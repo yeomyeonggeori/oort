@@ -154,11 +154,19 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
             }
         }
     }
+    // ADR-0151 증보 10 P8 · ADR-0162 증보 7 I3 (#6013): the picture road is served only while the
+    // operator's switch is on and the public address it is built from is set; otherwise the view lists
+    // and accepts neither the tool nor `oort_message_post.attachmentIds`.
+    let capability = if crate::routes::agent_uploads::served_origin(state).is_some() {
+        ToolCapability::FULL
+    } else {
+        ToolCapability::WITHOUT_PICTURES
+    };
     match hosted_identity(&state.pool, caller).await {
         Ok(Some(identity)) => ToolView::intersect(
             &identity.approved_scopes,
             &identity.token_scopes,
-            ToolCapability::FULL,
+            capability,
         ),
         Ok(None) => ToolView::empty(),
         Err(error) => {
@@ -261,6 +269,9 @@ pub(crate) async fn execute(
             expression_assemble(state, caller, &call.arguments).await
         }
         momo_mcp::TOOL_PING => ping(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_PICTURE_UPLOAD_BEGIN => {
+            picture_upload_begin(state, caller, &call.arguments).await
+        }
         _ => Err(ToolFailure::InvalidArguments),
     };
     let elapsed = started.elapsed();
@@ -593,6 +604,23 @@ pub(crate) fn optional_uuid(
         Some(Value::String(raw)) => Uuid::parse_str(raw)
             .map(Some)
             .map_err(|_| ToolFailure::InvalidArguments),
+        Some(_) => Err(ToolFailure::InvalidArguments),
+    }
+}
+
+/// An optional array of uuids (ADR-0151 증보 10 P6: `attachmentIds`). Absent or `null` is empty; anything
+/// that is not an array of uuid strings is refused (the published schema says so too).
+fn optional_uuid_list(args: &Map<String, Value>, key: &str) -> Result<Vec<Uuid>, ToolFailure> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .and_then(|raw| Uuid::parse_str(raw).ok())
+                    .ok_or(ToolFailure::InvalidArguments)
+            })
+            .collect(),
         Some(_) => Err(ToolFailure::InvalidArguments),
     }
 }
@@ -973,6 +1001,12 @@ async fn message_post(
     let body = required_str(args, "body", 8_000)?.to_string();
     let root_id = optional_uuid(args, "rootId")?;
     let reply_to_id = optional_uuid(args, "replyToId")?;
+    // ADR-0151 증보 10 P6 (#6013): pictures this agent uploaded through `oort_picture_upload_begin`. The
+    // view already refuses the argument while the road is shut (I3); this is the same answer again.
+    let attachment_ids = optional_uuid_list(args, "attachmentIds")?;
+    if !attachment_ids.is_empty() && crate::routes::agent_uploads::served_origin(state).is_none() {
+        return Err(ToolFailure::InvalidArguments);
+    }
     let mention_body = body.clone();
     let gateway_enabled = state.agent_gateway.enabled();
     let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
@@ -983,6 +1017,192 @@ async fn message_post(
     let connector_trial = state.cohosted.config.attest();
     let context_max_messages = state.mentions.context_max_messages;
 
+    // A refused picture bind is the one refusal that comes **after** the message INSERT (the bind runs
+    // inside the send), so it leaves through the error side and the transaction rolls back: the
+    // transaction helper commits on `Ok`. Every other refusal keeps the shape it always had.
+    let outcome = momo_db::with_tenant_tx_prelude(
+        &state.pool,
+        caller.workspace_id,
+        |_conn| Box::pin(async move { Ok::<(), PostFailure>(()) }),
+        |_conn| Box::pin(async move { Ok::<(), PostFailure>(()) }),
+        move |conn| {
+            Box::pin(async move {
+                let identity =
+                    match authorize_in_tx(conn, caller, momo_auth::SCOPE_MESSAGES_WRITE).await? {
+                        Ok(identity) => identity,
+                        Err(failure) => return Ok(Err(failure)),
+                    };
+                if !identity.approved_channel_ids.contains(&channel_id)
+                    || !is_channel_member(conn, channel_id, caller.agent_member_id).await?
+                {
+                    return Ok(Err(ToolFailure::Unavailable));
+                }
+                // P6: every id is a picture THIS agent uploaded through this road into THIS channel, complete
+                // and unbound — or, for a retry of a post that already landed, the send dedupes and binds
+                // nothing. One answer for every other case, and nothing is written.
+                if !attachment_ids.is_empty()
+                    && !momo_messaging::pictures_linkable_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        channel_id,
+                        client_msg_id,
+                        &attachment_ids,
+                    )
+                    .await?
+                {
+                    return Err(PostFailure::Refused(ToolFailure::AttachmentNotLinkable));
+                }
+                if let Some(root_id) = root_id {
+                    if validate_thread_root_in_tx(conn, channel_id, root_id)
+                        .await?
+                        .is_err()
+                    {
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                }
+                if let Some(reply_to_id) = reply_to_id {
+                    if validate_quote_target_in_tx(conn, channel_id, reply_to_id)
+                        .await?
+                        .is_err()
+                    {
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                }
+
+                // THE send transaction — the same function `routes::messages::send`
+                // calls, so `channel_seq`, the `client_msg_id` unique index, the
+                // message INSERT and the outbox INSERT are one implementation. No
+                // attachment, signature or stream-open surface is exposed here;
+                // that is a narrowing of one path, not a second one.
+                let sent = momo_messaging::send_message_with_mentions_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    NewMessage {
+                        channel_id,
+                        author_member_id: caller.agent_member_id,
+                        message_type: MessageType::Text,
+                        body: Some(body),
+                        props: json!({}),
+                        root_id,
+                        reply_to_id,
+                        client_msg_id: Some(client_msg_id),
+                        run_id: None,
+                        hlc_ts: None,
+                        hlc_count: None,
+                    },
+                    SendExtras {
+                        signature: None,
+                        // Empty unless the caller named pictures it may bind (checked above, P6).
+                        attachment_ids: &attachment_ids,
+                        via_token_id: Some(caller.token_id),
+                        opens_stream: false,
+                        subscription_agents_disabled: !subscription_agents_enabled,
+                        claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
+                        // ADR-0148 증보 (#4887): an agent's `oort_message_post` chooses its own place
+                        // (`rootId`) and does not carry 「대화에도 보내기」 — a person's choice.
+                        also_in_channel: false,
+                    },
+                )
+                .await?;
+                let sent = match sent {
+                    Ok(sent) => sent,
+                    // The bind refused after the INSERT (a race the lock above should already have
+                    // lost): roll the message back with it, and answer the one picture refusal.
+                    Err(momo_messaging::SendRejected::Attachment(_))
+                        if !attachment_ids.is_empty() =>
+                    {
+                        return Err(PostFailure::Refused(ToolFailure::AttachmentNotLinkable))
+                    }
+                    Err(_) => return Ok(Err(ToolFailure::Conflict)),
+                };
+
+                // The mention pass, exactly as the REST send runs it and with the
+                // same `author_is_agent` verdict — so an agent-authored mention is
+                // still skipped and audited rather than starting an uncapped A2A
+                // hop. Skipped entirely on a deduped retry, like REST.
+                if !sent.deduped {
+                    if let Err(rejection) = route_agent_mentions_in_tx(
+                        conn,
+                        MentionSend {
+                            workspace_id: caller.workspace_id,
+                            channel_id,
+                            message_id: sent.message.id,
+                            message_seq: sent.message.seq,
+                            root_id: sent.message.root_id,
+                            author_member_id: caller.agent_member_id,
+                            author_is_agent: true,
+                            author_is_human: false,
+                            body: &mention_body,
+                            hlc_ts: sent.message.hlc_ts,
+                            via_token_id: Some(caller.token_id),
+                            gateway_enabled,
+                            hosted_delivery_enabled,
+                            subscription_agents_enabled,
+                            claude_subscription_agents_enabled,
+                            connector_trial: &connector_trial,
+                            context_max_messages,
+                            // An agent's send never raises the in-place card (G1).
+                            inplace_grant_enabled: false,
+                            routing: None,
+                        },
+                    )
+                    .await?
+                    {
+                        return Ok(Err(failure_of(&rejection)));
+                    }
+                }
+                Ok(Ok((sent.message.id, sent.message.seq, sent.deduped)))
+            })
+        },
+    )
+    .await;
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(PostFailure::Refused(failure)) => return Err(failure),
+        Err(PostFailure::Db(error)) => return Err(internal("agent_port.message_post", error)),
+    };
+
+    let (message_id, seq, deduped) = outcome?;
+    Ok(json!({"messageId": message_id, "seq": seq, "deduplicated": deduped}))
+}
+
+/// `oort_message_post`'s transaction error: a database failure, or a refusal that must roll the
+/// transaction back (a picture bind refused after the INSERT — ADR-0151 증보 10 P6, PA9 "메시지 0").
+#[derive(Debug)]
+enum PostFailure {
+    Db(DbError),
+    Refused(ToolFailure),
+}
+
+impl From<DbError> for PostFailure {
+    fn from(error: DbError) -> Self {
+        PostFailure::Db(error)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// oort_picture_upload_begin (ADR-0151 증보 10 P2, ADR-0162 증보 7 I1 — #6013)
+// ---------------------------------------------------------------------------
+
+/// Issue a single-use upload address for ONE picture in an approved channel. The judgment is
+/// `oort_message_post`'s (bearer, `messages:write`, approved channel, member), then the road's own
+/// standing predicate and ceilings (`momo_messaging::issue_agent_upload_in_tx`). The answer carries the
+/// address; it is the credential, so it is never logged (P12 — the call ledger records the closed code
+/// only).
+async fn picture_upload_begin(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    let args = arguments(arguments_value)?;
+    let channel_id = required_uuid(args, "channelId")?;
+    // The view lists this tool only while the road is open; asked again so a call can never outlive it.
+    let Some(origin) = crate::routes::agent_uploads::served_origin(state) else {
+        return Err(ToolFailure::InvalidArguments);
+    };
+    // The workspace ceiling the row write counts against too (`AGENT_PICTURES_DAILY_CEILING`; a test lowers it).
+    let workspace_ceiling = state.agent_uploads.daily_ceiling;
     let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
             let identity =
@@ -995,105 +1215,37 @@ async fn message_post(
             {
                 return Ok(Err(ToolFailure::Unavailable));
             }
-            if let Some(root_id) = root_id {
-                if validate_thread_root_in_tx(conn, channel_id, root_id)
-                    .await?
-                    .is_err()
-                {
-                    return Ok(Err(ToolFailure::InvalidArguments));
-                }
-            }
-            if let Some(reply_to_id) = reply_to_id {
-                if validate_quote_target_in_tx(conn, channel_id, reply_to_id)
-                    .await?
-                    .is_err()
-                {
-                    return Ok(Err(ToolFailure::InvalidArguments));
-                }
-            }
-
-            // THE send transaction — the same function `routes::messages::send`
-            // calls, so `channel_seq`, the `client_msg_id` unique index, the
-            // message INSERT and the outbox INSERT are one implementation. No
-            // attachment, signature or stream-open surface is exposed here;
-            // that is a narrowing of one path, not a second one.
-            let sent = momo_messaging::send_message_with_mentions_in_tx(
-                conn,
-                caller.workspace_id,
-                NewMessage {
-                    channel_id,
-                    author_member_id: caller.agent_member_id,
-                    message_type: MessageType::Text,
-                    body: Some(body),
-                    props: json!({}),
-                    root_id,
-                    reply_to_id,
-                    client_msg_id: Some(client_msg_id),
-                    run_id: None,
-                    hlc_ts: None,
-                    hlc_count: None,
-                },
-                SendExtras {
-                    signature: None,
-                    attachment_ids: &[],
-                    via_token_id: Some(caller.token_id),
-                    opens_stream: false,
-                    subscription_agents_disabled: !subscription_agents_enabled,
-                    claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
-                    // ADR-0148 증보 (#4887): an agent's `oort_message_post` chooses its own place
-                    // (`rootId`) and does not carry 「대화에도 보내기」 — a person's choice.
-                    also_in_channel: false,
-                },
-            )
-            .await?;
-            let sent = match sent {
-                Ok(sent) => sent,
-                Err(_) => return Ok(Err(ToolFailure::Conflict)),
-            };
-
-            // The mention pass, exactly as the REST send runs it and with the
-            // same `author_is_agent` verdict — so an agent-authored mention is
-            // still skipped and audited rather than starting an uncapped A2A
-            // hop. Skipped entirely on a deduped retry, like REST.
-            if !sent.deduped {
-                if let Err(rejection) = route_agent_mentions_in_tx(
+            Ok(
+                match momo_messaging::issue_agent_upload_with_ttl_in_tx(
                     conn,
-                    MentionSend {
-                        workspace_id: caller.workspace_id,
-                        channel_id,
-                        message_id: sent.message.id,
-                        message_seq: sent.message.seq,
-                        root_id: sent.message.root_id,
-                        author_member_id: caller.agent_member_id,
-                        author_is_agent: true,
-                        author_is_human: false,
-                        body: &mention_body,
-                        hlc_ts: sent.message.hlc_ts,
-                        via_token_id: Some(caller.token_id),
-                        gateway_enabled,
-                        hosted_delivery_enabled,
-                        subscription_agents_enabled,
-                        claude_subscription_agents_enabled,
-                        connector_trial: &connector_trial,
-                        context_max_messages,
-                        // An agent's send never raises the in-place card (G1).
-                        inplace_grant_enabled: false,
-                        routing: None,
-                    },
+                    caller.workspace_id,
+                    identity.connection_id,
+                    caller.agent_member_id,
+                    channel_id,
+                    momo_messaging::AGENT_UPLOAD_TTL_SECS,
+                    workspace_ceiling,
                 )
                 .await?
                 {
-                    return Ok(Err(failure_of(&rejection)));
-                }
-            }
-            Ok(Ok((sent.message.id, sent.message.seq, sent.deduped)))
+                    Ok(grant) => Ok(grant),
+                    Err(momo_messaging::UploadIssueRefused::NotAllowed) => {
+                        Err(ToolFailure::Unavailable)
+                    }
+                    Err(momo_messaging::UploadIssueRefused::LimitReached) => {
+                        Err(ToolFailure::PictureLimitReached)
+                    }
+                },
+            )
         })
     })
     .await
-    .map_err(|error| internal("agent_port.message_post", error))?;
-
-    let (message_id, seq, deduped) = outcome?;
-    Ok(json!({"messageId": message_id, "seq": seq, "deduplicated": deduped}))
+    .map_err(|error| internal("agent_port.picture_upload_begin", error))?;
+    let grant = outcome?;
+    Ok(json!({
+        "uploadUrl": crate::routes::agent_uploads::upload_url(&origin, caller.workspace_id, &grant.token),
+        "expiresInSeconds": momo_messaging::AGENT_UPLOAD_TTL_SECS,
+        "maxBytes": momo_messaging::AGENT_PICTURE_MAX_INPUT_BYTES,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,6 +1326,14 @@ async fn jobs_claim(
             )
             .await
             .map_err(DbError::from)?;
+            // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+            // longer taken comes off, in this tx.
+            momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await?;
 
             let mut jobs = Vec::with_capacity(claimed.len());
             for job in claimed {
@@ -1220,6 +1380,13 @@ async fn jobs_claim(
                     run_id,
                     momo_agent::AppendedRunEvent::Claimed,
                     caller.agent_member_id,
+                )
+                .await?;
+                // ADR-0200 증보 8 L3 (#6067): the take is recorded — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    run_id,
                 )
                 .await?;
                 let mut entry = json!({
@@ -1394,6 +1561,14 @@ async fn job_start(
                     )
                     .await
                     .map_err(DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                    )
+                    .await?;
                     match claimed.into_iter().next() {
                         Some(job) => job,
                         None => {
@@ -1438,6 +1613,13 @@ async fn job_start(
                     run_id,
                     momo_agent::AppendedRunEvent::Claimed,
                     caller.agent_member_id,
+                )
+                .await?;
+                // ADR-0200 증보 8 L3 (#6067): the take is recorded — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    run_id,
                 )
                 .await?;
             }
@@ -1624,6 +1806,14 @@ async fn job_lease(
                     )
                     .await
                     .map_err(DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                    )
+                    .await?;
                     Ok(if released {
                         Ok(json!({"status": "released"}))
                     } else {
@@ -2497,6 +2687,13 @@ async fn action_propose(
                 _ => None,
             };
             momo_agent::mark_run_started_in_tx(conn, handle.run_id).await?;
+            // ADR-0200 증보 8 L3 (#6067): a start is a take.
+            momo_messaging::status_reaction::on_run_taken_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+            )
+            .await?;
             // **The park happens before the approval, not after.**
             //
             // Its `status = 'running'` guard is the one thing in this

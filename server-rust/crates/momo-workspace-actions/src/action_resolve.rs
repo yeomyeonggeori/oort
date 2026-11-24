@@ -4492,6 +4492,51 @@ mod tests {
         }
     }
 
+    /// ADR-0200 증보 8 L10 · LA5 (#6067): the agent reaction switch is not something a proposal
+    /// can write — neither the workspace key (`workspace.settings.update` takes two other keys) nor
+    /// the agent's own value (`agent.profile.update` takes closed profile fields). Every spelling,
+    /// alone or beside a legal key, is an argument error. The Agent Port's `oort_action_propose`
+    /// judges its arguments with this same function, so it is the Agent Port tool's door too.
+    #[test]
+    fn no_proposal_can_name_the_agent_reaction_switch() {
+        for (id, legal) in [
+            (
+                actions::ACTION_WORKSPACE_SETTINGS_UPDATE,
+                json!({"welcomePrompt": "환영해요"}),
+            ),
+            (
+                actions::ACTION_AGENT_PROFILE_UPDATE,
+                json!({"tagline": "회의록 정리"}),
+            ),
+        ] {
+            let action = actions::action_by_id(id).expect("registered");
+            assert!(
+                validated_action_args(action, &legal, 0).is_ok(),
+                "{id}: the control passes"
+            );
+            for key in ["agentReactions", "agent_reactions"] {
+                for value in [json!("free"), json!("off"), Value::Null] {
+                    let mut alone = serde_json::Map::new();
+                    alone.insert(key.to_string(), value.clone());
+                    let mut beside = legal.as_object().cloned().expect("object");
+                    beside.insert(key.to_string(), value.clone());
+                    for args in [Value::Object(alone), Value::Object(beside)] {
+                        assert!(
+                            validated_action_args(action, &args, 0).is_err(),
+                            "{id}: {args} must be refused"
+                        );
+                    }
+                }
+            }
+            let schema = action.args_schema();
+            let properties = schema["properties"].as_object().expect("closed schema");
+            assert!(
+                !properties.contains_key("agentReactions")
+                    && !properties.contains_key("agent_reactions")
+            );
+        }
+    }
+
     /// ADR-0186 증보 v5 U-b-3 (#4704): the switch that bounds an agent's unasked cards is **not**
     /// something a proposal can write. `workspace.settings.update` takes exactly two keys, and
     /// `agent_initiative` — spelled as the bag spells it or as the wire would — is neither: refused,

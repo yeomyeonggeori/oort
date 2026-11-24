@@ -72,18 +72,19 @@ pub(crate) const BODY_DEADLINE: Duration = Duration::from_secs(10);
 /// `Retry-After` of the one 503 a caller may retry (`busy`).
 const BUSY_RETRY_AFTER_SECONDS: u64 = 5;
 /// The three types the route accepts, by magic. GIF is not among them.
-const SNIFFED: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
+/// `pub(crate)`: the Agent Port picture road (`routes::agent_uploads`, #6013) sniffs the same three.
+pub(crate) const SNIFFED: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
 
 /// The one refusal that depends on the token: unknown, malformed, another workspace's, expired,
 /// spent, run over, someone gone, channel archived, slot beyond the run's limit — all this exact
 /// answer, so the status says nothing about which.
-fn refused() -> Response {
+pub(crate) fn refused() -> Response {
     ApiError::not_found("not found").into_response()
 }
 
 /// A refusal made **without** touching the database or after the caller proved the token: a status
 /// and one closed word, nothing else. Only `busy` may be retried and says when.
-fn closed(status: StatusCode, code: &'static str) -> Response {
+pub(crate) fn closed(status: StatusCode, code: &'static str) -> Response {
     let error = ApiError::coded(status, code, code);
     if code == "busy" {
         error
@@ -95,7 +96,7 @@ fn closed(status: StatusCode, code: &'static str) -> Response {
 }
 
 /// `Content-Length` as one number, or `None` when it is absent, repeated or not a number.
-fn declared_length(headers: &HeaderMap) -> Option<u64> {
+pub(crate) fn declared_length(headers: &HeaderMap) -> Option<u64> {
     let mut values = headers.get_all(header::CONTENT_LENGTH).iter();
     let first = values.next()?;
     if values.next().is_some() {
@@ -126,7 +127,7 @@ async fn refuse_after(
 
 /// Delete an object whose row was never written. A failure to delete leaves an object no row
 /// names; the log line is a fixed word and nothing the archive said.
-async fn discard(state: &AppState, drive_file_id: &str) {
+pub(crate) async fn discard(state: &AppState, drive_file_id: &str) {
     if state.drive.delete_file(drive_file_id).await.is_err() {
         tracing::warn!(
             cause = "object_left",

@@ -55,6 +55,7 @@ pub mod routes;
 /// ADR-0208 D5/D7 — the scheduled-message tick that lives in the api process.
 pub mod scheduler;
 mod session_end;
+pub mod status_reaction_sweep;
 pub mod work_host_auth;
 
 pub use realtime_advert::{
@@ -264,6 +265,10 @@ pub struct AppState {
     /// state built by [`AppState::new`], so a test drives `attachment_reclaim::sweep_once`
     /// explicitly.
     pub attachment_reclaim_touched: Arc<attachment_reclaim::TouchedWorkspaces>,
+    /// ADR-0200 증보 8 L7 5 (#6067): the workspaces this process has served an authenticated
+    /// request for since it started — filled by `auth::require_principal` from the credential's own
+    /// workspace, read by the agent status eye follow-up removal ([`status_reaction_sweep`]).
+    pub status_reaction_touched: Arc<status_reaction_sweep::StatusReactionTouched>,
     /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
     /// and the (default-off) host-registration signature requirement.
     pub device_keys: Arc<DeviceKeySettings>,
@@ -364,6 +369,9 @@ pub struct AppState {
     /// ADR-0151 증보 8 W4: the longest the route waits for the picture body after the token is spent
     /// (`routes::agent_media::BODY_DEADLINE`, 10 s). A test shortens it.
     pub agent_media_body_deadline: std::time::Duration,
+    /// ADR-0151 증보 10 (#6013): the Agent Port picture road — the operator's switch and edge setting
+    /// (read at boot), its own write slot (1 per process, P3 3), the workspace ceiling and the body deadline.
+    pub agent_uploads: Arc<routes::agent_uploads::AgentUploadsState>,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
     /// ADR-0170 증보 2026-11-01 D18 (#4884) — the link previews this process holds for members who
     /// are still composing: in memory only, per (workspace, member, address). Tests build one with
@@ -427,6 +435,9 @@ impl AppState {
             scheduler: Arc::new(SchedulerSettings::default()),
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             attachment_reclaim_touched: Arc::new(attachment_reclaim::TouchedWorkspaces::default()),
+            status_reaction_touched: Arc::new(
+                status_reaction_sweep::StatusReactionTouched::default(),
+            ),
             device_keys: Arc::new(DeviceKeySettings::default()),
             cloud_box: Arc::new(CloudBoxConfig::default()),
             cors: Arc::new(CorsConfig::default()),
@@ -452,6 +463,9 @@ impl AppState {
             )),
             agent_media_daily_ceiling: momo_messaging::AGENT_PICTURES_DAILY_CEILING,
             agent_media_body_deadline: routes::agent_media::BODY_DEADLINE,
+            agent_uploads: Arc::new(routes::agent_uploads::AgentUploadsState::new(
+                config::AgentUploadsConfig::default(),
+            )),
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
             unfurl_previews: Arc::new(momo_unfurl::PreviewCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
@@ -604,6 +618,29 @@ impl AppState {
     /// Conformance tests: shorten the time the picture body has after the token is spent (W4).
     pub fn with_agent_media_body_deadline(mut self, deadline: std::time::Duration) -> Self {
         self.agent_media_body_deadline = deadline;
+        self
+    }
+
+    /// ADR-0151 증보 10 P8 · P3 5 (#6013): the operator's picture switch and edge setting.
+    pub fn with_agent_uploads(mut self, config: config::AgentUploadsConfig) -> Self {
+        let mut uploads = (*self.agent_uploads).clone();
+        uploads.config = config;
+        self.agent_uploads = Arc::new(uploads);
+        self
+    }
+
+    /// Conformance tests: the upload road's write slots, workspace ceiling and body deadline.
+    pub fn with_agent_uploads_limits(
+        mut self,
+        slots: usize,
+        daily_ceiling: i64,
+        body_deadline: std::time::Duration,
+    ) -> Self {
+        let mut uploads = (*self.agent_uploads).clone();
+        uploads.slots = Arc::new(tokio::sync::Semaphore::new(slots));
+        uploads.daily_ceiling = daily_ceiling;
+        uploads.body_deadline = body_deadline;
+        self.agent_uploads = Arc::new(uploads);
         self
     }
 
@@ -2603,6 +2640,23 @@ pub fn build_app(state: AppState) -> Router {
                 .route_layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     rate_limit::per_ip_agent_media_ceiling,
+                )),
+        )
+        // #6013 — the address an Agent Port agent uploads ONE picture for its own message to (ADR-0151
+        // 증보 10 P3). **Public by design** (the agent's own shell holds no oort credential; the one-time,
+        // hash-only, 120-second token in the path is the only authority), so no Caddyfile blocks this
+        // prefix — which is why it is not the worker's prefix above. A PUT-only route; the refusal budget is
+        // spent only by the route's own 404 (P3 5), in two layers, keyed as the edge setting says.
+        .route(
+            "/v1/agent-uploads/{ws}/{token}",
+            put(routes::agent_uploads::upload)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_agent_uploads,
+                ))
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::agent_uploads_ceiling,
                 )),
         )
         .merge(protected)

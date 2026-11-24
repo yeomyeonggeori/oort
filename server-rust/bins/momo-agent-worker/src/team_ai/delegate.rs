@@ -1294,6 +1294,9 @@ impl AgentWorker {
                 // the state a picture write (S4) and the run's own reads judge by.
                 if matches!(committed, store::CalledCommit::Go(_)) {
                     momo_agent::run::resume_run_between_attempts_in_tx(conn, run_id).await?;
+                    // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+                    momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, run_id)
+                        .await?;
                 }
                 Ok(match committed {
                     store::CalledCommit::Go(request) => Called::Go {

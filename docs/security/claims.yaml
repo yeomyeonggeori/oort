@@ -353,6 +353,19 @@ claims:
       - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_big_backlog_in_one_workspace_does_not_starve_the_next_one"
       - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#the_running_tick_obeys_the_switch"
       - "server-rust/bins/momo-server/src/attachment_reclaim.rs#only_the_local_volume_is_reclaimed_by_the_api_process"
+  - id: ATT-9
+    claim: "An external agent connected through the Agent Port can put a picture only on its own message in a channel its connection is approved for and it belongs to: the upload address it is given works once and for 120 seconds, the agent's standing is checked again when the address is used and again when the picture is stored, only PNG, JPEG or WebP is accepted and only the decoder's re-encoded output is stored, a picture it did not upload through this address (another agent's, another channel's, a person's, the team AI's, one already on a message, an unknown id or a repeated one) is refused with one answer and leaves no message, and the per-message, per-agent and per-workspace limits hold at issue and again at storage."
+    scope: "Real PostgreSQL as the api's runtime role, the real isolated decoder child and the real local archive, through the real routes and the Agent Port. The address is built from the operator's configured public address only (Host and X-Forwarded-Host are tested). Turning the feature off (MOMO_AGENT_PORT_PICTURES, or no MOMO_PUBLIC_BASE_URL) removes the tool and the argument and closes the address. Not covered: the hosting edge's real behaviour in front of the refusal budget (tested with and without a trusted edge in-process only, to be measured once after deployment), the content of a picture (no moderation), and pictures a prompt injection makes the agent upload (bounded by the limits, not prevented). Runs in the nightly lane (the test binary is not in the Security pack selection)."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#a_picture_is_uploaded_and_bound_to_the_agents_own_message"
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#one_token_is_one_picture_and_every_token_refusal_is_one_404"
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#the_standing_is_asked_again_when_the_token_is_spent_and_when_the_row_is_written"
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#only_three_still_formats_reach_the_decoder_and_storage"
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#every_unbindable_id_is_one_refusal_and_writes_nothing"
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#the_ceilings_are_judged_at_issue_and_counted_again_at_write"
+      - "server-rust/bins/momo-server/tests/agent_port_picture_conformance_pg.rs#the_switch_closes_the_tool_the_argument_and_the_address"
   - id: PUSH-1
     claim: "The push dispatch payload carries identifiers only: no message body, and no content-shaped key."
     scope: "Payload construction in momo-push and the relay's closed dispatch (static placeholder text). The notification the phone shows is built on the device after a separate authenticated fetch."

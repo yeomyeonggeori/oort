@@ -209,6 +209,8 @@ pub(crate) async fn cancel_unadmitted_in_tx(
     }
     sqlx::query("UPDATE dm_agent_admission SET revoked_at = clock_timestamp() WHERE workspace_id = $1 AND id = $2").bind(workspace_id).bind(admission_id).execute(&mut *conn).await?;
     sqlx::query("UPDATE agent_run SET status = 'cancelled', finished_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = ANY($2) AND status = 'awaiting_approval'").bind(workspace_id).bind(run_ids).execute(&mut *conn).await?;
+    // ADR-0200 증보 8 L4 (#6067): each ended run's eye comes off — same tx.
+    momo_messaging::status_reaction::on_runs_terminal_in_tx(conn, workspace_id, run_ids).await?;
     Ok(())
 }
 
@@ -373,6 +375,13 @@ pub(crate) async fn vote_in_tx(
     .execute(&mut *conn)
     .await?;
     sqlx::query("UPDATE agent_run SET status = 'succeeded', finished_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2 AND status = 'awaiting_approval'").bind(approval.workspace_id).bind(approval.run_id).execute(&mut *conn).await?;
+    // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+    momo_messaging::status_reaction::on_run_terminal_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.run_id,
+    )
+    .await?;
     let name: String =
         sqlx::query_scalar("SELECT display_name FROM member WHERE workspace_id = $1 AND id = $2")
             .bind(approval.workspace_id)

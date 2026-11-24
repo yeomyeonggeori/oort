@@ -896,6 +896,9 @@ impl AgentWorker {
                 momo_agent::consume_run_step_in_tx(conn, run_id, limits.max_steps).await?;
                 // A retried attempt left the run reading `failed`; a task that goes on is `running`.
                 momo_agent::run::resume_run_between_attempts_in_tx(conn, run_id).await?;
+                // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, run_id)
+                    .await?;
                 append_run_event_in_tx(
                     conn,
                     workspace_id,

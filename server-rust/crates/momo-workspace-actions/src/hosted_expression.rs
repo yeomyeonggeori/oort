@@ -969,6 +969,8 @@ pub async fn propose_in_tx(
     // A re-claimed job finds its run `failed` (the between-attempts mark): this attempt takes it back.
     momo_agent::run::resume_run_between_attempts_in_tx(conn, run.run_id).await?;
     momo_agent::mark_run_started_in_tx(conn, run.run_id).await?;
+    // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+    momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, run.run_id).await?;
     if !momo_agent::park_run_for_approval_in_tx(conn, run.run_id, run.expires_at).await? {
         return Ok(Err(Refusal::RunNotParkable));
     }

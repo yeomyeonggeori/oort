@@ -108,6 +108,7 @@ fn profile_dto(profile: &AgentProfile) -> AgentProfileDto {
         updated_at_ms: profile.updated_at_ms,
         model_source: profile.model_source.as_str(),
         thread_reply_wake: profile.thread_reply_wake,
+        agent_reactions: profile.agent_reactions.clone(),
     }
 }
 
@@ -558,6 +559,7 @@ pub async fn get_profile(
 pub async fn put_profile(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    full_person_session: Option<Extension<crate::auth::FullPersonSession>>,
     Path((workspace, agent)): Path<(String, String)>,
     Json(request): Json<AgentProfileInput>,
 ) -> Result<Json<AgentProfileResponse>, ApiError> {
@@ -571,6 +573,30 @@ pub async fn put_profile(
         .map(parse_model_source)
         .transpose()?;
     let thread_reply_wake = request.thread_reply_wake;
+    // ADR-0200 증보 8 L10 (#6067): the agent's own reaction switch — one of three words or null
+    // (follow the workspace). Taken only from a person's full app session; a value wider than the
+    // workspace's is stored as sent and read narrowed (LA5), never refused for being wider.
+    let agent_reactions = match request.agent_reactions.clone() {
+        None => None,
+        Some(value) => {
+            if full_person_session.is_none() {
+                return Err(ApiError::forbidden(
+                    "agentReactions can only be changed from a person's app session",
+                ));
+            }
+            match value.as_deref() {
+                None => Some(None),
+                Some(word) => match momo_settings::AgentReactionsMode::from_wire(word) {
+                    Some(mode) => Some(Some(mode.as_wire())),
+                    None => {
+                        return Err(ApiError::bad_request(
+                            "agentReactions must be one of off, status, free, or null",
+                        ))
+                    }
+                },
+            }
+        }
+    };
     let actor_member_id = principal.member_id;
     let via_token_id = audit_via_token_id(&principal);
 
@@ -622,6 +648,21 @@ pub async fn put_profile(
                         return Ok(Err(ApiError::not_found("agent profile target not found")));
                     }
                 }
+                if let Some(value) = agent_reactions {
+                    let updated = momo_db::sqlx::query(
+                        "UPDATE agent SET agent_reactions = $3 \
+                          WHERE workspace_id = $1 AND member_id = $2",
+                    )
+                    .bind(workspace_id)
+                    .bind(agent_member_id)
+                    .bind(value)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(momo_db::DbError::from)?;
+                    if updated.rows_affected() == 0 {
+                        return Ok(Err(ApiError::not_found("agent profile target not found")));
+                    }
+                }
                 let Some(stored) = upsert_agent_profile_in_tx(
                     conn,
                     workspace_id,
@@ -658,6 +699,7 @@ pub async fn put_profile(
                                 "model_source": stored.model_source.as_str(),
                                 "mention_enabled": true,
                                 "thread_reply_wake": stored.thread_reply_wake,
+                                "agent_reactions_changed": agent_reactions.is_some(),
                             }),
                         ),
                 )
@@ -953,6 +995,7 @@ mod tests {
             triggers: None,
             model_source: None,
             thread_reply_wake: None,
+            agent_reactions: None,
         };
         let error = validated_profile(&unusable, &[]).expect_err("hermes-fast cannot do max");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
@@ -974,6 +1017,7 @@ mod tests {
             triggers: None,
             model_source: None,
             thread_reply_wake: None,
+            agent_reactions: None,
         };
         let spec = validated_profile(&input, &[]).expect("valid");
         assert_eq!(spec.triggers, json!({"mention": true}));
