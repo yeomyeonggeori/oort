@@ -233,7 +233,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
                 >
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     className="tap-target"
                     disabled={disabled}

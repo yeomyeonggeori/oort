@@ -176,7 +176,7 @@ export function CleanupArtifactRow({
           // 폼 안(`AcknowledgeForm`)에서만 필요하다.
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             className={cn("shrink-0", disabled && "opacity-50")}
             aria-expanded={false}
@@ -491,7 +491,7 @@ function AcknowledgeForm({
           // 그 손에서 초점이 <body> 로 떨어졌을 것이다.
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             aria-disabled={locked || undefined}
             aria-busy={saving || undefined}

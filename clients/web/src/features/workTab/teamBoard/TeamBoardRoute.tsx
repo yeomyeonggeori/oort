@@ -345,7 +345,7 @@ export function TeamBoardRoute() {
                     <Button
                       type="button"
                       size="sm"
-                      variant="outline"
+                      variant="secondary"
                       className="tap-target"
                       onClick={() => navigate("/")}
                       data-testid="team-board-empty-action"
@@ -419,7 +419,7 @@ export function TeamBoardRoute() {
                       <Button
                         type="button"
                         size="sm"
-                        variant="outline"
+                        variant="secondary"
                         className="tap-target"
                         disabled={list.isFetchingNextPage}
                         onClick={() => void list.fetchNextPage()}

@@ -400,7 +400,7 @@ export function AgentHubRoute() {
             {mayCreate && hostedPairingProvided && (
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={(event) => {
                   setWizardLaunch(null);
@@ -487,7 +487,7 @@ export function AgentHubRoute() {
                   </Button>
                 ) : (
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     onClick={() => void directoryQuery.refetch()}
                   >
@@ -1189,7 +1189,7 @@ function PermissionsSection({
           자리에서 이유를 말하므로, 여기서 미리 판정할 필요가 없다. 정적 판정은
           사이드바의 작업 흐름처럼 **일급 목적지**에만 쓴다: 설정의 한 줄과
           달리 그것은 셸의 상시 네비게이션이고, 죽은 채로 서 있는 값이 다르다. */}
-      <Button variant="outline" size="sm" className="self-start" asChild>
+      <Button variant="secondary" size="sm" className="self-start" asChild>
         <Link to="/ai/external">AI의 외부 연결에서 권한 보기</Link>
       </Button>
     </section>
@@ -1244,7 +1244,7 @@ function AgentHistorySection({
           headline="표시할 작업 이력이 없어요."
           detail="현재 참여 중인 채널에서 이 에이전트가 실행한 작업이 생기면 최신순으로 표시돼요."
           actions={
-            <Button variant="outline" size="sm" onClick={onOpenProfile}>
+            <Button variant="secondary" size="sm" onClick={onOpenProfile}>
               프로필 보기
             </Button>
           }
@@ -1268,7 +1268,7 @@ function AgentHistorySection({
             <div className="p-4">
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 aria-busy={query.isFetchingNextPage || undefined}
                 onClick={() => {
@@ -1391,7 +1391,7 @@ function AgentRunDetailDialog({
         )}
         <div className="flex justify-end gap-2 border-t border-line p-4">
           {query.data && (
-            <Button variant="outline" size="sm" asChild>
+            <Button variant="secondary" size="sm" asChild>
               <Link to={`/c/${query.data.channelId}`} onClick={onClose}>
                 채널 열기
               </Link>

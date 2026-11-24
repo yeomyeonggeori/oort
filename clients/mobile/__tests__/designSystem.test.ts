@@ -581,6 +581,7 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
     expect([...exported].sort()).toEqual([
       'AVATAR_INITIAL_MAX_SCALE',
       'BAR_CONTROL_MAX_SCALE',
+      'BUTTON_MAX_SCALE',
       'FOLDED_MAX_SCALE',
       'HEAD_MAX_SCALE',
       'REACTION_GLYPH_MAX_SCALE',

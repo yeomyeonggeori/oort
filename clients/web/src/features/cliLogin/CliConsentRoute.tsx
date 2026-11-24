@@ -563,7 +563,7 @@ function ConsentBody({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           aria-disabled={!canDeny || undefined}
           aria-busy={deny.isPending || undefined}
           className={cn(!canDeny && "opacity-50")}

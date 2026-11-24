@@ -288,7 +288,7 @@ export function FirstMentionOnboarding({
         )}
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           className="ms-auto shrink-0"
           onClick={dismiss}

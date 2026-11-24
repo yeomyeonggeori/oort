@@ -4,17 +4,15 @@
 // 값은 시안 `claudedocs/onboarding-2.0/mockups.html`의 폰 CSS다(줄마다 원문).
 // 고정 높이는 `minHeight`로 옮긴다: 큰 글씨에서 글자가 상자를 밀고 나가야 한다.
 //
-// 버튼은 셸의 `PrimaryButton` 과 같은 규칙(주 행동 = 잉크 채움, 잠김 = 옅은 칸 + 읽히는 라벨,
-// #5100)을 따르되, 시안의 높이·반경·보조 단추가 달라 따로 둔다. 온보딩 문법(D11)은
-// 주 행동 = 잉크 채움, 보조 = 테두리, 신호색 오렌지는 진행 점과 포커스뿐이다.
+// 단추는 따로 두지 않는다(#6075): 온보딩의 주 행동 · 보조 · 막대의 「뒤로」·「취소」는 셸 공용 단추
+// (`PrimaryButton` · `OutlineButton` · `QuietButton`, `design/atoms.tsx`)이고, 규격은 부품 장부의 「폰 단추」 절이다.
+// 시안의 54pt · 반경 14 단추는 공용 규격(44 · 알약)으로 옮겼다. 신호색 오렌지는 진행 점과 포커스뿐이다(D11).
 // =============================================================================
 
 import React, {useEffect, useRef} from 'react';
 import {
-  ActivityIndicator,
   Animated,
   Easing,
-  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,9 +24,8 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import type {OnboardingDots as OnboardingDotsModel} from '@momo/core/features/onboarding/guide';
 
-import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
-import {usePalette, useStyles} from '../../design/theme';
-import {font, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
+import {font, PRESSED_OPACITY, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {OnboardingCanvas, OnboardingDots} from './KomettoGuide';
 
@@ -52,12 +49,6 @@ export const PHONE_OB = {
    * 내용 끝과 행동 사이의 바닥 여백도 이 값이라, 끝까지 스크롤하면 마지막 줄은 흐려지지 않는다.
    */
   pinFade: 24,
-  /** `.btn.lg{height:54px;border-radius:14px;font-size:16.5px}` */
-  buttonLg: 54,
-  buttonLgRadius: 14,
-  /** `.btn{gap:8px;padding:0 18px;font-weight:600}` */
-  buttonGap: 8,
-  buttonPadH: 18,
   /** `.ic{width:18px;height:18px;stroke-width:1.8}` */
   icon: 18,
   iconStroke: 1.8,
@@ -190,128 +181,7 @@ export function OnboardingTopBar({
   );
 }
 
-// ---- 버튼 --------------------------------------------------------------------
-
-export type OnboardingButtonKind = 'primary' | 'secondary';
-
-/**
- * `.btn.pri.lg`(잉크 채움) / `.btn.sec.lg`(테두리). 진행 중이면 낱말 옆에서
- * 표시기가 돈다(셸 `PrimaryButton`과 같은 `busyLabel` 관례, 말줄임 없음).
- */
-export function OnboardingButton({
-  label,
-  kind = 'primary',
-  onPress,
-  disabled,
-  busy,
-  busyLabel,
-  icon,
-  accessibilityHint,
-  testID,
-}: {
-  label: string;
-  kind?: OnboardingButtonKind;
-  onPress: () => void;
-  disabled?: boolean;
-  busy?: boolean;
-  busyLabel?: string;
-  icon?: React.ReactNode;
-  accessibilityHint?: string;
-  testID?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  const inert = disabled === true || busy === true;
-  const primary = kind === 'primary';
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={busy && busyLabel ? busyLabel : label}
-      accessibilityHint={accessibilityHint}
-      accessibilityState={{disabled: inert, busy}}
-      disabled={inert}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.button,
-        primary ? styles.buttonPrimary : styles.buttonSecondary,
-        // 진행 중에는 잉크 채움을 그대로 둔다: 흰 표시기와 「로그인 중」이 그 위에서 읽힌다.
-        disabled === true && !busy && styles.buttonInert,
-        pressed &&
-          !inert &&
-          (primary
-            ? styles.buttonPrimaryPressed
-            : styles.buttonSecondaryPressed),
-      ]}
-      testID={testID}
-    >
-      {busy ? (
-        <ActivityIndicator color={primary ? palette.onPrimary : palette.text} />
-      ) : (
-        icon
-      )}
-      <Text
-        style={[
-          styles.buttonLabel,
-          primary ? styles.onPrimary : styles.onSecondary,
-          disabled === true && !busy && styles.labelInert,
-        ]}
-        numberOfLines={2}
-      >
-        {busy && busyLabel ? busyLabel : label}
-      </Text>
-    </Pressable>
-  );
-}
-
-/** `.btn.ghost`: 막대의 「취소」·「뒤로」. 누를 자리는 44를 지킨다. */
-export function OnboardingGhostButton({
-  label,
-  onPress,
-  accessory,
-  accessibilityLabel,
-  accessibilityHint,
-  testID,
-}: {
-  label: string;
-  onPress: () => void;
-  /**
-   * `expand`: 글자 뒤에 ⌄ 를 붙여 「여기서 고른다」를 말한다(언어 칩, #5101). `ListRow accessory="expand"` 와 같은
-   * 글리프·크기이고(phone-sheets.md §4) 색은 글자와 같다. 글리프는 장식이라 보조기술에서 숨고 이름·힌트가 말한다.
-   * 「뒤로」·「취소」는 주지 않는다 — 고르는 단추가 아니다.
-   */
-  accessory?: 'expand';
-  /** 글자와 다르게 읽을 때만(언어 칩의 「현재 언어: 한국어」). 없으면 글자 그대로다. */
-  accessibilityLabel?: string;
-  accessibilityHint?: string;
-  testID?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const expand = accessory === 'expand';
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityHint={accessibilityHint}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.ghost,
-        expand && styles.ghostWithGlyph,
-        pressed && styles.pressedText,
-      ]}
-      testID={testID}
-    >
-      <Text style={styles.ghostLabel}>{label}</Text>
-      {expand ? (
-        <Image
-          source={HOME_ICONS.down}
-          style={styles.ghostGlyph}
-          accessibilityElementsHidden
-          testID={testID ? `${testID}-expand` : undefined}
-        />
-      ) : null}
-    </Pressable>
-  );
-}
+// ---- 링크 --------------------------------------------------------------------
 
 /** `.link`(M0 아래 작은 링크). 색은 시안 인라인 `color:var(--ink2)`. */
 export function OnboardingLink({
@@ -516,58 +386,6 @@ const buildStyles = (color: Palette) =>
     topSide: {minWidth: PHONE_OB.topSpacer, alignItems: 'flex-start'},
     topSideRight: {alignItems: 'flex-end'},
     topSideEven: {flex: 1},
-    button: {
-      minHeight: PHONE_OB.buttonLg,
-      borderRadius: PHONE_OB.buttonLgRadius,
-      paddingHorizontal: PHONE_OB.buttonPadH,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: PHONE_OB.buttonGap,
-    },
-    buttonPrimary: {backgroundColor: color.primary},
-    buttonPrimaryPressed: {opacity: 0.86},
-    buttonSecondary: {
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: 'transparent',
-    },
-    buttonSecondaryPressed: {backgroundColor: color.surfacePressed},
-    // 못 누르는 주 행동: 채움을 걷고 옅은 칸으로 둔다(잉크가 서 있으면 눌러도 되는 줄 안다).
-    buttonInert: {backgroundColor: color.surfaceMuted, borderWidth: 0},
-    buttonLabel: {
-      fontSize: font.body,
-      fontWeight: '600',
-      textAlign: 'center',
-      flexShrink: 1,
-    },
-    onPrimary: {color: color.onPrimary},
-    // 옅은 칸 위 흰 글자는 사라진다(390 캡처). 못 누르는 버튼도 라벨은 읽혀야 한다.
-    labelInert: {color: color.textMuted},
-    onSecondary: {color: color.text},
-    ghost: {
-      minHeight: TOUCH_TARGET,
-      minWidth: TOUCH_TARGET,
-      justifyContent: 'center',
-    },
-    // ⌄ 가 붙은 칩(언어 칩)은 글자 뒤에 글리프를 한 줄로 둔다. 「뒤로」·「취소」는 이 줄을 쓰지 않는다.
-    ghostWithGlyph: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.xs,
-    },
-    // `ListRow accessory="expand"` 와 같은 PNG·크기. 색은 곁의 글자(`ghostLabel`)와 같은 역할이다 — 이 글리프가
-    // 칩이 고르는 단추임을 말하는 유일한 표지라 글자만큼 읽혀야 한다.
-    ghostGlyph: {
-      width: HOME_ICON_SIZE.down,
-      height: HOME_ICON_SIZE.down,
-      tintColor: color.textMuted,
-    },
-    ghostLabel: {
-      color: color.textMuted,
-      fontSize: font.body,
-      fontWeight: '500',
-    },
     pressedText: {opacity: PRESSED_OPACITY},
     linkRow: {
       flexDirection: 'row',

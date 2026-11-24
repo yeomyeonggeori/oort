@@ -534,7 +534,7 @@ export function WorkstreamDetailRoute() {
             headline="이 작업 흐름을 찾을 수 없습니다."
             detail="주소가 오래됐거나, 내가 속한 채널의 작업 흐름이 아닙니다."
             actions={
-              <Button variant="outline" size="sm" asChild>
+              <Button variant="secondary" size="sm" asChild>
                 {/* 동사로 끝나는 라벨(skill §7). 명사구 `작업 흐름 목록`은
                     버튼이 아니라 표지판처럼 읽힌다. */}
                 <Link to="/workstreams">작업 흐름 목록 보기</Link>
@@ -631,7 +631,7 @@ export function WorkstreamDetailRoute() {
                     scrolls to that card once the timeline mounts it; if the
                     card is older than the loaded head the watcher expires
                     quietly and the reader is still in the right channel. */}
-                <Button variant="outline" size="sm" asChild>
+                <Button variant="secondary" size="sm" asChild>
                   <Link
                     to={messageAnchorPath(
                       workstream.channelId,

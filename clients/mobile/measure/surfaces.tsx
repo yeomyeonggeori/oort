@@ -223,6 +223,7 @@ import {ChannelBrowseSurface} from './channelBrowse';
 import {ChannelPreviewSurface} from './channelPreview';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
+import {ButtonsSurface} from './buttons';
 import {ConnectionStripSurface} from './connectionStrip';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
@@ -2239,6 +2240,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
   }
+  // #6075: 폰 단추 네 종류 전시(`measure/buttons.tsx`, 실제 공용 부품 · 고정 낱말).
+  if (name === 'buttons') return <ButtonsSurface />;
   // #4318: 공용 시트·페이지 부품 전시 + 이전한 시트(`measure/sheetKit.tsx`, 고정 데이터·가상 인물).
   if (name === 'sheetkit' || name.startsWith('sheetkit-')) {
     return <SheetKitSurface which={name.slice('sheetkit'.length).replace(/^-/, '')} />;

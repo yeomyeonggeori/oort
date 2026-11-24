@@ -237,7 +237,7 @@ export function DevAccessList({
               <div>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={onStartCreate}
                   data-testid="dev-credentials-start"

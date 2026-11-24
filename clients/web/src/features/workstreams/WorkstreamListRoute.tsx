@@ -289,7 +289,7 @@ export function WorkstreamListRoute() {
               detail="다른 상태에는 있을 수 있습니다."
               actions={
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => setStatus(null)}
                   data-testid="workstream-empty-all"

@@ -896,7 +896,7 @@ export function ConfirmButton({
       <Button
         ref={triggerRef}
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         // aria-disabled, not native `disabled`: a gated trigger that leaves the
         // tab order takes its `describedBy` (the blocked reason) out of reach,

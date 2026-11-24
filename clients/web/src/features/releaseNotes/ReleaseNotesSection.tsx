@@ -191,7 +191,7 @@ export function ReleaseNotesSection({ notes: given = RELEASE_NOTES }: { notes?: 
                 }
               >
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   className="tap-target"
                   aria-label={`${messages.formatMessage("releaseNotes.action.details")}, ${versionLabel}`}

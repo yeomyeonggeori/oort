@@ -196,7 +196,7 @@ export function ShareDialog({
           </p>
         ) : null}
         <div className="flex items-center justify-end gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onClose}>
+          <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={onClose}>
             {SHARE_COPY.cancel}
           </Button>
           {prepError ? (

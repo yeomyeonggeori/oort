@@ -501,7 +501,7 @@ function SubscriptionRow({
             서 있었다. 클릭을 막는 일은 가드가 진다. */}
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-disabled={toggleLocked || undefined}
           aria-busy={toggling || undefined}
@@ -771,7 +771,7 @@ function CreateForm({
           {createFailure === UNVERIFIED_CREATE_MESSAGE && (
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={onReloadList}
               data-testid="event-subscription-create-reload"

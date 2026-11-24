@@ -350,7 +350,7 @@ function ExcerptForm({
       <div className="flex items-center justify-end gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           disabled={pending}
           onClick={() => onDone(false)}
@@ -509,7 +509,7 @@ function SessionActions({
           <Button
             ref={armRef}
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             disabled={endReason !== null || done}
             onClick={() => setArmed(true)}
@@ -553,7 +553,7 @@ function SessionActions({
         <Button
           ref={excerptRef}
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           onClick={onExcerpt}
           aria-expanded={excerptOpen}

@@ -246,7 +246,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="secondary"
             className="tap-target"
             onClick={onRetryHost}
             data-testid={`tool-card-${harness}-host-retry`}
@@ -352,7 +352,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 className="tap-target"
                 onClick={() => setDialogOpen(true)}
                 data-focus-slot="login-open"
@@ -376,7 +376,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               className="tap-target"
               onClick={() => {
                 setConfirming(true);
@@ -393,7 +393,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
+                variant="secondary"
                 className="tap-target"
                 onClick={() => sessions.startDisconnect(harness)}
                 data-testid={`tool-card-${harness}-disconnect-retry`}
