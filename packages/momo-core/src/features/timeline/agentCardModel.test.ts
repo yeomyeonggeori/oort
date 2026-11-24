@@ -1,7 +1,13 @@
 import requestLoopFixture from "./__fixtures__/requestLoop.json";
 import { agentRequestBundle } from "./agentCardModel";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const errorText = (outcome: DecisionOutcome) => decisionErrorText(outcome, ko);
+const noteText = (outcome: DecisionOutcome) => decisionNoteText(outcome, ko);
+const sendFailureText = (cause: unknown) => ko(sendFailureKey(cause));
 import { requestBundleState, REQUEST_BUNDLE_FACE, requestLoopCopyViolations, shouldFoldBundleLine } from "./requestBundle";
-import { APPROVAL_OFFLINE_COPY } from "./approvalNote";
+import { APPROVAL_OFFLINE_KEY } from "./approvalNote";
 import { particleFor, directionParticle } from "../../lib/koreanParticle";
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
@@ -20,7 +26,13 @@ import {
   turnStatusFor,
 } from "./agentCardModel";
 import { NetworkError } from "../../lib/http";
-import { interpretReceipt, sendFailureCopy } from "./approvalDecision";
+import {
+  decisionErrorText,
+  decisionNoteText,
+  interpretReceipt,
+  sendFailureKey,
+  type DecisionOutcome,
+} from "./approvalDecision";
 
 // #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
 // `serverResultAuthor.test.ts` 가 잰다.
@@ -660,11 +672,11 @@ describe("decision receipt semantics", () => {
     const outcome = interpretReceipt(409, receipt("rejected"));
     expect(outcome.kind).toBe("superseded");
     expect(outcome.status).toBe("rejected");
-    expect(outcome.note).toBe("다른 곳에서 이미 결정됐어요.");
+    expect(noteText(outcome)).toBe("다른 곳에서 이미 결정됐어요.");
   });
 
   it("names expiry for what it is", () => {
-    expect(interpretReceipt(409, receipt("expired")).note).toBe(
+    expect(noteText(interpretReceipt(409, receipt("expired")))).toBe(
       "결정 전에 만료됐어요."
     );
   });
@@ -678,19 +690,19 @@ describe("decision receipt semantics", () => {
   it("never lets a decision that got no answer read as recorded", () => {
     // MOMO-609: the request either reached the server or it did not, and the
     // two absences point at different next moves. Neither is "it was recorded".
-    expect(sendFailureCopy(new NetworkError("timeout", 15_000))).toContain(
+    expect(sendFailureText(new NetworkError("timeout", 15_000))).toContain(
       "보내지 못했어요"
     );
-    expect(sendFailureCopy(new NetworkError("unreachable", 15_000))).toContain(
+    expect(sendFailureText(new NetworkError("unreachable", 15_000))).toContain(
       "닿지 못했어요"
     );
   });
 
   it("says what a 403 and a 404 mean without apologising", () => {
-    expect(interpretReceipt(403, receipt("forbidden")).errorCopy).toContain(
+    expect(errorText(interpretReceipt(403, receipt("forbidden")))).toContain(
       "권한이 없어요"
     );
-    expect(interpretReceipt(404, receipt("not_found")).errorCopy).toContain(
+    expect(errorText(interpretReceipt(404, receipt("not_found")))).toContain(
       "찾지 못했어요"
     );
   });
@@ -990,7 +1002,7 @@ describe("만료 스윕이 남긴 줄 (검수 L4, #4705)", () => {
 describe("요청 묶음", () => {
   const nowMs = 1_800_000_000_000;
   const names: Record<string, string> = { agent: "달무리봇", human: "김인턴", other: "박연구원" };
-  const context = { nowMs, nameFor: (id: string) => names[id], viewerMemberId: "human", viewerKind: "human" as const, canDecide: true };
+  const context = { nowMs, formatMessage: ko, nameFor: (id: string) => names[id], viewerMemberId: "human", viewerKind: "human" as const, canDecide: true };
   const message = (props: Record<string, unknown> = {}) => msg({ type: "approval_request", authorMemberId: "agent", props: { approval_id: "approval", action_type: "tool_call", tool_name: "shell", status: "pending", ...props } });
 
   it("승인 다섯 상태 × run 아홉 단계 × 종료 코드 여섯 × 승인 두 종류에서 정확히 한 상태와 얼굴을 낸다", () => {
@@ -1191,7 +1203,7 @@ describe("요청 묶음", () => {
       ["Tool call expired without a human approval.", "english-source"], ["Tool call rejected by human approval.", "english-source"],
       ["Approval required: shell", "english-source"], ["Approve shell", "english-source"], ["결정할 수 없습니다.", "formal"], ["승인을 기록합니다.", "formal"], ["거절됨", "declined-copy"], ["승인 대기", "approval-wait-copy"],
     ]) expect(requestLoopCopyViolations(copy)).toContain(hit);
-    expect(requestLoopCopyViolations(APPROVAL_OFFLINE_COPY)).toEqual([]);
+    expect(requestLoopCopyViolations(ko(APPROVAL_OFFLINE_KEY))).toEqual([]);
     expect(requestLoopCopyViolations("shell · 승인 필요 · 김인턴 님의 승인을 기다려요")).toEqual([]);
   });
 

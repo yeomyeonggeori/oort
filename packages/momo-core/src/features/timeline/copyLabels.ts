@@ -8,22 +8,27 @@
 // (답글 달기 · 인용해서 답하기 · 고정하기 · 고치기 · 지우기).
 // =============================================================================
 
+import type { PlainMessageKey } from "../../i18n/keys";
+
 /** Idle label: put the message body on the clipboard. */
-export const COPY_MESSAGE_ACTION_LABEL = "메시지 복사하기";
+export const COPY_MESSAGE_ACTION_KEY = "timeline.copy.messageAction" satisfies PlainMessageKey;
 
 /** Receipt after the body landed on the clipboard. */
-export const COPY_MESSAGE_DONE_LABEL = "메시지 복사됨";
+export const COPY_MESSAGE_DONE_KEY = "timeline.copy.messageDone" satisfies PlainMessageKey;
 
 /** Idle label: put a paste-anywhere link on the clipboard. */
-export const COPY_LINK_ACTION_LABEL = "링크 복사하기";
+export const COPY_LINK_ACTION_KEY = "timeline.copy.linkAction" satisfies PlainMessageKey;
 
-/** Receipt after the link landed on the clipboard. */
-export const COPY_LINK_DONE_LABEL = "링크 복사됨";
+/**
+ * Receipt after the link landed on the clipboard. The same words (「링크 복사됨」 / "Link copied") already
+ * live in the phone link card's key, so this reads it instead of adding a second copy.
+ */
+export const COPY_LINK_DONE_KEY = "mobile.linkCard.copied" satisfies PlainMessageKey;
 
-export function copyMessageActionLabel(copied: boolean): string {
-  return copied ? COPY_MESSAGE_DONE_LABEL : COPY_MESSAGE_ACTION_LABEL;
+export function copyMessageActionKey(copied: boolean): PlainMessageKey {
+  return copied ? COPY_MESSAGE_DONE_KEY : COPY_MESSAGE_ACTION_KEY;
 }
 
-export function copyLinkActionLabel(copied: boolean): string {
-  return copied ? COPY_LINK_DONE_LABEL : COPY_LINK_ACTION_LABEL;
+export function copyLinkActionKey(copied: boolean): PlainMessageKey {
+  return copied ? COPY_LINK_DONE_KEY : COPY_LINK_ACTION_KEY;
 }

@@ -1,6 +1,11 @@
 import { approvalOpensOnCard, type FeedItem } from "@momo/core/features/inbox/model";
 import type { ApprovalStatus } from "@momo/core/features/timeline/agentCardModel";
-import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import {
+  decisionErrorText,
+  decisionNoteText,
+  type DecisionOutcome,
+} from "@momo/core/features/timeline/approvalDecision";
+import type { LocaleService } from "@momo/core/i18n";
 
 // =============================================================================
 // 승인함의 판정들 (goal W-AP1). 순수 함수만, DOM 없이 단언 가능하게.
@@ -229,12 +234,15 @@ const CANCELLED_COPY = "이 요청은 취소되어 있었어요.";
  * 네 갈래는 원장의 어휘 그대로이고, 모르는 상태는 지어내지 않고 서버가 준 note를
  * 먼저 쓴다.
  */
-function supersededCopy(outcome: DecisionOutcome): string {
+function supersededCopy(
+  outcome: DecisionOutcome,
+  formatMessage: LocaleService["formatMessage"]
+): string {
   if (outcome.status === "approved") return "이미 승인으로 기록되어 있었어요.";
   if (outcome.status === "rejected") return "이미 거부로 기록되어 있었어요.";
   if (outcome.status === "expired") return EXPIRED_COPY;
   if (outcome.status === "cancelled") return CANCELLED_COPY;
-  return outcome.note ?? SUPERSEDED_FALLBACK;
+  return decisionNoteText(outcome, formatMessage) ?? SUPERSEDED_FALLBACK;
 }
 
 /**
@@ -256,19 +264,22 @@ export function settledStatusLine(status: ApprovalStatus): string | null {
   return SETTLED_LINE[status] ?? null;
 }
 
-export function decisionNote(outcome: DecisionOutcome): DecisionNote {
+export function decisionNote(
+  outcome: DecisionOutcome,
+  formatMessage: LocaleService["formatMessage"]
+): DecisionNote {
   if (outcome.kind === "committed" && outcome.status === "cancelled") {
-    return { tone: "neutral", text: supersededCopy(outcome) };
+    return { tone: "neutral", text: supersededCopy(outcome, formatMessage) };
   }
   if (outcome.kind === "superseded") {
-    return { tone: "neutral", text: supersededCopy(outcome) };
+    return { tone: "neutral", text: supersededCopy(outcome, formatMessage) };
   }
   if (outcome.kind === "error") {
     // 2R M1: 같은 404를 목록은 조용히 접고 이 줄만 빨갛게 그리면, 한 화면이
     // 같은 사실을 두 색으로 말한다.
     return {
       tone: outcome.errorCode === "surface_absent" ? "unavailable" : "error",
-      text: outcome.errorCopy ?? "결정을 처리하지 못했어요.",
+      text: decisionErrorText(outcome, formatMessage) ?? "결정을 처리하지 못했어요.",
     };
   }
   if (outcome.status === "approved") {

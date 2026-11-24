@@ -113,9 +113,11 @@ describe("the consent card names the one person it waits for (#4920)", () => {
     const forPeer = consentCard(PEER, "a2");
     const cards = [forTarget, forPeer].map((message) => agentCardModel(message)!);
     const view = render(
-      <SessionProvider value={sessionFor(REQUESTER)}>
-        {cards.map((card, index) => <AgentCard key={index} card={card} directory={DIRECTORY} viewerMemberId={REQUESTER} />)}
-      </SessionProvider>
+      <LocaleProvider locale={ko}>
+        <SessionProvider value={sessionFor(REQUESTER)}>
+          {cards.map((card, index) => <AgentCard key={index} card={card} directory={DIRECTORY} viewerMemberId={REQUESTER} />)}
+        </SessionProvider>
+      </LocaleProvider>
     );
     const [first, second] = view.getAllByTestId("agent-card");
     expect(within(first!).getAllByText(TARGET_LINE)).toHaveLength(1);

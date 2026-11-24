@@ -63,12 +63,12 @@ function message(over: Partial<Message> = {}): Message {
 
 const NO_EXPRESSIONS: readonly Expression[] = [];
 const WAVE = {name: 'wave', status: 'active', displayName: '손 흔들기', tags: []} as unknown as Expression;
+const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
 const context = (expressions: readonly Expression[] = NO_EXPRESSIONS) => ({
   myMemberId: SELF,
   expressions,
+  formatMessage: ko.formatMessage,
 });
-
-const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
 const en = createMessageService({messageLocale: 'en-US', catalog: enCatalog});
 
 describe('답글 대상 루트 — 이미 스레드 답글이면 그 스레드의 루트에 단다', () => {

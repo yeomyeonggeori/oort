@@ -15,6 +15,8 @@ import {
   serverSpeaksThreadHome,
 } from "./threadHome";
 
+const koFormat = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
+
 // 이슈 #4888 → #5324 — 본류에 그릴 행의 판정(웹·데스크탑·폰이 같은 함수: `root_id` 없는 메시지만, 「대화에도 보내기」는 화면에서 빠졌다), 옛 서버 대체(폰), 폰 답글 줄의 모양과 문구.
 
 const ME = "11111111-1111-4111-8111-111111111111";
@@ -101,14 +103,14 @@ describe("phoneMainFlowMessages — 새 서버는 규칙대로, 옛 서버는 �
 
 describe("replyHomeLineOf — 「어느 스레드의 답글인가」(폰: 옛 서버의 본류 답글·보내지 못한 답글의 에코)", () => {
   it("루트가 불러온 범위에 없으면 모른다고 말한다", () => {
-    expect(replyHomeLineOf(ROOT, undefined)).toEqual({ kind: "unloaded", rootId: ROOT });
+    expect(replyHomeLineOf(koFormat, ROOT, undefined)).toEqual({ kind: "unloaded", rootId: ROOT });
   });
   it("지워진 루트는 지워졌다고 말한다(스레드는 열린다)", () => {
-    const line = replyHomeLineOf(ROOT, root({ state: "deleted", body: undefined }));
+    const line = replyHomeLineOf(koFormat, ROOT, root({ state: "deleted", body: undefined }));
     expect(line).toEqual({ kind: "deleted", rootId: ROOT, rootAuthorMemberId: SEO });
   });
   it("루트의 글을 한 줄 발췌로 싣는다", () => {
-    expect(replyHomeLineOf(ROOT, root())).toEqual({
+    expect(replyHomeLineOf(koFormat, ROOT, root())).toEqual({
       kind: "ready",
       rootId: ROOT,
       rootAuthorMemberId: SEO,
@@ -116,14 +118,14 @@ describe("replyHomeLineOf — 「어느 스레드의 답글인가」(폰: 옛 �
     });
   });
   it("글이 여러 줄이면 인용과 같은 규칙으로 자른다(한 줄까지 — 인용이 카드 윗칸 머리가 되며 2→1, #5381)", () => {
-    expect(messageExcerpt(root({ body: "첫 줄\n\n둘째 줄\n셋째 줄" }))).toEqual({ kind: "text", text: "첫 줄" });
+    expect(messageExcerpt(koFormat, root({ body: "첫 줄\n\n둘째 줄\n셋째 줄" }))).toEqual({ kind: "text", text: "첫 줄" });
   });
   it("글이 없는 루트는 종류로 말한다(사진·파일·빈 글)", () => {
     const photo = { id: "f1", name: "a.png", mime: "image/png", sizeBytes: 1 };
     const doc = { id: "f2", name: "a.pdf", mime: "application/pdf", sizeBytes: 1 };
-    expect(messageExcerpt(root({ body: "", attachments: [photo] }))).toEqual({ kind: "photo" });
-    expect(messageExcerpt(root({ body: "", attachments: [doc] }))).toEqual({ kind: "file" });
-    expect(messageExcerpt(root({ body: "  " }))).toEqual({ kind: "empty" });
+    expect(messageExcerpt(koFormat, root({ body: "", attachments: [photo] }))).toEqual({ kind: "photo" });
+    expect(messageExcerpt(koFormat, root({ body: "", attachments: [doc] }))).toEqual({ kind: "file" });
+    expect(messageExcerpt(koFormat, root({ body: "  " }))).toEqual({ kind: "empty" });
   });
 });
 

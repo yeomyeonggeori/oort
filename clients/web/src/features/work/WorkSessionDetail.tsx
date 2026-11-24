@@ -54,7 +54,7 @@ import {
 import {
   clockLabel,
   ROW_STATE_CLASS,
-  SESSION_ELAPSED_META_LABEL,
+  SESSION_ELAPSED_META_LABEL_KEY,
   SESSION_STATUS_CLASS,
   sessionElapsedReadout,
   silenceLabel,
@@ -825,9 +825,10 @@ export function WorkSessionDetail({
   // 이 세션의 가장 최근 창. 판정(어느 것이 최신인가·닫힘이 이긴다)은 코어가 지고
   // 이 화면은 그 답을 그리기만 한다 — 폰이 언젠가 같은 표시를 그릴 때 두 번째
   // 구현이 생기지 않게.
+  const formatMessage = useFormatMessage();
   const controlNotice = useMemo(
-    () => latestControlNotice(controlFrames, session.id),
-    [controlFrames, session.id]
+    () => latestControlNotice(controlFrames, session.id, formatMessage),
+    [controlFrames, session.id, formatMessage]
   );
   // 이 실행이 어느 목표에 속하는지 (MOMO-679). 반대 방향 — 목표에서 실행으로 —
   // 은 작업 흐름 상세의 이력 행이 이미 걸어주지만, 돌아오는 길이 없어서 이 표면은
@@ -871,7 +872,6 @@ export function WorkSessionDetail({
   // receiving keys and the documented step back (상세 -> 리스트 -> 밖) was dead
   // for exactly the readers who need it. The back control is the right landing
   // spot because it is both the heading's neighbour and the way out.
-  const formatMessage = useFormatMessage();
   const backRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const back = backRef.current;
@@ -900,7 +900,7 @@ export function WorkSessionDetail({
     isSlowStep(session, lastSignalAtMs, nowMs);
   // 도는 세션은 시계, 끝난 세션은 성과 서술, 시작이 관측되지 않았으면 아무것도
   // (코어 `sessionElapsedReadout`). 목록 행이 부르는 것과 같은 함수다.
-  const elapsed = sessionElapsedReadout(session, nowMs);
+  const elapsed = sessionElapsedReadout(session, nowMs, formatMessage);
   // 이 세션이 스스로 보고한 게이트 결과, 또는 없음 (#1463).
   //
   // 절단된 스레드 페이지는 이 판정에 들어가지 않는다 — 그때 없는 것이 정확히 가장
@@ -1139,7 +1139,7 @@ export function WorkSessionDetail({
                 갈림도 화면의 삼항이 아니라 위 조각과 **같은 판정**(`kind`)이
                 진다. 한글이 섞인 값에는 자릿폭 고정을 걸지 않는다. */}
             {elapsed !== null && (
-              <MetaRow label={SESSION_ELAPSED_META_LABEL[elapsed.kind]}>
+              <MetaRow label={formatMessage(SESSION_ELAPSED_META_LABEL_KEY[elapsed.kind])}>
                 <span
                   {...(elapsed.numeric ? { "data-numeric": true } : {})}
                   className={cn(elapsed.numeric && "font-mono")}
@@ -1300,7 +1300,7 @@ export function WorkSessionDetail({
                         : "bg-surface-hover text-ink-muted"
                 )}
               >
-                {controlWindowLabel(controlNotice)}
+                {controlWindowLabel(controlNotice, formatMessage)}
               </span>
             </div>
             <dl className="py-1">

@@ -1,26 +1,29 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import { agentCardModel, cardKeepsBody } from "./agentCardModel";
 import { rowPresentation } from "./rowModel";
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
-  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_LABEL_KEY,
   COMPLETION_OUTCOME_TONE,
   COMPLETION_REPORT_KIND,
-  COMPLETION_REPORT_TITLE,
-  ELAPSED_SUB_SECOND,
+  ELAPSED_SUB_SECOND_KEY,
   MAX_COMPLETION_ACTIONS,
   MAX_COMPLETION_CHECKS_PER_ROW,
   MAX_COMPLETION_GATE_ROWS,
-  WORKED_ELAPSED_LABEL,
+  WORKED_ELAPSED_LABEL_KEY,
   completionCellChecks,
   completionCheckCounts,
   completionGateColumns,
   completionOutcome,
   completionReportCard,
+  completionReportTitle,
   completionRowChecks,
-  formatElapsed,
+  formatElapsed as buildFormatElapsed,
+  isSubSecondElapsed,
   parseCompletionActions,
   parseCompletionCheckOutcome,
   parseCompletionGates,
@@ -29,6 +32,23 @@ import {
   type CompletionGateRow,
   type CompletionReportCard,
 } from "./completionReportCard";
+
+// 낱말은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 예전과 같은 한국어를 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const formatElapsed = (ms: number) => buildFormatElapsed(ko, ms);
+const ELAPSED_SUB_SECOND = ko(ELAPSED_SUB_SECOND_KEY);
+const WORKED_ELAPSED_LABEL = ko(WORKED_ELAPSED_LABEL_KEY);
+const COMPLETION_OUTCOME_LABEL = {
+  clean: ko(COMPLETION_OUTCOME_LABEL_KEY.clean),
+  attention: ko(COMPLETION_OUTCOME_LABEL_KEY.attention),
+};
+const COMPLETION_CHECK_OUTCOME_LABEL = {
+  pass: ko(COMPLETION_CHECK_OUTCOME_LABEL_KEY.pass),
+  fail: ko(COMPLETION_CHECK_OUTCOME_LABEL_KEY.fail),
+  skip: ko(COMPLETION_CHECK_OUTCOME_LABEL_KEY.skip),
+  pending: ko(COMPLETION_CHECK_OUTCOME_LABEL_KEY.pending),
+  unknown: ko(COMPLETION_CHECK_OUTCOME_LABEL_KEY.unknown),
+};
 
 // A realistic report the worker would emit at the end of a long setup turn —
 // the oort repo build the cursor benchmark measured, in our dialect. It is the
@@ -130,7 +150,7 @@ describe("completionReportCard — parsing the full envelope", () => {
 
   it("reads title, summary, elapsed and marks the run clean", () => {
     expect(card.kind).toBe("completion_report");
-    expect(card.title).toBe("yeomyeonggeori/oort 환경 셋업 완료");
+    expect(completionReportTitle(ko, card)).toBe("yeomyeonggeori/oort 환경 셋업 완료");
     expect(card.summary).toContain("oort 모노레포입니다");
     expect(card.elapsedMs).toBe(1_468_000);
     expect(card.outcome).toBe("clean");
@@ -160,7 +180,8 @@ describe("completionReportCard — parsing the full envelope", () => {
       kind: COMPLETION_REPORT_KIND,
       summary: "제목 없이",
     }) as CompletionReportCard;
-    expect(bare.title).toBe(COMPLETION_REPORT_TITLE);
+    expect(bare.titleText).toBeNull();
+    expect(completionReportTitle(ko, bare)).toBe("작업 완료 리포트");
   });
 });
 
@@ -330,6 +351,10 @@ describe("formatElapsed", () => {
     // `workSessionFormat` 이 그 경계를 이 상수와의 비교로 알아본다.
     expect(ELAPSED_SUB_SECOND).toBe("1초 미만");
     expect(formatElapsed(0)).toBe(ELAPSED_SUB_SECOND);
+    expect(isSubSecondElapsed(0)).toBe(true);
+    expect(isSubSecondElapsed(400)).toBe(true);
+    expect(isSubSecondElapsed(1_468_000)).toBe(false);
+    expect(isSubSecondElapsed(-1)).toBe(false);
   });
 });
 

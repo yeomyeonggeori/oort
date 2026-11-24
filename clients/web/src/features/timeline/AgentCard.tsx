@@ -67,25 +67,27 @@ import {
   type PayloadDetail,
 } from "@momo/core/features/timeline/agentCardModel";
 import {
-  LOGIN_HANDOFF_DECISION,
-  LOGIN_HANDOFF_DEPLOYMENT_COPY,
+  LOGIN_HANDOFF_DECISION_KEY,
+  LOGIN_HANDOFF_DEPLOYMENT_KEY,
   loginHandoffNote,
-  loginHandoffOutcomeDetail,
+  loginHandoffOutcomeDetailKey,
   loginHandoffSeeksControl,
-  loginHandoffStoppedCopy,
-  loginHandoffWaitingCopy,
+  loginHandoffStoppedKey,
+  loginHandoffTitle,
+  loginHandoffWaitingKey,
   type LoginHandoffCard,
   type LoginHandoffNote,
 } from "@momo/core/features/timeline/loginHandoffCard";
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
-  COMPLETION_GATE_SURFACE_LABEL,
+  COMPLETION_GATE_SURFACE_LABEL_KEY,
   completionCellChecks,
   completionCheckCounts,
   completionGateColumns,
+  completionReportTitle,
   formatElapsed,
-  WORKED_ELAPSED_LABEL,
+  WORKED_ELAPSED_LABEL_KEY,
   type CompletionCheck,
   type CompletionCheckOutcome,
   type CompletionReportCard,
@@ -522,7 +524,7 @@ function ApprovalBody({
   const context = approvalBundleContext(card, session.member, directory, run);
   const isAdmin = context.isWorkspaceAdmin;
   const bundle = card.isResumeOffer ? undefined : requestBundleModel(
-    approvalBundleCard(formatMessage, card, receipt), { ...context, nowMs }
+    approvalBundleCard(formatMessage, card, receipt), { ...context, formatMessage, nowMs }
   );
   // open을 명시하지 않은 서버 카드는 인라인 [승인][거부]를 그대로 유지해요.
   const openStage = card.bundle?.decisionMode === "open" ? (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -587,7 +589,7 @@ function ApprovalBody({
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback
     }`,
-  });
+ }, formatMessage);
 
   return (
     <CardFrame
@@ -710,7 +712,7 @@ function ApprovalBody({
               ) {
                 next.secretOnce = outcome.result.secretOnce;
               }
-              next.note = decisionNote(outcome).text;
+              next.note = decisionNote(outcome, formatMessage).text;
               setLocal(next);
               // 1회 값은 저장소에 넘기지 않는다(ADR-0186 D4).
               const { secretOnce: _once, ...receiptOnly } = next;
@@ -847,7 +849,7 @@ function ApprovalBody({
  * ## 어포던스 부재 원칙
  *
  * 이 빌드에는 채팅에서 화면을 여는 버튼이 없다. 그래서 그 자리에 **비활성
- * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_COPY`).
+ * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_KEY`).
  * 영원히 눌리지 않는 버튼은 사람에게 「내가 뭘 잘못했나」를 묻게 하고, 그것은
  * 화면이 거짓을 말하는 가장 조용한 형태다. 대신 실제로 있는 문 하나 — 작업 세션
  * 상세 — 는 진짜 버튼으로 서고, 그 세션 화면은 세션 상세가 그린다.
@@ -861,6 +863,7 @@ function LoginHandoffBody({
   directory: Directory;
   onOpenWorkSession?: OpenWorkSession;
 }) {
+  const formatMessage = useFormatMessage();
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
     decidedAtMs?: number;
@@ -890,6 +893,7 @@ function LoginHandoffBody({
   const showOpenSession =
     card.sessionId !== null && onOpenWorkSession !== undefined;
 
+  const outcomeDetailKey = loginHandoffOutcomeDetailKey(card);
   const note = loginHandoffNote({
     receiptNote: receipt?.note ?? null,
     hasTarget: card.approvalId !== null,
@@ -902,13 +906,13 @@ function LoginHandoffBody({
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback
     }`,
-  });
+  }, formatMessage);
 
   return (
     <CardFrame
       sectionRef={cardRef}
       icon={<KeyRound className="size-4" aria-hidden="true" />}
-      title={card.title}
+      title={loginHandoffTitle(formatMessage, card)}
       chip={<LoginHandoffChip card={card} />}
       status={card.outcome ?? card.phase}
       kind="login_handoff"
@@ -928,7 +932,7 @@ function LoginHandoffBody({
                 className="text-meta text-ink-muted"
                 data-testid="handoff-deployment"
               >
-                {LOGIN_HANDOFF_DEPLOYMENT_COPY}
+                {formatMessage(LOGIN_HANDOFF_DEPLOYMENT_KEY)}
               </p>
             )}
             {showOpenSession && (
@@ -973,10 +977,10 @@ function LoginHandoffBody({
             approvalId={card.approvalId}
             className="border-t border-line"
             testIdPrefix="handoff"
-            lead={LOGIN_HANDOFF_DECISION.lead}
+            lead={formatMessage(LOGIN_HANDOFF_DECISION_KEY.lead)}
             verbs={{
-              approve: LOGIN_HANDOFF_DECISION.resume,
-              reject: LOGIN_HANDOFF_DECISION.stop,
+              approve: formatMessage(LOGIN_HANDOFF_DECISION_KEY.resume),
+              reject: formatMessage(LOGIN_HANDOFF_DECISION_KEY.stop),
             }}
             onSettled={(outcome) => {
               cardRef.current?.focus();
@@ -992,7 +996,7 @@ function LoginHandoffBody({
               if (outcome.decidedByMemberId !== undefined) {
                 next.decidedByMemberId = outcome.decidedByMemberId;
               }
-              next.note = decisionNote(outcome).text;
+              next.note = decisionNote(outcome, formatMessage).text;
               setLocal(next);
               rememberSettledApproval(card.approvalId, next);
             }}
@@ -1007,7 +1011,7 @@ function LoginHandoffBody({
               (freeze M1). 국면은 승인 원장의 것이라 뒤집지 않고, 화면이
               「지금도 조작 중」이라고 읽히는 것만 막는다. 문장도 조건도
               코어가 답한다. */}
-          {loginHandoffWaitingCopy(card)}
+          {formatMessage(loginHandoffWaitingKey(card))}
         </LabeledRow>
       )}
       {/* 경계 사실. 증보 3 D3이 에이전트에게 허락한 것과 같은 것만 그린다 —
@@ -1027,12 +1031,12 @@ function LoginHandoffBody({
           컨트롤 자리에 서는 `in-control` 줄이 같은 사실을 이미 말하고,
           거기에 **다음에 무엇을 하면 되는지**까지 붙는다. 한 카드가 같은
           사실을 두 번 말하면 읽는 사람은 두 가지가 일어났다고 읽는다. */}
-      {card.outcome !== null && (
+      {outcomeDetailKey !== null && (
         <LabeledRow label="결과" testId="handoff-outcome">
           {/* 표를 그대로 인덱싱하지 않는다 (freeze M2): 창 없이 `returned` 인
               카드는 「화면을 돌려주었습니다」라고 말할 수 없다 — 이 배포에서는
               아무도 잡은 적이 없고, 실행기가 모델에게 하는 말도 그렇다. */}
-          {loginHandoffOutcomeDetail(card)}
+          {formatMessage(outcomeDetailKey)}
         </LabeledRow>
       )}
       {card.phase === "stopped" && (
@@ -1043,7 +1047,7 @@ function LoginHandoffBody({
               문장도 조건도 코어가 답한다 (design-review H2·M1). 앞 판은 두
               문장을 인라인으로 붙여 두었고, 그래서 창이 있었던 stopped 카드에서
               바로 윗줄의 「정지」 행과 모순됐다. */}
-          {loginHandoffStoppedCopy(card)}
+          {formatMessage(loginHandoffStoppedKey(card))}
         </LabeledRow>
       )}
       {settled && (decidedBy || decidedAtMs !== undefined) && (
@@ -1074,8 +1078,9 @@ function LoginHandoffBody({
  * 붙어 실패 칸이 초록에 접혀 사라지지 않는다.
  */
 function GateCellValue({ check }: { check: CompletionCheck }) {
+  const formatMessage = useFormatMessage();
   const toneClass = COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[check.outcome]];
-  const label = COMPLETION_CHECK_OUTCOME_LABEL[check.outcome];
+  const label = formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[check.outcome]);
   return (
     <span className="block" data-outcome={check.outcome}>
       <span className={cn("text-meta", toneClass)}>{check.detail ?? label}</span>
@@ -1098,6 +1103,7 @@ function GateCellValue({ check }: { check: CompletionCheck }) {
  * 절대 가로로 밀리지 않는다(design-taste-web 반응형 규칙).
  */
 function CompletionGateTable({ card }: { card: CompletionReportCard }) {
+  const formatMessage = useFormatMessage();
   const columns = completionGateColumns(card.gates);
   const counts = completionCheckCounts(card.gates);
   const tally: Array<{ outcome: CompletionCheckOutcome; count: number }> = (
@@ -1122,7 +1128,7 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
                 scope="col"
                 className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
               >
-                {COMPLETION_GATE_SURFACE_LABEL}
+                {formatMessage(COMPLETION_GATE_SURFACE_LABEL_KEY)}
               </th>
               {columns.map((col) => (
                 <th
@@ -1187,7 +1193,7 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
           {tally.map((entry, index) => (
             <span key={entry.outcome}>
               {index > 0 && " · "}
-              {COMPLETION_CHECK_OUTCOME_LABEL[entry.outcome]}{" "}
+              {formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[entry.outcome])}{" "}
               <span data-numeric>{formatCount(entry.count)}</span>
             </span>
           ))}
@@ -1217,11 +1223,12 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
  * 파일은 옷만 입힌다.
  */
 function CompletionReportBody({ card }: { card: CompletionReportCard }) {
-  const elapsed = card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : "";
+  const formatMessage = useFormatMessage();
+  const elapsed = card.elapsedMs !== undefined ? formatElapsed(formatMessage, card.elapsedMs) : "";
   return (
     <CardFrame
       icon={<ClipboardCheck className="size-4" aria-hidden="true" />}
-      title={card.title}
+      title={completionReportTitle(formatMessage, card)}
       chip={<CompletionReportChip outcome={card.outcome} />}
       status={card.outcome}
       kind="completion_report"
@@ -1239,7 +1246,7 @@ function CompletionReportBody({ card }: { card: CompletionReportCard }) {
         // 성과의 단위(벤치마크 차용 C). 숫자와 한글 단위가 섞이므로 자릿폭 고정을
         // 걸지 않는다 — 걸면 음절 사이가 벌어진다(코어 `formatElapsed` 독스트링).
         // 낱말은 코어의 것이다: 작업 세션 정보의 같은 줄이 같은 상수를 쓴다(#1468).
-        <LabeledRow label={WORKED_ELAPSED_LABEL} testId="completion-elapsed">
+        <LabeledRow label={formatMessage(WORKED_ELAPSED_LABEL_KEY)} testId="completion-elapsed">
           {elapsed}
         </LabeledRow>
       )}

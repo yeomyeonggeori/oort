@@ -116,20 +116,25 @@ function composerOfflineCopy() {
  * 지키는 것이 아니라 화면의 문장이 고쳐지는 것을 막는 쪽이 된다.
  */
 function emptyActionLabels() {
-  const source = readFileSync(
-    resolve(webRoot, "../../packages/momo-core/src/features/timeline/model.ts"),
-    "utf8"
+  const catalog = JSON.parse(
+    readFileSync(
+      resolve(
+        webRoot,
+        "../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json"
+      ),
+      "utf8"
+    )
   );
-  const read = (name) => {
-    const match = source.match(
-      new RegExp(`export const ${name}\\s*=\\s*"([^"]+)"`)
-    );
-    if (match === null) throw new Error(`코어의 ${name}을 읽지 못했다`);
-    return match[1];
+  const read = (key) => {
+    const text = catalog[key];
+    if (typeof text !== "string" || text === "") {
+      throw new Error(`한국어 사전의 ${key}를 읽지 못했다`);
+    }
+    return text;
   };
   return {
-    write: read("EMPTY_WRITE_ACTION_LABEL"),
-    addMember: read("EMPTY_ADD_MEMBER_ACTION_LABEL"),
+    write: read("timeline.emptyChannel.writeAction"),
+    addMember: read("timeline.emptyChannel.addMemberAction"),
   };
 }
 

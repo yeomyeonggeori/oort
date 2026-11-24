@@ -59,4 +59,4 @@ export function useOnline(): boolean {
  * 「오프라인일 때 무슨 문장이 서는가」를 찾는 사람이 먼저 여는 자리가 여기이기
  * 때문이다.
  */
-export {APPROVAL_OFFLINE_COPY} from '@momo/core/features/timeline/approvalNote';
+export {APPROVAL_OFFLINE_KEY} from '@momo/core/features/timeline/approvalNote';

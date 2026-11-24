@@ -2,17 +2,32 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  LOGIN_HANDOFF_DEPLOYMENT_COPY,
-  LOGIN_HANDOFF_ELSEWHERE_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_LEAD,
-  LOGIN_HANDOFF_OFFLINE_COPY,
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
-  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
-  LOGIN_HANDOFF_STOPPED_COPY,
-  LOGIN_HANDOFF_WAITING_COPY,
-  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED,
+  LOGIN_HANDOFF_DEPLOYMENT_KEY,
+  LOGIN_HANDOFF_ELSEWHERE_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY,
+  LOGIN_HANDOFF_OFFLINE_KEY,
+  LOGIN_HANDOFF_OUTCOME_DETAIL_KEY,
+  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY,
+  LOGIN_HANDOFF_STOPPED_KEY,
+  LOGIN_HANDOFF_WAITING_KEY,
+  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED_KEY,
 } from "@momo/core/features/timeline/loginHandoffCard";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
+
+// 문장은 사전에 있다(#6044). 소스에 인라인으로 적혀 있지 않은지는 한국어 사전의 값으로 대조한다.
+const koPlain = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage as unknown as (
+  key: string
+) => string;
+const LOGIN_HANDOFF_DEPLOYMENT_COPY = koPlain(LOGIN_HANDOFF_DEPLOYMENT_KEY);
+const LOGIN_HANDOFF_ELSEWHERE_COPY = koPlain(LOGIN_HANDOFF_ELSEWHERE_KEY);
+const LOGIN_HANDOFF_IN_CONTROL_COPY = koPlain(LOGIN_HANDOFF_IN_CONTROL_KEY);
+const LOGIN_HANDOFF_IN_CONTROL_LEAD = koPlain(LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY);
+const LOGIN_HANDOFF_OFFLINE_COPY = koPlain(LOGIN_HANDOFF_OFFLINE_KEY);
+const LOGIN_HANDOFF_WAITING_COPY = koPlain(LOGIN_HANDOFF_WAITING_KEY);
+const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL = koPlain(LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY);
+const valuesOf = (table: Record<string, string>) => Object.values(table).map((key) => koPlain(key));
 
 // =============================================================================
 // 로그인 핸드오프 카드의 **웹 사본 대조** (LIVE-4 design-review M1·H1·L1).
@@ -54,9 +69,9 @@ describe("웹이 핸드오프 문장을 다시 쓰지 않는다 (M1)", () => {
       LOGIN_HANDOFF_OFFLINE_COPY,
       LOGIN_HANDOFF_WAITING_COPY,
       LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
-      ...Object.values(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED),
-      ...Object.values(LOGIN_HANDOFF_STOPPED_COPY),
-      ...Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL),
+      ...valuesOf(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED_KEY),
+      ...valuesOf(LOGIN_HANDOFF_STOPPED_KEY),
+      ...valuesOf(LOGIN_HANDOFF_OUTCOME_DETAIL_KEY),
     ]) {
       expect(CODE_ONLY).not.toContain(sentence);
     }
@@ -66,16 +81,16 @@ describe("웹이 핸드오프 문장을 다시 쓰지 않는다 (M1)", () => {
     // 둘 다 **갈래가 있는** 문장이 됐다: 대기 카피는 창이 닫혔는지에 따라 한
     // 문장이 붙고, 결과 문장은 창이 있었는지에 따라 갈린다. 조건이 이 파일에
     // 있으면 폰이 그 조건을 다시 적어야 하고, 그때부터 둘은 각자 늙는다.
-    expect(CODE_ONLY).toContain("loginHandoffWaitingCopy(card)");
-    expect(CODE_ONLY).toContain("loginHandoffOutcomeDetail(card)");
+    expect(CODE_ONLY).toContain("loginHandoffWaitingKey(card)");
+    expect(CODE_ONLY).toContain("loginHandoffOutcomeDetailKey(card)");
     // 그리고 표를 손으로 인덱싱하던 자리가 남아 있지 않다.
-    expect(CODE_ONLY).not.toContain("LOGIN_HANDOFF_OUTCOME_DETAIL[");
+    expect(CODE_ONLY).not.toContain("LOGIN_HANDOFF_OUTCOME_DETAIL_KEY[");
   });
 
   it("멈춘 카드의 문장은 코어 헬퍼가 답한다 — 조건도 함께", () => {
     // 조건이 이 파일에 있으면 폰이 그 조건을 다시 적어야 하고, 그때부터 둘은
     // 각자 늙는다. H2 가 고친 갈래가 정확히 그것이다.
-    expect(CODE_ONLY).toContain("loginHandoffStoppedCopy(card)");
+    expect(CODE_ONLY).toContain("loginHandoffStoppedKey(card)");
   });
 });
 
@@ -105,7 +120,7 @@ const HANDOFF_BODY = CODE_ONLY.slice(
 describe("빈 띠를 그리지 않는다 (L1)", () => {
   it("함수를 실제로 잘라 냈다", () => {
     // 슬라이스가 빈 문자열이면 아래 단정은 아무것도 지키지 않는다.
-    expect(HANDOFF_BODY).toContain("LOGIN_HANDOFF_DEPLOYMENT_COPY");
+    expect(HANDOFF_BODY).toContain("LOGIN_HANDOFF_DEPLOYMENT_KEY");
     expect(HANDOFF_BODY).toContain("note={");
   });
 

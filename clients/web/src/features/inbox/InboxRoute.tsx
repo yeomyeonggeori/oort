@@ -352,7 +352,7 @@ export function InboxRoute() {
 
   const onDecided = useCallback(
     (outcome: DecisionOutcome, approvalId: string) => {
-      setNote({ ...decisionNote(outcome), approvalId });
+      setNote({ ...decisionNote(outcome, formatMessage), approvalId });
       invalidateApprovals();
     },
     [invalidateApprovals]

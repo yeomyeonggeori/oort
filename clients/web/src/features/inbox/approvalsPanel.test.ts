@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 import {
   approvalItem,
   mentionItem,
@@ -23,12 +25,16 @@ import {
   approvalRowControl,
   approvalsPanelState,
   decidableCount,
-  decisionNote,
+  decisionNote as buildDecisionNote,
   receiptSaidInPane,
   settledStatusLine,
   APPROVED_RECEIPT,
   REJECTED_RECEIPT,
 } from "./approvalsPanel";
+
+// 문장은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 예전과 같은 한국어를 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const decisionNote = (outcome: DecisionOutcome) => buildDecisionNote(outcome, ko);
 
 // =============================================================================
 // 웹 승인함의 계약 (goal W-AP1).

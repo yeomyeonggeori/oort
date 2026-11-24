@@ -6,6 +6,8 @@ import type {
   RosterMember,
 } from "../../lib/api";
 import { threadRollup, uuidEq } from "../../lib/api";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { DmGroupFacts } from "../workspace/directory";
 import { isMainFlowRow } from "./threadHome";
 
@@ -74,10 +76,10 @@ export function emptyTimeline(): TimelineState {
 // 빈-워크스페이스 상태, 둘 다 /settings의 초대 링크 생성기로 간다).
 
 /** 빈 대화가 내놓는 첫 행동의 이름. 정본은 이 두 상수다. */
-export const EMPTY_WRITE_ACTION_LABEL = "첫 메시지 쓰기";
-export const EMPTY_ADD_MEMBER_ACTION_LABEL = "멤버 추가하기";
+export const EMPTY_WRITE_ACTION_KEY = "timeline.emptyChannel.writeAction" satisfies PlainMessageKey;
+export const EMPTY_ADD_MEMBER_ACTION_KEY = "timeline.emptyChannel.addMemberAction" satisfies PlainMessageKey;
 /** 에이전트가 한 명도 없는 빈 채널의 세 번째 손잡이(#3697). 관리자에게만 선다. */
-export const EMPTY_CONNECT_AGENT_ACTION_LABEL = "에이전트 연결";
+export const EMPTY_CONNECT_AGENT_ACTION_KEY = "timeline.emptyChannel.connectAgentAction" satisfies PlainMessageKey;
 
 export interface EmptyChannelAction {
   /** 무엇을 하는 손잡이인가. 표면은 이 값으로 자기 핸들러를 고른다. */
@@ -96,18 +98,6 @@ export interface EmptyChannelCopy {
   secondary: EmptyChannelAction | null;
 }
 
-const WRITE_ACTION: EmptyChannelAction = {
-  kind: "write",
-  label: EMPTY_WRITE_ACTION_LABEL,
-};
-
-const ADD_MEMBER_ACTION: EmptyChannelAction = {
-  kind: "add-member",
-  label: EMPTY_ADD_MEMBER_ACTION_LABEL,
-};
-
-/** 참여자가 정확히 둘인 DM의 안내. 셋 이상(`DmGroupFacts`)에는 쓰지 않는다. */
-const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
 
 /**
  * 셋 이상 DM의 안내(#4912, ADR-0217). 「둘만」·「고정」은 이 대화에서 사실이 아니다: 모든 사람의 허락으로 에이전트가
@@ -115,11 +105,13 @@ const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 �
  * 같은 수)와, 에이전트가 있을 때 그 읽기 범위(착석 뒤에 쓴 글, D5). 에이전트가 있는지는 명부로 **아는 때만** 말한다.
  * 같은 블록의 「이 대화의 시작입니다.」·두 사람 DM 문장과 같은 합쇼체다.
  */
-function groupDmDetail(group: DmGroupFacts): string {
-  const sees = `여기 쓴 메시지는 이 대화에 있는 ${group.count}명이 함께 봅니다.`;
-  return group.agentCount > 0
-    ? `${sees} 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다.`
-    : sees;
+function groupDmDetail(formatMessage: LocaleService["formatMessage"], group: DmGroupFacts): string {
+  return formatMessage(
+    group.agentCount > 0
+      ? "timeline.emptyChannel.dmDetailGroupAgents"
+      : "timeline.emptyChannel.dmDetailGroup",
+    { count: group.count }
+  );
 }
 
 /**
@@ -127,10 +119,16 @@ function groupDmDetail(group: DmGroupFacts): string {
  * 상대 한 명으로는 이 둘을 가를 수 없다. 생략하거나 둘 이하면 지금까지의 두 사람 DM 문장이다.
  */
 export function emptyChannelCopy(
+  formatMessage: LocaleService["formatMessage"],
   kind: Channel["kind"] | null | undefined,
   peer: Pick<RosterMember, "displayName" | "kind"> | null,
   group?: DmGroupFacts | null
 ): EmptyChannelCopy {
+  const writeAction: EmptyChannelAction = { kind: "write", label: formatMessage(EMPTY_WRITE_ACTION_KEY) };
+  const addMemberAction: EmptyChannelAction = {
+    kind: "add-member",
+    label: formatMessage(EMPTY_ADD_MEMBER_ACTION_KEY),
+  };
   if (kind !== "dm") {
     // R-1 §3 asked for [사람 추가] and [에이전트 추가] as equal buttons, to say
     // that adding an agent is not the lesser path. Two buttons on one handler
@@ -145,32 +143,36 @@ export function emptyChannelCopy(
     // 나중에 들어온 멤버도 오늘 쓴 줄을 그대로 읽는다.
     return {
       surface: "channel",
-      headline: "이 채널을 첫 메시지로 시작하세요.",
-      detail:
-        "지금 쓴 메시지는 나중에 들어올 사람과 에이전트도 같은 자격으로 읽습니다.",
-      primary: WRITE_ACTION,
-      secondary: ADD_MEMBER_ACTION,
+      headline: formatMessage("timeline.emptyChannel.channelHeadline"),
+      detail: formatMessage("timeline.emptyChannel.channelDetail"),
+      primary: writeAction,
+      secondary: addMemberAction,
     };
   }
-  const detail = group && group.count > 2 ? groupDmDetail(group) : DM_DETAIL;
+  const detail =
+    group && group.count > 2
+      ? groupDmDetail(formatMessage, group)
+      : formatMessage("timeline.emptyChannel.dmDetailPair");
   if (!peer) {
     // 상대를 못 고른 DM: 명부를 아직 못 받았거나(이름을 지어내지 않는다) 셋 이상 그룹이다(`group`이 문구를 가른다).
     return {
       surface: "dm",
-      headline: "다이렉트 메시지를 시작하세요.",
+      headline: formatMessage("timeline.emptyChannel.dmHeadline"),
       detail,
-      primary: WRITE_ACTION,
+      primary: writeAction,
       secondary: null,
     };
   }
   return {
     surface: "dm",
-    headline:
+    headline: formatMessage(
       peer.kind === "agent"
-        ? `${peer.displayName}님에게 첫 일을 맡겨보세요.`
-        : `${peer.displayName}님과의 대화를 시작하세요.`,
+        ? "timeline.emptyChannel.dmAgentHeadline"
+        : "timeline.emptyChannel.dmPeerHeadline",
+      { name: peer.displayName }
+    ),
     detail,
-    primary: WRITE_ACTION,
+    primary: writeAction,
     secondary: null,
   };
 }

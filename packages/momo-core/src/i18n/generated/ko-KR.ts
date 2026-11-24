@@ -12808,6 +12808,78 @@ export const catalog: MessageCatalog = {
       "value": "원본 메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다."
     }
   ],
+  "timeline.actionResult.avatarExpired": [
+    {
+      "type": 0,
+      "value": "기한이 지나 프로필 사진은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.avatarRejected": [
+    {
+      "type": 0,
+      "value": "승인하지 않아 프로필 사진은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.avatarRoleRequired": [
+    {
+      "type": 0,
+      "value": "사진 주인 본인이 승인해야 해요."
+    }
+  ],
+  "timeline.actionResult.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "워크스페이스 행동"
+    }
+  ],
+  "timeline.actionResult.nameExpired": [
+    {
+      "type": 0,
+      "value": "기한이 지나 이름은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.nameRejected": [
+    {
+      "type": 0,
+      "value": "승인하지 않아 이름은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.nameRoleRequired": [
+    {
+      "type": 0,
+      "value": "요청한 본인이 승인해야 해요."
+    }
+  ],
+  "timeline.actionResult.noteExecuted": [
+    {
+      "type": 0,
+      "value": "실행을 마쳤어요."
+    }
+  ],
+  "timeline.actionResult.noteRejected": [
+    {
+      "type": 0,
+      "value": "승인하지 않아 실행하지 않았어요."
+    }
+  ],
+  "timeline.actionResult.noteRoleRequired": [
+    {
+      "type": 0,
+      "value": "관리자가 승인해야 해요."
+    }
+  ],
+  "timeline.actionResult.permissionNeeded": [
+    {
+      "type": 0,
+      "value": "권한 필요"
+    }
+  ],
+  "timeline.actionResult.secretOnce": [
+    {
+      "type": 0,
+      "value": "링크는 승인한 사람에게 1회 표시됐어요. 다시 필요하면 새로 만드세요."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 1,
@@ -12894,6 +12966,280 @@ export const catalog: MessageCatalog = {
       "value": "일하는 에이전트"
     }
   ],
+  "timeline.appNotice.egressKnown": [
+    {
+      "type": 0,
+      "value": "에이전트가 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에 연결할 수 없어요."
+    }
+  ],
+  "timeline.appNotice.egressOutside": [
+    {
+      "type": 0,
+      "value": "에이전트가 바깥에 연결할 수 없어요."
+    }
+  ],
+  "timeline.appNotice.grantRevoked": [
+    {
+      "type": 0,
+      "value": "실행 중에 허용이 회수돼서 여기서 멈췄어요. 이미 한 일은 그대로예요."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesUnnamed": [
+    {
+      "type": 0,
+      "value": "이 앱 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요."
+    }
+  ],
+  "timeline.appNotice.loginLostNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " 로그인이 끊겼어요."
+    }
+  ],
+  "timeline.appNotice.loginLostUnnamed": [
+    {
+      "type": 0,
+      "value": "이 앱 로그인이 끊겼어요."
+    }
+  ],
+  "timeline.appNotice.notAllowedPhone": [
+    {
+      "type": 0,
+      "value": "이 앱은 데스크탑이나 웹에서 허용해 주세요."
+    }
+  ],
+  "timeline.appNotice.notAllowedWeb": [
+    {
+      "type": 0,
+      "value": "먼저 내 사용을 허용해 주세요."
+    }
+  ],
+  "timeline.appNotice.openApp": [
+    {
+      "type": 0,
+      "value": "앱 열기"
+    }
+  ],
+  "timeline.appNotice.openOnWeb": [
+    {
+      "type": 0,
+      "value": "웹에서 열기"
+    }
+  ],
+  "timeline.appNotice.rateLimitedNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 잠시 요청을 막았어요. 1분 뒤 다시 해 주세요."
+    }
+  ],
+  "timeline.appNotice.rateLimitedUnnamed": [
+    {
+      "type": 0,
+      "value": "이 앱이 잠시 요청을 막았어요. 1분 뒤 다시 해 주세요."
+    }
+  ],
+  "timeline.appNotice.signInAgain": [
+    {
+      "type": 0,
+      "value": "다시 로그인"
+    }
+  ],
+  "timeline.appNotice.siteOff": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥이 꺼져 있어서 못 했어요. 맥을 켜면 다시 해 볼게요."
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes가 꺼져 있어서 못 했어요."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가 있는 곳이 꺼져 있어서 못 했어요."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.siteSilent": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥이"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes가"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 답하지 않아요."
+    }
+  ],
+  "timeline.appNotice.working": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가 있는 곳"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에서 하는 중"
+    }
+  ],
+  "timeline.appNotice.workingMinutes": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가 있는 곳"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에서 하는 중 · "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "분째"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
@@ -12924,10 +13270,116 @@ export const catalog: MessageCatalog = {
       "value": "입력창에 넣어 뒀어요. 보내면 에이전트가 다시 제안해요."
     }
   ],
+  "timeline.approvalDecision.decidedElsewhere": [
+    {
+      "type": 0,
+      "value": "다른 곳에서 이미 결정됐어요."
+    }
+  ],
+  "timeline.approvalDecision.expiredFirst": [
+    {
+      "type": 0,
+      "value": "결정 전에 만료됐어요."
+    }
+  ],
+  "timeline.approvalDecision.failedLoginExpired": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 로그인이 만료됐어요. 다시 로그인하면 결정할 수 있어요."
+    }
+  ],
+  "timeline.approvalDecision.failedNotAccepted": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 서버가 이 결정을 받지 않았어요. 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.failedRateLimited": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 요청이 잦아 서버가 이번 결정을 받지 않았어요."
+    }
+  ],
+  "timeline.approvalDecision.failedServerError": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 서버가 오류로 답했어요. 잠시 뒤에 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.forbidden": [
+    {
+      "type": 0,
+      "value": "이 승인을 결정할 권한이 없어요. 채널 멤버인지 확인해 주세요."
+    }
+  ],
+  "timeline.approvalDecision.idempotencyConflict": [
+    {
+      "type": 0,
+      "value": "같은 요청이 다른 결정으로 기록돼 있어요. 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.notFound": [
+    {
+      "type": 0,
+      "value": "이 승인 요청을 찾지 못했어요. 이미 정리됐을 수 있어요."
+    }
+  ],
+  "timeline.approvalDecision.roleRequired": [
+    {
+      "type": 0,
+      "value": "이 결정을 내릴 수 있는 역할이 아니에요. 이 요청은 아직 기다리고 있어요."
+    }
+  ],
+  "timeline.approvalDecision.sendTimeout": [
+    {
+      "type": 0,
+      "value": "서버가 제때 응답하지 않아 결정을 보내지 못했어요. 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.sendUnreached": [
+    {
+      "type": 0,
+      "value": "결정이 서버에 닿지 못했어요. 연결을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.unreadable": [
+    {
+      "type": 0,
+      "value": "서버 응답을 읽지 못했어요. 다시 눌러 주세요."
+    }
+  ],
   "timeline.approvalExpiry.soon": [
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.approvalNote.elsewhere": [
+    {
+      "type": 0,
+      "value": "이 결정은 인박스나 데스크탑 앱에서 할 수 있어요."
+    }
+  ],
+  "timeline.approvalNote.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "timeline.approvalNote.waitingNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 허락을 기다려요"
+    }
+  ],
+  "timeline.approvalNote.waitingOther": [
+    {
+      "type": 0,
+      "value": "다른 참여자의 허락을 기다려요"
     }
   ],
   "timeline.artifactNote.awaitingApproval": [
@@ -13263,6 +13715,38 @@ export const catalog: MessageCatalog = {
       "value": "스레드를 열고 운영자를 멘션해 주세요."
     }
   ],
+  "timeline.commandSuggest.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 제안했어요"
+    }
+  ],
   "timeline.commandSuggest.oneLineAiConnect": [
     {
       "type": 1,
@@ -13481,6 +13965,162 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "팀 AI 키 보기"
+    }
+  ],
+  "timeline.completion.checkDetailSpoken": [
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "timeline.completion.checkFail": [
+    {
+      "type": 0,
+      "value": "실패"
+    }
+  ],
+  "timeline.completion.checkPass": [
+    {
+      "type": 0,
+      "value": "통과"
+    }
+  ],
+  "timeline.completion.checkPending": [
+    {
+      "type": 0,
+      "value": "진행 중"
+    }
+  ],
+  "timeline.completion.checkSkip": [
+    {
+      "type": 0,
+      "value": "건너뜀"
+    }
+  ],
+  "timeline.completion.checkUnknown": [
+    {
+      "type": 0,
+      "value": "미상 결과"
+    }
+  ],
+  "timeline.completion.elapsedClock": [
+    {
+      "type": 0,
+      "value": "경과"
+    }
+  ],
+  "timeline.completion.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간"
+    }
+  ],
+  "timeline.completion.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "timeline.completion.elapsedSeconds": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초"
+    }
+  ],
+  "timeline.completion.elapsedSubSecond": [
+    {
+      "type": 0,
+      "value": "1초 미만"
+    }
+  ],
+  "timeline.completion.outcomeAttention": [
+    {
+      "type": 0,
+      "value": "확인 필요"
+    }
+  ],
+  "timeline.completion.outcomeClean": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "timeline.completion.surface": [
+    {
+      "type": 0,
+      "value": "표면"
+    }
+  ],
+  "timeline.completion.tallyItem": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.completion.workedLabel": [
+    {
+      "type": 0,
+      "value": "작업 시간"
+    }
+  ],
+  "timeline.completion.workedWithElapsed": [
+    {
+      "type": 0,
+      "value": "작업 시간 "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
+    }
+  ],
+  "timeline.copy.linkAction": [
+    {
+      "type": 0,
+      "value": "링크 복사하기"
+    }
+  ],
+  "timeline.copy.messageAction": [
+    {
+      "type": 0,
+      "value": "메시지 복사하기"
+    }
+  ],
+  "timeline.copy.messageDone": [
+    {
+      "type": 0,
+      "value": "메시지 복사됨"
     }
   ],
   "timeline.createChannel.privateDetail": [
@@ -13723,6 +14363,96 @@ export const catalog: MessageCatalog = {
       "value": "누르면 고친 시각을 보여 줘요"
     }
   ],
+  "timeline.emptyChannel.addMemberAction": [
+    {
+      "type": 0,
+      "value": "멤버 추가하기"
+    }
+  ],
+  "timeline.emptyChannel.channelDetail": [
+    {
+      "type": 0,
+      "value": "지금 쓴 메시지는 나중에 들어올 사람과 에이전트도 같은 자격으로 읽습니다."
+    }
+  ],
+  "timeline.emptyChannel.channelHeadline": [
+    {
+      "type": 0,
+      "value": "이 채널을 첫 메시지로 시작하세요."
+    }
+  ],
+  "timeline.emptyChannel.connectAgentAction": [
+    {
+      "type": 0,
+      "value": "에이전트 연결"
+    }
+  ],
+  "timeline.emptyChannel.dmAgentHeadline": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님에게 첫 일을 맡겨보세요."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroup": [
+    {
+      "type": 0,
+      "value": "여기 쓴 메시지는 이 대화에 있는 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "명이 함께 봅니다."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroupAgents": [
+    {
+      "type": 0,
+      "value": "여기 쓴 메시지는 이 대화에 있는 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "명이 함께 봅니다. 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailPair": [
+    {
+      "type": 0,
+      "value": "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다."
+    }
+  ],
+  "timeline.emptyChannel.dmHeadline": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지를 시작하세요."
+    }
+  ],
+  "timeline.emptyChannel.dmPeerHeadline": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화를 시작하세요."
+    }
+  ],
+  "timeline.emptyChannel.writeAction": [
+    {
+      "type": 0,
+      "value": "첫 메시지 쓰기"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -13751,6 +14481,150 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.loginHandoff.decisionLead": [
+    {
+      "type": 0,
+      "value": "에이전트가 사람의 개입을 기다립니다."
+    }
+  ],
+  "timeline.loginHandoff.decisionResume": [
+    {
+      "type": 0,
+      "value": "재개"
+    }
+  ],
+  "timeline.loginHandoff.decisionStop": [
+    {
+      "type": 0,
+      "value": "중단"
+    }
+  ],
+  "timeline.loginHandoff.deploymentNotice": [
+    {
+      "type": 0,
+      "value": "이 배포에서는 아직 화면 전송이 준비되지 않아, 채팅에서 화면을 여는 동선이 없습니다. 세션 화면을 연 뒤 개입을 마쳤다면 여기서 재개를 누르세요."
+    }
+  ],
+  "timeline.loginHandoff.detailExpired": [
+    {
+      "type": 0,
+      "value": "개입이 끝났다는 신호 없이 연결이 끊겼습니다. 에이전트는 완료를 가정하지 않고, 자기 화면에서 상태를 확인한 뒤 진행합니다."
+    }
+  ],
+  "timeline.loginHandoff.detailReturned": [
+    {
+      "type": 0,
+      "value": "사람이 개입을 마치고 화면을 돌려주었습니다. 에이전트는 로그인이 끝났다고 보고 이어서 진행합니다."
+    }
+  ],
+  "timeline.loginHandoff.detailReturnedWithoutWindow": [
+    {
+      "type": 0,
+      "value": "사람이 개입을 마쳤다고 알렸습니다. 이 배포에서는 조작 창이 열리지 않았으므로, 에이전트가 세션 화면에서 상태를 확인한 뒤 이어서 진행합니다."
+    }
+  ],
+  "timeline.loginHandoff.detailSessionEnded": [
+    {
+      "type": 0,
+      "value": "작업 세션이 끝나면서 조작 창도 닫혔습니다."
+    }
+  ],
+  "timeline.loginHandoff.elsewhere": [
+    {
+      "type": 0,
+      "value": "직접 조작은 데스크탑이나 웹에서 할 수 있습니다. 이 화면에서는 진행 상황만 보여 줍니다."
+    }
+  ],
+  "timeline.loginHandoff.inControl": [
+    {
+      "type": 0,
+      "value": "지금 이 세션 화면을 직접 조작하는 사람이 있습니다. 조작이 끝나면 여기서 재개하거나 중단할 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.inControlLead": [
+    {
+      "type": 0,
+      "value": "지금 이 세션 화면을 직접 조작하는 사람이 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 재개하거나 중단할 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.outcomeExpired": [
+    {
+      "type": 0,
+      "value": "완료 불확실"
+    }
+  ],
+  "timeline.loginHandoff.outcomeReturned": [
+    {
+      "type": 0,
+      "value": "개입 완료"
+    }
+  ],
+  "timeline.loginHandoff.outcomeSessionEnded": [
+    {
+      "type": 0,
+      "value": "세션 종료"
+    }
+  ],
+  "timeline.loginHandoff.phaseStopped": [
+    {
+      "type": 0,
+      "value": "중단됨"
+    }
+  ],
+  "timeline.loginHandoff.phaseWaiting": [
+    {
+      "type": 0,
+      "value": "개입 대기"
+    }
+  ],
+  "timeline.loginHandoff.stoppedCancelled": [
+    {
+      "type": 0,
+      "value": "대기 중이던 실행이 취소됐습니다."
+    }
+  ],
+  "timeline.loginHandoff.stoppedNeverStarted": [
+    {
+      "type": 0,
+      "value": "대기 중이던 실행이 취소됐습니다. 개입은 시작되지 않았습니다."
+    }
+  ],
+  "timeline.loginHandoff.title": [
+    {
+      "type": 0,
+      "value": "로그인 핸드오프 요청"
+    }
+  ],
+  "timeline.loginHandoff.waiting": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedExpired": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다. 직접 조작 창은 연결이 끊겨 닫혔습니다. 필요하면 다시 열 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedReturned": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다. 직접 조작 창은 닫혔습니다. 필요하면 다시 열 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedSessionEnded": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다. 작업 세션이 끝나면서 직접 조작 창도 닫혔습니다."
     }
   ],
   "timeline.memberPanel.agentKind": [
@@ -14150,6 +15024,34 @@ export const catalog: MessageCatalog = {
       "value": "에 고정"
     }
   ],
+  "timeline.quote.action": [
+    {
+      "type": 0,
+      "value": "인용해서 답하기"
+    }
+  ],
+  "timeline.quote.cancel": [
+    {
+      "type": 0,
+      "value": "인용 취소"
+    }
+  ],
+  "timeline.quote.deleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
+    }
+  ],
+  "timeline.quote.deletedSpoken": [
+    {
+      "type": 1,
+      "value": "head"
+    },
+    {
+      "type": 0,
+      "value": ", 삭제된 메시지"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 1,
@@ -14164,6 +15066,66 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "메시지에 답장"
+    }
+  ],
+  "timeline.quote.jump": [
+    {
+      "type": 0,
+      "value": "원본으로 이동"
+    }
+  ],
+  "timeline.quote.kindApproval": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "timeline.quote.kindArtifact": [
+    {
+      "type": 0,
+      "value": "산출물"
+    }
+  ],
+  "timeline.quote.kindCard": [
+    {
+      "type": 0,
+      "value": "카드 메시지"
+    }
+  ],
+  "timeline.quote.kindCompletionReport": [
+    {
+      "type": 0,
+      "value": "작업 완료 리포트"
+    }
+  ],
+  "timeline.quote.kindDiff": [
+    {
+      "type": 0,
+      "value": "코드 변경"
+    }
+  ],
+  "timeline.quote.kindSystem": [
+    {
+      "type": 0,
+      "value": "시스템 알림"
+    }
+  ],
+  "timeline.quote.kindToolCall": [
+    {
+      "type": 0,
+      "value": "도구 실행"
+    }
+  ],
+  "timeline.quote.kindToolResult": [
+    {
+      "type": 0,
+      "value": "도구 결과"
+    }
+  ],
+  "timeline.quote.nestedMark": [
+    {
+      "type": 0,
+      "value": "인용 포함"
     }
   ],
   "timeline.reaction.chipMine": [
@@ -14396,6 +15358,188 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "나(내 반응 취소)"
+    }
+  ],
+  "timeline.requestBundle.approvalRequest": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "timeline.requestBundle.cancelled": [
+    {
+      "type": 0,
+      "value": "요청이 취소됐어요"
+    }
+  ],
+  "timeline.requestBundle.chipAfterOnly": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 이후 값 "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.chipBeforeAfter": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 이전 값 "
+    },
+    {
+      "type": 1,
+      "value": "before"
+    },
+    {
+      "type": 0,
+      "value": ", 이후 값 "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.daysLeft": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "일 남음"
+    }
+  ],
+  "timeline.requestBundle.declined": [
+    {
+      "type": 0,
+      "value": "거부됐어요"
+    }
+  ],
+  "timeline.requestBundle.declinedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 거부했어요"
+    }
+  ],
+  "timeline.requestBundle.details": [
+    {
+      "type": 0,
+      "value": "자세히"
+    }
+  ],
+  "timeline.requestBundle.done": [
+    {
+      "type": 0,
+      "value": "실행을 마쳤어요"
+    }
+  ],
+  "timeline.requestBundle.executing": [
+    {
+      "type": 0,
+      "value": "승인됐어요 · 이어서 하는 중"
+    }
+  ],
+  "timeline.requestBundle.expiresSoon": [
+    {
+      "type": 0,
+      "value": "10분 안에 만료돼요"
+    }
+  ],
+  "timeline.requestBundle.failed": [
+    {
+      "type": 0,
+      "value": "실행을 끝내지 못했어요 · 다시 요청해 보세요"
+    }
+  ],
+  "timeline.requestBundle.hoursLeft": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "시간 남음"
+    }
+  ],
+  "timeline.requestBundle.minutesLeft": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "분 남음"
+    }
+  ],
+  "timeline.requestBundle.quietWithDetails": [
+    {
+      "type": 1,
+      "value": "quiet"
+    },
+    {
+      "type": 0,
+      "value": " · 자세히"
+    }
+  ],
+  "timeline.requestBundle.rationale": [
+    {
+      "type": 0,
+      "value": "사유"
+    }
+  ],
+  "timeline.requestBundle.requiredRole": [
+    {
+      "type": 0,
+      "value": "결정 권한"
+    }
+  ],
+  "timeline.requestBundle.thinking": [
+    {
+      "type": 0,
+      "value": "요청을 살펴보고 있어요"
+    }
+  ],
+  "timeline.requestBundle.toolRunNamed": [
+    {
+      "type": 0,
+      "value": "도구 「"
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": "」 실행"
+    }
+  ],
+  "timeline.requestBundle.waitingAdmin": [
+    {
+      "type": 0,
+      "value": "관리자의 승인을 기다려요"
+    }
+  ],
+  "timeline.requestBundle.waitingNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 승인을 기다려요"
     }
   ],
   "timeline.runException.open": [
@@ -14654,6 +15798,389 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "도우미가 제때 답하지 못함"
+    }
+  ],
+  "timeline.teamAiReply.appItem": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "timeline.teamAiReply.appItemVerb": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "verb"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "timeline.teamAiReply.appsLine": [
+    {
+      "type": 0,
+      "value": "쓴 앱: "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.appsSpoken": [
+    {
+      "type": 0,
+      "value": "쓴 앱, "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenHost": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", 새 창에서 열기"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenTitled": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", 새 창에서 열기"
+    }
+  ],
+  "timeline.teamAiReply.connected": [
+    {
+      "type": 0,
+      "value": "연결: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    }
+  ],
+  "timeline.teamAiReply.connectedMore": [
+    {
+      "type": 0,
+      "value": "연결: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "곳"
+    }
+  ],
+  "timeline.teamAiReply.detailsClose": [
+    {
+      "type": 0,
+      "value": "접기"
+    }
+  ],
+  "timeline.teamAiReply.detailsOpen": [
+    {
+      "type": 0,
+      "value": "자세히"
+    }
+  ],
+  "timeline.teamAiReply.exposure": [
+    {
+      "type": 0,
+      "value": "이 채널 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "명에게 보여요"
+    }
+  ],
+  "timeline.teamAiReply.modelChip": [
+    {
+      "type": 0,
+      "value": "팀 AI · "
+    },
+    {
+      "type": 1,
+      "value": "model"
+    }
+  ],
+  "timeline.teamAiReply.onBehalfOf": [
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 명의로 썼어요."
+    }
+  ],
+  "timeline.teamAiReply.otherApp": [
+    {
+      "type": 0,
+      "value": "다른 앱"
+    }
+  ],
+  "timeline.teamAiReply.personalNote": [
+    {
+      "type": 0,
+      "value": "개인 앱은 요약만 올리는 게 원칙이에요. oort는 지키는지 확인하지 못해요."
+    }
+  ],
+  "timeline.teamAiReply.ranOn": [
+    {
+      "type": 1,
+      "value": "site"
+    },
+    {
+      "type": 0,
+      "value": "에서 실행했어요."
+    }
+  ],
+  "timeline.teamAiReply.selfReport": [
+    {
+      "type": 0,
+      "value": "앱과 횟수는 에이전트가 알려 준 대로예요. oort는 확인하지 못해요."
+    }
+  ],
+  "timeline.teamAiReply.siteHermes": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
+  "timeline.teamAiReply.siteMac": [
+    {
+      "type": 0,
+      "value": "내 맥"
+    }
+  ],
+  "timeline.teamAiReply.sourceOpen": [
+    {
+      "type": 0,
+      "value": "출처 "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 열기, "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "timeline.teamAiReply.sourcesCount": [
+    {
+      "type": 0,
+      "value": "출처 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.teamAiReply.sourcesLabel": [
+    {
+      "type": 0,
+      "value": "출처"
+    }
+  ],
+  "timeline.teamAiReply.toolGetAgentRun": [
+    {
+      "type": 0,
+      "value": "작업 단계 보기"
+    }
+  ],
+  "timeline.teamAiReply.toolListAgentRuns": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 기록"
+    }
+  ],
+  "timeline.teamAiReply.toolListMembers": [
+    {
+      "type": 0,
+      "value": "멤버 목록"
+    }
+  ],
+  "timeline.teamAiReply.toolListPlugins": [
+    {
+      "type": 0,
+      "value": "앱 목록"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannel": [
+    {
+      "type": 0,
+      "value": "채널 읽기"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannelNamed": [
+    {
+      "type": 0,
+      "value": "#"
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": " 읽기"
+    }
+  ],
+  "timeline.teamAiReply.toolReadThread": [
+    {
+      "type": 0,
+      "value": "스레드 읽기"
+    }
+  ],
+  "timeline.teamAiReply.toolReadWorkspaceSettings": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
+    }
+  ],
+  "timeline.teamAiReply.toolSearchMessages": [
+    {
+      "type": 0,
+      "value": "메시지 검색"
+    }
+  ],
+  "timeline.teamAiReply.toolsLine": [
+    {
+      "type": 0,
+      "value": "찾아본 것: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    }
+  ],
+  "timeline.teamAiReply.toolsLineMore": [
+    {
+      "type": 0,
+      "value": "찾아본 것: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.teamAiReply.toolWebSearch": [
+    {
+      "type": 0,
+      "value": "웹 검색"
+    }
+  ],
+  "timeline.teamAiReply.verbCreate": [
+    {
+      "type": 0,
+      "value": "만들기"
+    }
+  ],
+  "timeline.teamAiReply.verbList": [
+    {
+      "type": 0,
+      "value": "목록"
+    }
+  ],
+  "timeline.teamAiReply.verbRead": [
+    {
+      "type": 0,
+      "value": "읽기"
+    }
+  ],
+  "timeline.teamAiReply.verbSearch": [
+    {
+      "type": 0,
+      "value": "검색"
+    }
+  ],
+  "timeline.teamAiReply.verbUpdate": [
+    {
+      "type": 0,
+      "value": "고치기"
     }
   ],
   "timeline.thread.followDismiss": [

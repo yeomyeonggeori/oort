@@ -6,7 +6,6 @@ import type { Message, QuotedMessage, RosterMember } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
 import { makeDirectory } from "../workspace/directory";
 import { hasRenderableBody } from "./bodySlot";
-import { COMPLETION_REPORT_TITLE } from "./completionReportCard";
 import { hasAnyAction } from "./model";
 import {
   canQuoteMessage,
@@ -14,17 +13,33 @@ import {
   isQuoteRedundant,
   messageAboveIds,
   quoteHeadAuthorId,
-  quoteBlockFrom,
-  quoteDraftFor,
+  quoteBlockFrom as buildQuoteBlock,
+  quoteDraftFor as buildQuoteDraft,
   quoteDraftStillValid,
   quoteExcerpt,
-  quotedKindLabel,
-  resolveQuote,
-  QUOTE_CARD_TEXT,
-  QUOTE_DELETED_TEXT,
+  quotedKindKey,
+  resolveQuote as buildResolveQuote,
+  QUOTE_CARD_KEY,
+  QUOTE_DELETED_KEY,
   QUOTE_EXCERPT_MAX_CHARS,
   QUOTE_EXCERPT_MAX_LINES,
 } from "./quote";
+
+// 인용 낱말은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 같은 한국어를 단정한다.
+const kf = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
+const quoteBlockFrom = (...args: Parameters<typeof buildQuoteBlock> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteBlock(kf, ...args);
+const quoteDraftFor = (...args: Parameters<typeof buildQuoteDraft> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteDraft(kf, ...args);
+const resolveQuote = (...args: Parameters<typeof buildResolveQuote> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildResolveQuote(kf, ...args);
+const quotedKindLabel = (type: string) => {
+  const key = quotedKindKey(type);
+  return key === null ? null : kf(key);
+};
+const COMPLETION_REPORT_TITLE = kf("timeline.quote.kindCompletionReport");
+const QUOTE_CARD_TEXT = kf(QUOTE_CARD_KEY);
+const QUOTE_DELETED_TEXT = kf(QUOTE_DELETED_KEY);
 
 function message(over: Partial<Message> = {}): Message {
   return {

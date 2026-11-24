@@ -1,5 +1,5 @@
 import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
-import { APPROVAL_OFFLINE_COPY } from "@momo/core/features/timeline/approvalNote";
+import { APPROVAL_OFFLINE_KEY } from "@momo/core/features/timeline/approvalNote";
 import { useConnection } from "@/features/common/connectionContext";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 
@@ -29,5 +29,5 @@ export function useComposerBlockedLine(): string {
 export function useApprovalBlockedLine(): string {
   const { view } = useConnection();
   const formatMessage = useFormatMessage();
-  return view.approvalNote === null ? APPROVAL_OFFLINE_COPY : formatMessage(view.approvalNote);
+  return formatMessage(view.approvalNote ?? APPROVAL_OFFLINE_KEY);
 }

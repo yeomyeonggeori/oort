@@ -1,9 +1,9 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {
-  QUOTE_ACTION_LABEL,
-  QUOTE_DELETED_TEXT,
-  QUOTE_NESTED_MARK,
-  quoteDraftFor,
+  QUOTE_ACTION_KEY,
+  QUOTE_DELETED_KEY,
+  QUOTE_NESTED_KEY,
+  quoteDraftFor as buildQuoteDraftFor,
   type QuoteBlock as QuoteBlockModel,
 } from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -25,6 +25,13 @@ import {
   QuoteDraftBar,
   quoteAccessibilityPhrase,
 } from '../src/features/conversation/Quote';
+
+const quoteFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const quoteDraftFor = (...args: Parameters<typeof buildQuoteDraftFor> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteDraftFor(quoteFormat, ...args);
+const QUOTE_ACTION_LABEL = quoteFormat(QUOTE_ACTION_KEY);
+const QUOTE_DELETED_TEXT = quoteFormat(QUOTE_DELETED_KEY);
+const QUOTE_NESTED_MARK = quoteFormat(QUOTE_NESTED_KEY);
 
 // =============================================================================
 // 인용 표면 — 스레드와 **다른 장치로 읽히는가**, 그리고 정직한가.

@@ -46,9 +46,10 @@ import {
   type AgentCardModel,
 } from '@momo/core/features/timeline/agentCardModel';
 import {
-  ACTION_RESULT_SECRET_ONCE_NOTE,
-  ACTION_RESULT_STATUS_LABEL,
+  ACTION_RESULT_SECRET_ONCE_KEY,
+  actionResultStatusLabel,
   actionResultStatusNote,
+  actionResultTitle,
   type ActionResultStatus,
   type AgentActionResultCard,
 } from '@momo/core/features/timeline/actionResultCard';
@@ -142,6 +143,7 @@ import {useLinkPreviewPreference} from './linkPreviewPreference';
 import {messageRowKey} from './rowViewability';
 import {NO_UNFURLS} from './useMessageUnfurls';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
+import type {LocaleService} from '@momo/core/i18n';
 import {useLocaleService} from '../../i18n/useLocaleService';
 import {editedMark} from '@momo/core/features/timeline/editedLabel';
 import {MessageEditorSheet} from './MessageEditorSheet';
@@ -263,23 +265,25 @@ import {
   type ApprovalNoteTone,
 } from '@momo/core/features/timeline/approvalNote';
 import {
-  LOGIN_HANDOFF_ELSEWHERE_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_LEAD,
-  loginHandoffOutcomeDetail,
-  loginHandoffStatusLabel,
-  loginHandoffStoppedCopy,
-  loginHandoffWaitingCopy,
+  LOGIN_HANDOFF_ELSEWHERE_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY,
+  loginHandoffOutcomeDetailKey,
+  loginHandoffStatusKey,
+  loginHandoffStoppedKey,
+  loginHandoffTitle,
+  loginHandoffWaitingKey,
   type LoginHandoffCard,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
-  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_LABEL_KEY,
+  completionReportTitle,
   COMPLETION_OUTCOME_TONE,
   completionCheckCounts,
   completionRowChecks,
   formatElapsed,
-  WORKED_ELAPSED_LABEL,
+
   type CompletionCheckOutcome,
   type CompletionReportCard,
   type CompletionTone,
@@ -1086,20 +1090,22 @@ function LoginHandoffCardView({
   styles: ReturnType<typeof buildStyles>;
   noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const settled = card.phase !== 'waiting';
   const underControl = card.control !== null && card.control.endedAtMs === null;
+  const outcomeDetailKey = loginHandoffOutcomeDetailKey(card);
   return (
     <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.title}
+          {loginHandoffTitle(formatMessage, card)}
         </Text>
         {/* 칩 색이 국면이 아니라 결과를 따르는 것은 웹과 같다. 폰의 팔레트에는
             `ok`·`warn`·`muted` 셋뿐이라 그 셋으로 옮긴다: 개입 완료는 `ok`,
             완료 불확실은 `warn`(사고가 아니라 불확실이므로 danger 가 아니다),
             세션 종료와 중단은 조용한 종결이라 `muted`. */}
         <StatusChip
-          label={loginHandoffStatusLabel(card)}
+          label={formatMessage(loginHandoffStatusKey(card))}
           tone={
             card.outcome === 'returned'
               ? 'ok'
@@ -1116,7 +1122,7 @@ function LoginHandoffCardView({
         // 창이 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다 (freeze M1).
         // 폰은 결정 동선이 없으므로 이 줄이 이 화면에서 창의 상태를 말하는
         // 유일한 자리다 — 조건도 문장도 코어가 답한다.
-        <Text style={styles.cardBody}>{loginHandoffWaitingCopy(card)}</Text>
+        <Text style={styles.cardBody}>{formatMessage(loginHandoffWaitingKey(card))}</Text>
       ) : null}
       {card.control !== null ? (
         <Text style={styles.cardMeta} testID="card-handoff-boundary">
@@ -1138,15 +1144,15 @@ function LoginHandoffCardView({
         <Text
           style={[styles.cardNote, noteStyle.blocked]}
           testID="card-handoff-in-control">
-          {LOGIN_HANDOFF_IN_CONTROL_LEAD}
+          {formatMessage(LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY)}
         </Text>
       ) : null}
-      {card.outcome !== null ? (
+      {outcomeDetailKey !== null ? (
         // 표를 그대로 인덱싱하지 않는다 (freeze M2). 창 없이 `returned` 인
         // 카드에서 「화면을 돌려주었습니다」는 실행기가 모델에게 하는 말과
         // 어긋난다.
         <Text style={styles.cardNote} testID="card-handoff-outcome">
-          {loginHandoffOutcomeDetail(card)}
+          {formatMessage(outcomeDetailKey)}
         </Text>
       ) : null}
       {card.phase === 'stopped' ? (
@@ -1154,7 +1160,7 @@ function LoginHandoffCardView({
         // stopped 카드에서 「개입은 시작되지 않았습니다」는 바로 윗줄의 경계 행
         // (정지 시각)과 모순된다.
         <Text style={styles.cardNote} testID="card-handoff-stopped">
-          {loginHandoffStoppedCopy(card)}
+          {formatMessage(loginHandoffStoppedKey(card))}
         </Text>
       ) : null}
       {/* 안내는 **대기 중일 때만** 선다. 끝난 카드에 「데스크톱에서 하세요」를
@@ -1164,7 +1170,7 @@ function LoginHandoffCardView({
         <Text
           style={[styles.cardNote, noteStyle.guidance]}
           testID="card-handoff-elsewhere">
-          {LOGIN_HANDOFF_ELSEWHERE_COPY}
+          {formatMessage(LOGIN_HANDOFF_ELSEWHERE_KEY)}
         </Text>
       ) : null}
     </AgentCardFrame>
@@ -1191,14 +1197,20 @@ function CompletionReportCardView({
   styles: ReturnType<typeof buildStyles>;
   toneStyle: ReturnType<typeof buildCompletionToneStyle>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const elapsed =
-    card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : '';
+    card.elapsedMs !== undefined ? formatElapsed(formatMessage, card.elapsedMs) : '';
   const counts = completionCheckCounts(card.gates);
   const tally = (
     ['pass', 'fail', 'skip', 'pending', 'unknown'] as CompletionCheckOutcome[]
   )
     .filter(outcome => counts[outcome] > 0)
-    .map(outcome => `${COMPLETION_CHECK_OUTCOME_LABEL[outcome]} ${counts[outcome]}`)
+    .map(outcome =>
+      formatMessage('timeline.completion.tallyItem', {
+        label: formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[outcome]),
+        count: counts[outcome],
+      }),
+    )
     .join(' · ');
   // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다 — 웹과 같은
   // 「N개 더」.
@@ -1211,12 +1223,12 @@ function CompletionReportCardView({
     <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.title}
+          {completionReportTitle(formatMessage, card)}
         </Text>
         {/* 국면이 아니라 결과가 색을 정한다 — 실패가 있으면 `warn`(사람을 부르는
             색), 없으면 `ok`. 웹과 같은 규칙, 폰 팔레트로. */}
         <StatusChip
-          label={COMPLETION_OUTCOME_LABEL[card.outcome]}
+          label={formatMessage(COMPLETION_OUTCOME_LABEL_KEY[card.outcome])}
           tone={COMPLETION_OUTCOME_TONE[card.outcome]}
         />
       </View>
@@ -1228,7 +1240,7 @@ function CompletionReportCardView({
         // 그 티켓이 온 이유(「실행 시간」)다. 여기서 낱말과 값을 잇는 것은 폰의
         // 배치일 뿐이다: 웹은 `LabeledRow` 두 칸으로, 폰은 한 줄로 세운다.
         <Text style={styles.cardMeta} testID="completion-elapsed">
-          {`${WORKED_ELAPSED_LABEL} ${elapsed}`}
+          {formatMessage('timeline.completion.workedWithElapsed', {elapsed})}
         </Text>
       ) : null}
       {card.actions.length > 0 ? (
@@ -1268,11 +1280,14 @@ function CompletionReportCardView({
                 key={index}
                 state={stepStateForCheck(check.outcome)}
                 label={check.label}
-                meta={check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
+                meta={check.detail ?? formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[check.outcome])}
                 metaStyle={toneStyle[COMPLETION_CHECK_TONE[check.outcome]]}
                 metaAccessibilityLabel={
                   check.detail !== undefined
-                    ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
+                    ? formatMessage('timeline.completion.checkDetailSpoken', {
+                        detail: check.detail,
+                        label: formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[check.outcome]),
+                      })
                     : undefined
                 }
               />
@@ -1430,6 +1445,7 @@ function ActionResultCardView({
   styles: ReturnType<typeof buildStyles>;
   noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const decidedBy =
     card.decidedByMemberId !== null
       ? memberFor(directory, card.decidedByMemberId)
@@ -1439,10 +1455,10 @@ function ActionResultCardView({
     <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.title}
+          {actionResultTitle(formatMessage, card)}
         </Text>
         <StatusChip
-          label={ACTION_RESULT_STATUS_LABEL[card.status]}
+          label={actionResultStatusLabel(formatMessage, card.status)}
           tone={ACTION_RESULT_TONE[card.status]}
         />
       </View>
@@ -1478,13 +1494,13 @@ function ActionResultCardView({
         </View>
       ) : null}
       <Sentence style={styles.cardBody} testID="action-result-note">
-        {actionResultStatusNote(card.status, card.actionId)}
+        {actionResultStatusNote(formatMessage, card.status, card.actionId)}
       </Sentence>
       {card.secretShownOnce ? (
         <Sentence
           style={[styles.cardNote, noteStyle.guidance]}
           testID="action-result-secret-once">
-          {ACTION_RESULT_SECRET_ONCE_NOTE}
+          {formatMessage(ACTION_RESULT_SECRET_ONCE_KEY)}
         </Sentence>
       ) : null}
       {elsewhere !== null ? (
@@ -1615,6 +1631,7 @@ function ApprovalActionRows({
 export function readApprovalCard(
   card: Extract<AgentCardModel, {kind: 'approval'}>,
   {
+    formatMessage,
     approvalGates,
     approvalReceipts,
     approvalOffline,
@@ -1623,6 +1640,8 @@ export function readApprovalCard(
     viewerMemberId,
     nameFor,
   }: {
+    /** 문장을 그리는 지금 언어의 사전. */
+    formatMessage: LocaleService['formatMessage'];
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
@@ -1688,7 +1707,7 @@ export function readApprovalCard(
     offline: approvalOffline === true,
     offlineText: approvalOfflineText,
     approvalsProvided,
-  });
+  }, formatMessage);
   return {approval, receipt, settledStatus, note};
 }
 
@@ -1761,6 +1780,7 @@ function AgentCard({
     // 곳에서 읽는다. 행의 로터(#2595)도 같은 답을 보고 「승인」·「거부」를 세운다 —
     // 두 자리가 따로 읽으면 버튼은 없는데 로터만 남는 날이 온다.
     const {approval, receipt, settledStatus, note} = readApprovalCard(card, {
+      formatMessage,
       approvalGates,
       approvalReceipts,
       approvalOffline,
@@ -2594,13 +2614,14 @@ function MessageRowInner({
     }),
     [message],
   );
+  const formatMessage = useFormatMessage();
   const requestSentence = useMemo(() => {
     if (!requestCardTarget) return undefined;
     const target = rowPresentation(requestCardTarget).card;
     return target?.kind === 'approval'
-      ? phoneRequestBundle(target, directory, undefined, null, undefined, nowMs, false, requestRun).sentence
+      ? phoneRequestBundle(formatMessage, target, directory, undefined, null, undefined, nowMs, false, requestRun).sentence
       : undefined;
-  }, [requestCardTarget, directory, nowMs, requestRun]);
+  }, [requestCardTarget, directory, formatMessage, nowMs, requestRun]);
   const suggestion = useMemo(
     () => commandSuggestCard(message, directory),
     [message, directory],
@@ -2613,11 +2634,11 @@ function MessageRowInner({
   // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
   const appsTail = useAppsTailContext(message, directory, actions?.workspaceId);
   const teamAiReply = useMemo(
-    () => teamAiReplyMetaFor(message, appsTail, authorKind),
-    [message, appsTail, authorKind],
+    () => teamAiReplyMetaFor(formatMessage, message, appsTail, authorKind),
+    [formatMessage, message, appsTail, authorKind],
   );
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
-  const appNotice = useAppNotice(message, actions?.workspaceId, nowMs);
+  const appNotice = useAppNotice(message, actions?.workspaceId, nowMs, formatMessage);
   // 폰의 행동은 「웹에서 열기」 하나다. 열 곳(서버 주소)을 모르면 세우지 않는다.
   const appNoticeWebUrl = appNotice?.action ? appsOnWebUrl() : null;
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
@@ -2672,6 +2693,7 @@ function MessageRowInner({
       return null;
     }
     const read = readApprovalCard(card, {
+      formatMessage,
       viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
@@ -2680,7 +2702,7 @@ function MessageRowInner({
     });
     if (read.note !== null || read.approval === null) return null;
     if (hasRequestBundle(card)) {
-      const bundle = phoneRequestBundle(card, directory, actions?.myMemberId, read.approval, read.receipt, nowMs, approvalOffline, requestRun);
+      const bundle = phoneRequestBundle(formatMessage, card, directory, actions?.myMemberId, read.approval, read.receipt, nowMs, approvalOffline, requestRun);
       if (!bundle.canDecide || (bundle.decisionMode === 'open' && actions?.onOpenDecision)) return null;
     }
     // 실행할 호스트가 하나도 없는 스폰 승인은 버튼도 꺼져 있다. 로터에도 세우지 않는다.
@@ -2693,6 +2715,7 @@ function MessageRowInner({
     approvalsProvided,
     directory,
     actions,
+    formatMessage,
     nowMs,
     requestRun,
   ]);
@@ -2704,6 +2727,7 @@ function MessageRowInner({
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
     const read = readApprovalCard(card, {
+      formatMessage,
       viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
@@ -2718,6 +2742,7 @@ function MessageRowInner({
     approvalReceipts,
     approvalOffline,
     approvalsProvided,
+    formatMessage,
     onOpenMessage,
   ]);
   const deleted = message.state === 'deleted';
@@ -2794,13 +2819,12 @@ function MessageRowInner({
   //      액션 시트)와 다른 문이고, 카드가 제 손가락을 먼저 받으므로 둘이 다투지 않는다.
   // 묘비에는 카드가 없다: 지워진 본문에 달린 미리보기를 보이는 것은 지워진 것이 무엇인지 말을 어긋나게 한다.
   // ===========================================================================
-  const formatMessage = useFormatMessage();
   // 시각을 문장으로 짓는 화면은 언어 서비스를 통째로 읽는다(`useFormatMessage` 는 `formatMessage` 만 준다, #5026).
   const locale = useLocaleService();
   // 한 접근성 원소가 읽는 답글 머리(「○○님 스레드에 답글」) — 줄(`ReplyHomeLine`)과 **같은 코어 문장**이고 화살표는 읽지 않는다(#4888).
   const replyToSpoken =
     isMarkedReply && !deleted && message.rootId !== undefined
-      ? replyHomeCopy(replyHomeLineOf(message.rootId, replyParent ?? undefined), {
+      ? replyHomeCopy(replyHomeLineOf(formatMessage, message.rootId, replyParent ?? undefined), {
           directory,
           myMemberId: actions?.myMemberId,
           formatMessage,
@@ -3157,7 +3181,7 @@ function MessageRowInner({
       });
     });
     // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
-    if (!deleted) list.push(...teamAiCitationActions(teamAiReply));
+    if (!deleted) list.push(...teamAiCitationActions(formatMessage, teamAiReply));
     // 막힘 문장의 행동(웹에서 열기). 손가락은 문장 옆 링크를 누른다.
     if (!deleted && appNotice?.action && appNoticeWebUrl !== null) {
       list.push({name: APP_NOTICE_ACTION_NAME, label: appNotice.action.label});
@@ -3357,7 +3381,7 @@ function MessageRowInner({
         // 앱을 쓰다 막힌 문장, 그리고 도우미 답의 꼬리(쓴 앱 · 찾아본 것 · 모델 라벨 · 출처 수).
         ...appNoticeSpoken(appNotice),
         ...(githubNotice !== null && !deleted ? [githubNoticeLabel(githubNotice)] : []),
-        ...teamAiReplySpoken(teamAiReply),
+        ...teamAiReplySpoken(formatMessage, teamAiReply),
         // 링크 카드(#4883): 「링크 미리보기: 제목, 도메인」(동영상이면 「, 동영상」). 행이 원소 하나라 귀에는 여기로만 닿는다.
         ...unfurlSpoken,
       ].join(', ')}

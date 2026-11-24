@@ -12,7 +12,7 @@ const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 
 const context: RequestBundleContext = {
-  nowMs: 1000, viewerKind: "human", viewerMemberId: "reviewer", canDecide: true,
+  nowMs: 1000, formatMessage: ko, viewerKind: "human", viewerMemberId: "reviewer", canDecide: true,
 };
 function card(id: string, patch: Partial<AgentApprovalCard> = {}, facts = context) {
   const approval: AgentApprovalCard = {

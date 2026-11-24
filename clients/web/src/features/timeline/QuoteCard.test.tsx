@@ -6,7 +6,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, QuotedMessage, RosterMember } from "@momo/core/lib/api";
 import type { PendingMessage } from "@momo/core/features/timeline/model";
-import { quoteBlockFrom } from "@momo/core/features/timeline/quote";
+import { quoteBlockFrom as buildQuoteBlock } from "@momo/core/features/timeline/quote";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
@@ -18,6 +20,10 @@ import { PendingRow } from "./PendingRow";
 import { QuoteChip } from "./QuoteBlock";
 import { ThreadPanel } from "./ThreadPanel";
 import { Timeline } from "./Timeline";
+
+const koFormat = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
+const quoteBlockFrom = (...args: Parameters<typeof buildQuoteBlock> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteBlock(koFormat, ...args);
 
 // =============================================================================
 // 인용 = 답장 카드의 윗칸 머리 (#5381, Q4 — owner 2026-11-05).

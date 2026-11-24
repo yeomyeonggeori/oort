@@ -27,7 +27,8 @@
 // 순수 모듈이다. 웹과 폰이 같은 함수를 부른다.
 // =============================================================================
 
-import { attachParticle } from "../../lib/koreanParticle";
+import type { LocaleService } from "../../i18n/context";
+import { takesFinalForm } from "../../lib/koreanParticle";
 import { AI_EXTERNAL_ROWS } from "../ai/aiHubModel";
 import type { Message } from "../../lib/api";
 import type { AppsTailPlugin } from "./teamAiReply";
@@ -84,6 +85,8 @@ export interface AppNoticeEnv {
   plugins: ReadonlyMap<string, AppsTailPlugin>;
   /** 지금(에포크 ms). `working` 의 「n분째」가 이 값에서 나온다. */
   nowMs: number;
+  /** 문장을 그리는 지금 언어의 사전. */
+  formatMessage: LocaleService["formatMessage"];
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -102,11 +105,6 @@ function text(value: unknown, max: number): string | null {
 
 function siteOf(value: unknown): AppNoticeSite | null {
   return value === "mac" || value === "hermes" ? value : null;
-}
-
-/** 「내 맥」「Hermes」. 모르면 null. */
-function siteName(site: AppNoticeSite | null): string | null {
-  return site === "mac" ? "내 맥" : site === "hermes" ? "Hermes" : null;
 }
 
 /** 1분 미만은 「1분째」. 시계가 거꾸로 가면(음수) 0이 아니라 1분으로 둔다. */
@@ -128,9 +126,10 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
   const pluginId = text(raw["plugin_id"], 64);
   const plugin = pluginId === null ? undefined : env.plugins.get(pluginId);
   const appName = text(plugin?.name, 24);
-  // 이름을 모르면 「이 앱」: 원문 id 를 사람에게 보이지 않는다.
-  const app = appName ?? "이 앱";
-  const where = siteName(site);
+  // 이름을 모르면 「이 앱」: 원문 id 를 사람에게 보이지 않는다(이름 없는 문장이 따로 있다).
+  const { formatMessage } = env;
+  // 실행 장소를 모르면 `other` 로 가르는 문장이 장소 없이 성립한다.
+  const place = site ?? "other";
   const phone = env.surface === "phone";
 
   switch (kind as AppNoticeKind) {
@@ -138,22 +137,14 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       // 꺼진 곳이 내 맥이면 사람이 할 일은 맥을 켜는 것이다. 버튼이 아니라 문장이 말한다.
       return {
         kind: "site_off",
-        sentence:
-          site === "mac"
-            ? "내 맥이 꺼져 있어서 못 했어요. 맥을 켜면 다시 해 볼게요."
-            : where === null
-              ? "에이전트가 있는 곳이 꺼져 있어서 못 했어요."
-              : `${attachParticle(where, "subject")} 꺼져 있어서 못 했어요.`,
+        sentence: formatMessage("timeline.appNotice.siteOff", { site: place }),
         action: null,
         progress: false,
       };
     case "site_silent":
       return {
         kind: "site_silent",
-        sentence:
-          where === null
-            ? "에이전트가 답하지 않아요."
-            : `${attachParticle(where, "subject")} 답하지 않아요.`,
+        sentence: formatMessage("timeline.appNotice.siteSilent", { site: place }),
         action: null,
         progress: false,
       };
@@ -164,7 +155,9 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       if (site === null) {
         return {
           kind: "login_lost",
-          sentence: `${app} 로그인이 끊겼어요.`,
+          sentence: appName === null
+            ? formatMessage("timeline.appNotice.loginLostUnnamed")
+            : formatMessage("timeline.appNotice.loginLostNamed", { app: appName }),
           action: null,
           progress: false,
         };
@@ -172,29 +165,38 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       return site === "hermes"
         ? {
             kind: "login_lost",
-            sentence: `${app} 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요.`,
+            sentence: appName === null
+              ? formatMessage("timeline.appNotice.loginLostHermesUnnamed")
+              : formatMessage("timeline.appNotice.loginLostHermesNamed", { app: appName }),
             action: null,
             progress: false,
           }
         : {
             kind: "login_lost",
-            sentence: `${app} 로그인이 끊겼어요.`,
+            sentence: appName === null
+              ? formatMessage("timeline.appNotice.loginLostUnnamed")
+              : formatMessage("timeline.appNotice.loginLostNamed", { app: appName }),
             action: phone
-              ? { kind: "web", label: "웹에서 열기" }
-              : { kind: "apps", label: "다시 로그인" },
+              ? { kind: "web", label: formatMessage("timeline.appNotice.openOnWeb") }
+              : { kind: "apps", label: formatMessage("timeline.appNotice.signInAgain") },
             progress: false,
           };
     case "grant_revoked":
       return {
         kind: "grant_revoked",
-        sentence: "실행 중에 허용이 회수돼서 여기서 멈췄어요. 이미 한 일은 그대로예요.",
+        sentence: formatMessage("timeline.appNotice.grantRevoked"),
         action: null,
         progress: false,
       };
     case "rate_limited":
       return {
         kind: "rate_limited",
-        sentence: `${attachParticle(app, "subject")} 잠시 요청을 막았어요. 1분 뒤 다시 해 주세요.`,
+        sentence: appName === null
+          ? formatMessage("timeline.appNotice.rateLimitedUnnamed")
+          : formatMessage("timeline.appNotice.rateLimitedNamed", {
+              app: appName,
+              josa: takesFinalForm(appName) ? "final" : "other",
+            }),
         action: null,
         progress: false,
       };
@@ -204,7 +206,9 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       const known = host !== null && (plugin?.egressDomains ?? []).includes(host);
       return {
         kind: "egress_blocked",
-        sentence: `에이전트가 ${known ? `${host}에` : "바깥에"} 연결할 수 없어요.`,
+        sentence: known
+          ? formatMessage("timeline.appNotice.egressKnown", { host })
+          : formatMessage("timeline.appNotice.egressOutside"),
         action: null,
         progress: false,
       };
@@ -213,14 +217,14 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
       return phone
         ? {
             kind: "not_allowed",
-            sentence: "이 앱은 데스크탑이나 웹에서 허용해 주세요.",
-            action: { kind: "web", label: "웹에서 열기" },
+            sentence: formatMessage("timeline.appNotice.notAllowedPhone"),
+            action: { kind: "web", label: formatMessage("timeline.appNotice.openOnWeb") },
             progress: false,
           }
         : {
             kind: "not_allowed",
-            sentence: "먼저 내 사용을 허용해 주세요.",
-            action: { kind: "apps", label: "앱 열기" },
+            sentence: formatMessage("timeline.appNotice.notAllowedWeb"),
+            action: { kind: "apps", label: formatMessage("timeline.appNotice.openApp") },
             progress: false,
           };
     case "working": {
@@ -232,7 +236,10 @@ export function parseAppNotice(props: Props, env: AppNoticeEnv): AppNotice | nul
           : null;
       return {
         kind: "working",
-        sentence: `${where ?? "에이전트가 있는 곳"}에서 하는 중${minutes === null ? "" : ` · ${minutes}분째`}`,
+        sentence:
+          minutes === null
+            ? formatMessage("timeline.appNotice.working", { site: place })
+            : formatMessage("timeline.appNotice.workingMinutes", { site: place, minutes }),
         action: null,
         progress: true,
       };

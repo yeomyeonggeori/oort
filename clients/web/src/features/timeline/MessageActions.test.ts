@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 import {
-  COPY_LINK_ACTION_LABEL,
-  COPY_LINK_DONE_LABEL,
-  COPY_MESSAGE_ACTION_LABEL,
-  COPY_MESSAGE_DONE_LABEL,
+  COPY_LINK_ACTION_KEY,
+  COPY_LINK_DONE_KEY,
+  COPY_MESSAGE_ACTION_KEY,
+  COPY_MESSAGE_DONE_KEY,
 } from "@momo/core/features/timeline/copyLabels";
 import {
   actionKeepsMenuOpen,
@@ -227,10 +227,10 @@ describe("메시지 액션 세 표면", () => {
   it("복사는 렌더된 HTML이 아니라 본문 원문을 받는 독립 액션이다", () => {
     const items = messageActionItemsForSurface("menu", available, copyReady);
     const copy = items.find((item) => item.key === "copy");
-    expect(COPY_MESSAGE_ACTION_LABEL).toBe("메시지 복사하기");
+    expect(ko(COPY_MESSAGE_ACTION_KEY)).toBe("메시지 복사하기");
     expect(copy).toMatchObject({
-      label: COPY_MESSAGE_ACTION_LABEL,
-      accessibleLabel: COPY_MESSAGE_ACTION_LABEL,
+      labelKey: COPY_MESSAGE_ACTION_KEY,
+      accessibleLabelKey: COPY_MESSAGE_ACTION_KEY,
     });
     expect(items.findIndex((item) => item.key === "copy")).toBeGreaterThan(
       items.findIndex((item) => item.key === "quote")
@@ -243,8 +243,8 @@ describe("메시지 액션 세 표면", () => {
       copied: true,
     }).find((item) => item.key === "copy");
     expect(copy).toMatchObject({
-      label: COPY_MESSAGE_DONE_LABEL,
-      accessibleLabel: COPY_MESSAGE_DONE_LABEL,
+      labelKey: COPY_MESSAGE_DONE_KEY,
+      accessibleLabelKey: COPY_MESSAGE_DONE_KEY,
     });
   });
 
@@ -255,12 +255,12 @@ describe("메시지 액션 세 표면", () => {
         available,
         copyReady
       ).find((entry) => entry.key === "copy-link");
-      expect(COPY_LINK_ACTION_LABEL).toBe("링크 복사하기");
+      expect(ko(COPY_LINK_ACTION_KEY)).toBe("링크 복사하기");
       expect(item).toMatchObject({
         key: "copy-link",
         testKey: "copy-link",
-        label: COPY_LINK_ACTION_LABEL,
-        accessibleLabel: COPY_LINK_ACTION_LABEL,
+        labelKey: COPY_LINK_ACTION_KEY,
+        accessibleLabelKey: COPY_LINK_ACTION_KEY,
       });
       return labelOf(item);
     });
@@ -279,8 +279,8 @@ describe("메시지 액션 세 표면", () => {
       ...copyReady,
       copiedLink: true,
     }).find((entry) => entry.key === "copy-link");
-    expect(labelOf(item)).toBe(COPY_LINK_DONE_LABEL);
-    expect(item?.accessibleLabel).toBe(COPY_LINK_DONE_LABEL);
+    expect(labelOf(item)).toBe(ko(COPY_LINK_DONE_KEY));
+    expect(item?.accessibleLabelKey).toBe(COPY_LINK_DONE_KEY);
   });
 
   it("클립보드 항목만 메뉴를 닫지 않는다(반응 고르기는 이제 메뉴에 없다)", () => {

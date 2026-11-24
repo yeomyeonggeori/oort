@@ -330,7 +330,7 @@ export const CHANNEL_COPY_NAME_KEY = "channels.menu.copyName" satisfies PlainMes
 /** 이름이 클립보드에 올라간 뒤의 영수증. */
 export const CHANNEL_COPY_NAME_DONE_KEY = "channels.menu.copyNameDone" satisfies PlainMessageKey;
 
-/** 복사 항목의 낱말도 상태다 — `copyLinkActionLabel`과 같은 결. */
+/** 복사 항목의 낱말도 상태다 — `copyLinkActionKey`와 같은 결. */
 export function channelCopyNameKey(copied: boolean): PlainMessageKey {
   return copied ? CHANNEL_COPY_NAME_DONE_KEY : CHANNEL_COPY_NAME_KEY;
 }

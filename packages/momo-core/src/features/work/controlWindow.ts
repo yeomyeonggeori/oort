@@ -1,7 +1,8 @@
+import type { LocaleService } from "../../i18n/context";
 import type { WorkSessionControlFrame } from "../../lib/realtimeEvents";
 import {
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
-  LOGIN_HANDOFF_OUTCOME_LABEL,
+  LOGIN_HANDOFF_OUTCOME_DETAIL_KEY,
+  LOGIN_HANDOFF_OUTCOME_LABEL_KEY,
   parseLoginHandoffOutcome,
   type LoginHandoffOutcome,
 } from "../timeline/loginHandoffCard";
@@ -86,7 +87,8 @@ export interface ControlWindowView {
  */
 export function controlWindowNotice(
   frame: WorkSessionControlFrame,
-  sessionId: string
+  sessionId: string,
+  formatMessage: LocaleService["formatMessage"]
 ): ControlWindowNotice | null {
   if (frame.payload.session_id.toLowerCase() !== sessionId.toLowerCase()) {
     return null;
@@ -115,14 +117,17 @@ export function controlWindowNotice(
     detail:
       outcome === null
         ? "에이전트가 이 세션에서 다시 실행됩니다."
-        : LOGIN_HANDOFF_OUTCOME_DETAIL[outcome],
+        : formatMessage(LOGIN_HANDOFF_OUTCOME_DETAIL_KEY[outcome]),
   };
 }
 
 /** 칩 한 낱말. 카드와 같은 표를 쓴다. */
-export function controlWindowLabel(notice: ControlWindowNotice): string {
+export function controlWindowLabel(
+  notice: ControlWindowNotice,
+  formatMessage: LocaleService["formatMessage"]
+): string {
   return notice.outcome !== null
-    ? LOGIN_HANDOFF_OUTCOME_LABEL[notice.outcome]
+    ? formatMessage(LOGIN_HANDOFF_OUTCOME_LABEL_KEY[notice.outcome])
     : notice.state === "open"
       ? "조작 중"
       : "종료됨";
@@ -141,11 +146,12 @@ export function controlWindowLabel(notice: ControlWindowNotice): string {
  */
 export function latestControlNotice(
   frames: readonly WorkSessionControlFrame[],
-  sessionId: string
+  sessionId: string,
+  formatMessage: LocaleService["formatMessage"]
 ): ControlWindowNotice | null {
   let latest: ControlWindowNotice | null = null;
   for (const frame of frames) {
-    const notice = controlWindowNotice(frame, sessionId);
+    const notice = controlWindowNotice(frame, sessionId, formatMessage);
     if (notice === null) continue;
     if (latest === null) {
       latest = notice;

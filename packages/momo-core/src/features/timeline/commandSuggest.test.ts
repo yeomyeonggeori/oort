@@ -87,7 +87,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
       forMemberId: HUMAN,
       agentName: "hermes",
     });
-    expect(commandSuggestHead(card!)).toBe("hermes가 제안했어요");
+    expect(commandSuggestHead(ko, card!)).toBe("hermes가 제안했어요");
     expect(commandSuggestOneLine(ko, card!)).toBe("구민수에게 AI 계정 연결을 제안했어요");
   });
 
@@ -172,7 +172,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
       member(AGENT, "agent", "김인턴", "kim"),
     ]);
     const card = commandSuggestCard(suggestMessage(G3), dir)!;
-    expect(commandSuggestHead(card)).toBe("김인턴이 제안했어요");
+    expect(commandSuggestHead(ko, card)).toBe("김인턴이 제안했어요");
   });
 
   it("운영자에게 부탁하기: owner·admin 사람만, 나는 빼고 멘션만", () => {

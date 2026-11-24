@@ -16,6 +16,12 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { MessageRow } from "./MessageRow";
 import { ChannelAudienceContext } from "./appsTail";
 import { resetSettledApprovalsForTest } from "./settledApprovals";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
 
 const listPlugins = vi.hoisted(() => vi.fn());
 const fetchAgentRunDetail = vi.hoisted(() => vi.fn());
@@ -76,7 +82,8 @@ const act_ = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: bool
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   act_.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,
@@ -144,7 +151,7 @@ async function mount(node: ReactElement, audience: number | null = null): Promis
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
     root?.render(
-      createElement(
+      withKo(createElement(
         MemoryRouter,
         null,
         createElement(
@@ -160,7 +167,7 @@ async function mount(node: ReactElement, audience: number | null = null): Promis
             )
           )
         )
-      )
+      ))
     );
   });
   // 앱 목록 → run 상세 순서로 두 번 흐른다.

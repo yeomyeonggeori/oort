@@ -293,6 +293,7 @@ async function main() {
         deviceScaleFactor: 2,
         colorScheme: "light",
         reducedMotion: "reduce",
+        locale: "ko-KR",
       });
       await installMocks(context, { messages: MESSAGES, decisionStatus: 200 });
       const page = await openChannel(context);

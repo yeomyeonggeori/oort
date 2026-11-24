@@ -97,6 +97,7 @@ import {
   actionKeepsMenuOpen,
   messageActionGroups,
   messageActionItemsForSurface,
+  messageActionAccessibleLabel,
   messageActionLabel,
   messageToolbarItems,
   type MessageActionCopyState,
@@ -238,7 +239,7 @@ function ActionMenuItem({
   const formatMessage = useFormatMessage();
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
-    "aria-label": item.accessibleLabel,
+    "aria-label": messageActionAccessibleLabel(item, formatMessage),
     tone: item.tone,
     onSelect: (event: Event) => {
       // Copy receipts only work while the row stays visible: the label flips in
@@ -691,7 +692,7 @@ export function MessageActionSheet({
                 key={item.key}
                 type="button"
                 data-testid={`sheet-${item.testKey}`}
-                aria-label={item.accessibleLabel}
+                aria-label={messageActionAccessibleLabel(item, formatMessage)}
                 onClick={() => {
                   invokeAction(item.key, callbacks, onOpenPicker);
                   close();

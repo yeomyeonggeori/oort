@@ -1,3 +1,4 @@
+import type { LocaleService } from "../../i18n/context";
 import type {
   AgentRunProgress,
   ApprovalDecisionMode,
@@ -376,6 +377,8 @@ export function requestBundleDecisionMode(
 
 export interface RequestBundleContext {
   nowMs: number;
+  /** 문장을 그리는 지금 언어의 사전. */
+  formatMessage: LocaleService["formatMessage"];
   run?: Pick<AgentRunProgress, "phase" | "endReason">;
   /** 현재 명부에서 결정자의 이름을 읽어요. */
   nameFor?: (memberId: string) => string | undefined;
@@ -437,22 +440,32 @@ const DAY_MS = 86_400_000;
  */
 export function remainingTime(
   expiresAtMs: number | undefined,
-  nowMs: number
+  nowMs: number,
+  formatMessage: LocaleService["formatMessage"]
 ): string | undefined {
   if (expiresAtMs === undefined || expiresAtMs <= nowMs) return undefined;
   const remaining = expiresAtMs - nowMs;
-  if (remaining <= EXPIRY_WARN_MS) return "10분 안에 만료돼요";
-  if (remaining < HOUR_MS) return `${Math.floor(remaining / MINUTE_MS)}분 남음`;
-  if (remaining < DAY_MS) return `${Math.floor(remaining / HOUR_MS)}시간 남음`;
-  return `${Math.floor(remaining / DAY_MS)}일 남음`;
+  if (remaining <= EXPIRY_WARN_MS) return formatMessage("timeline.requestBundle.expiresSoon");
+  if (remaining < HOUR_MS) {
+    return formatMessage("timeline.requestBundle.minutesLeft", { count: Math.floor(remaining / MINUTE_MS) });
+  }
+  if (remaining < DAY_MS) {
+    return formatMessage("timeline.requestBundle.hoursLeft", { count: Math.floor(remaining / HOUR_MS) });
+  }
+  return formatMessage("timeline.requestBundle.daysLeft", { count: Math.floor(remaining / DAY_MS) });
 }
 
 /**
  * 결정자가 아닌 사람에게 승인 카드가 하는 대기 한 줄: 결정자 한 사람을 알면 그 이름, 모르면 「관리자」. 카드(`requestBundleModel`의
  * `waitingFor`)와 「작업 · 내 작업」의 결과 칸(#5640)이 이 한 문장을 같이 읽는다.
  */
-export function approvalWaitingLine(approverName?: string): string {
-  return approverName ? `${approverName} 님의 승인을 기다려요` : "관리자의 승인을 기다려요";
+export function approvalWaitingLine(
+  formatMessage: LocaleService["formatMessage"],
+  approverName?: string
+): string {
+  return approverName
+    ? formatMessage("timeline.requestBundle.waitingNamed", { name: approverName })
+    : formatMessage("timeline.requestBundle.waitingAdmin");
 }
 
 export function requestBundleModel(
@@ -460,6 +473,7 @@ export function requestBundleModel(
   context: RequestBundleContext
 ): RequestBundleModel {
   const bundle = card.bundle;
+  const { formatMessage } = context;
   const state = requestBundleState({
     ...bundle,
     status: bundle?.status ?? card.status,
@@ -478,7 +492,9 @@ export function requestBundleModel(
   const intent =
     bundle?.intent ??
     (card.title === "도구 실행 · 실패" ? undefined : publicCopy(card.title)) ??
-    (bundle?.toolName ? `도구 「${bundle.toolName}」 실행` : "승인 요청");
+    (bundle?.toolName
+      ? formatMessage("timeline.requestBundle.toolRunNamed", { tool: bundle.toolName })
+      : formatMessage("timeline.requestBundle.approvalRequest"));
   // 값 뒤에 조사를 붙이지 않는 기본 틀. 영문·숫자·기호 끝도 같은 문법이에요.
   const headline = proposer ? `${proposer} · ${intent}` : intent;
   const decider =
@@ -486,14 +502,16 @@ export function requestBundleModel(
       ? undefined
       : context.nameFor?.(card.decidedByMemberId);
   const sentences: Record<RequestBundleState, string> = {
-    thinking: "요청을 살펴보고 있어요",
+    thinking: formatMessage("timeline.requestBundle.thinking"),
     approval: headline,
-    executing: "승인됐어요 · 이어서 하는 중",
-    done: "실행을 마쳤어요",
-    declined: decider ? `${decider} 님이 거부했어요` : "거부됐어요",
+    executing: formatMessage("timeline.requestBundle.executing"),
+    done: formatMessage("timeline.requestBundle.done"),
+    declined: decider
+      ? formatMessage("timeline.requestBundle.declinedBy", { name: decider })
+      : formatMessage("timeline.requestBundle.declined"),
     expired: APPROVAL_EXPIRED_SENTENCE,
-    failed: "실행을 끝내지 못했어요 · 다시 요청해 보세요",
-    cancelled: "요청이 취소됐어요",
+    failed: formatMessage("timeline.requestBundle.failed"),
+    cancelled: formatMessage("timeline.requestBundle.cancelled"),
   };
   // ADR-0217: 참여자 동의 카드는 카드에 고정된 사람 하나만 결정해요. 그 밖의 사람은 요청자든 다른
   // 참여자든 관리자든 기다리는 쪽이에요. 다른 승인 카드는 이 판정에 걸리지 않아요.
@@ -523,10 +541,11 @@ export function requestBundleModel(
       ? isParticipantConsent(card.action)
         ? waitsForPerson
           ? participantWaitingLine(
+              formatMessage,
               target === undefined ? undefined : context.nameFor?.(target)
             )
           : undefined
-        : approvalWaitingLine(approver)
+        : approvalWaitingLine(formatMessage, approver)
       : undefined;
   const result = bundle?.result;
   const rows =
@@ -543,12 +562,16 @@ export function requestBundleModel(
       row.after === undefined
         ? `${row.label}: ${row.value}`
         : row.before === undefined
-        ? `${row.label}: 이후 값 ${row.after}`
-        : `${row.label}: 이전 값 ${row.before}, 이후 값 ${row.after}`,
+        ? formatMessage("timeline.requestBundle.chipAfterOnly", { label: row.label, after: row.after })
+        : formatMessage("timeline.requestBundle.chipBeforeAfter", {
+            label: row.label,
+            before: row.before,
+            after: row.after,
+          }),
   }));
   const quiet =
     state === "approval"
-      ? remainingTime(card.expiresAtMs, context.nowMs)
+      ? remainingTime(card.expiresAtMs, context.nowMs, formatMessage)
       : undefined;
   // ADR-0218 G3.8: 코드가 정본이에요. 거부·만료·실패·취소로 닫힌 카드가 생성·조립 실패 코드를
   // 싣고 있으면 그 코드의 골든 줄이 일반 상태 문장보다 앞서요(서버가 같은 줄을 body에 써요).
@@ -571,22 +594,24 @@ export function requestBundleModel(
     sentence: resultLine ?? codeLine ?? sentences[state],
     valueChips,
     moreValues: Math.max(0, rows.length - 2) + omittedRows,
-    quietLine: quiet ? `${quiet} · 자세히` : "자세히",
+    quietLine: quiet
+      ? formatMessage("timeline.requestBundle.quietWithDetails", { quiet })
+      : formatMessage("timeline.requestBundle.details"),
     ...(quiet ? { remainingLine: quiet } : {}),
     decisionMode: requestBundleDecisionMode(card),
     canDecide,
     ...(waitingFor !== undefined ? { waitingFor } : {}),
     details: {
-      label: "자세히",
+      label: formatMessage("timeline.requestBundle.details"),
       rows: [
         ...(card.action?.rows ?? []),
         ...(card.action?.rationale
-          ? [{ label: "사유", value: card.action.rationale }]
+          ? [{ label: formatMessage("timeline.requestBundle.rationale"), value: card.action.rationale }]
           : []),
         ...(card.action?.requiredRole
           ? [
               {
-                label: "결정 권한",
+                label: formatMessage("timeline.requestBundle.requiredRole"),
                 value: roleDisplayName(card.action.requiredRole),
               },
             ]

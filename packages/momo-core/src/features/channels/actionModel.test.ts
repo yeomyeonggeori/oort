@@ -10,10 +10,7 @@ import {
   CHANNEL_TOPIC_VIEW_KEY,
   CHANNEL_UNMUTE_KEY,
 } from "./model";
-import {
-  COPY_LINK_ACTION_LABEL,
-  COPY_LINK_DONE_LABEL,
-} from "../timeline/copyLabels";
+import { COPY_LINK_ACTION_KEY, COPY_LINK_DONE_KEY } from "../timeline/copyLabels";
 import type { Channel } from "../../lib/api";
 import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
 import { createMessageCopy } from "../../testkit";
@@ -216,7 +213,7 @@ describe("channelActionItems", () => {
     const idle = channelActionItems(ALL, REST);
     expect(idle.find((i) => i.key === "mute")?.label).toBe(ko(CHANNEL_MUTE_KEY));
     expect(idle.find((i) => i.key === "copy-link")?.label).toBe(
-      COPY_LINK_ACTION_LABEL
+      ko(COPY_LINK_ACTION_KEY)
     );
     expect(idle.find((i) => i.key === "copy-id")?.label).toBe(ko(CHANNEL_COPY_ID_KEY));
 
@@ -228,7 +225,7 @@ describe("channelActionItems", () => {
     });
     expect(after.find((i) => i.key === "mute")?.label).toBe(ko(CHANNEL_UNMUTE_KEY));
     expect(after.find((i) => i.key === "copy-link")?.label).toBe(
-      COPY_LINK_DONE_LABEL
+      ko(COPY_LINK_DONE_KEY)
     );
     expect(after.find((i) => i.key === "copy-name")?.label).toContain("복사됨");
     expect(after.find((i) => i.key === "copy-id")?.label).toBe(

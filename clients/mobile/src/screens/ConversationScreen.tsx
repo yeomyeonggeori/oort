@@ -1251,13 +1251,13 @@ export default function ConversationScreen({
   }, [quote, messages]);
 
   const onQuoteMessage = useCallback((message: Message) => {
-    setQuote(quoteDraftFor(message));
+    setQuote(quoteDraftFor(formatMenuMessage, message));
     // 한 입력칸에는 한 가지 머리말이다: 인용을 걸면 걸려 있던 답글 대상은 떨어진다(#4869).
     cancelReply();
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
     // 떴는데 손은 아직 타임라인에 있다.
     focusComposer();
-  }, [cancelReply, focusComposer]);
+  }, [cancelReply, focusComposer, formatMenuMessage]);
   const onCancelQuote = useCallback(() => setQuote(null), []);
 
   // ---- 인용이 가리키는 줄로 이동 --------------------------------------------
@@ -1652,7 +1652,7 @@ export default function ConversationScreen({
   useEffect(() => setApprovalReceipts(NO_RECEIPTS), [channelId]);
   const onApprovalSettled = useCallback(
     (approvalId: string, outcome: DecisionOutcome) => {
-      const note = decisionReceiptCopy(outcome);
+      const note = decisionReceiptCopy(outcome, formatMenuMessage);
       // 1회 값은 **결정 응답에서만** 온다(부록 C). 판정은 `linkOnceFrom` 한
       // 곳이고, 값은 이 표 — React 상태 — 에만 든다. 어디에도 적지 않는다.
       const secretOnce = linkOnceFrom(outcome);
@@ -1680,7 +1680,7 @@ export default function ConversationScreen({
       );
       invalidateApprovals();
     },
-    [invalidateApprovals],
+    [formatMenuMessage, invalidateApprovals],
   );
 
   // 문장은 `jumpNotice.ts` 가 든다 — **측정 하네스가 같은 상수를 읽어 사진을

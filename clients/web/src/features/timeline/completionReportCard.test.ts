@@ -3,9 +3,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   COMPLETION_CHECK_TONE,
-  COMPLETION_OUTCOME_LABEL,
-  WORKED_ELAPSED_LABEL,
+  COMPLETION_OUTCOME_LABEL_KEY,
+  WORKED_ELAPSED_LABEL_KEY,
 } from "@momo/core/features/timeline/completionReportCard";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
+
+// 낱말은 사전에 있다(#6044): 소스에 글자로 적혀 있지 않은지는 한국어 사전의 값으로 대조한다.
+const koPlain = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage as unknown as (
+  key: string
+) => string;
+const WORKED_ELAPSED_LABEL = koPlain(WORKED_ELAPSED_LABEL_KEY);
+const COMPLETION_OUTCOME_LABEL = { attention: koPlain(COMPLETION_OUTCOME_LABEL_KEY.attention) };
 
 // =============================================================================
 // 작업 완료 리포트 카드의 **웹 사본 대조** (UXC-A).
@@ -57,18 +66,18 @@ describe("완료 리포트는 승인 카드 가족의 뼈대를 쓴다", () => {
 
 describe("코어가 답하는 것을 웹이 다시 짓지 않는다", () => {
   it("경과 시간의 서식은 코어 헬퍼가 답한다", () => {
-    expect(REPORT_BODY).toContain("formatElapsed(card.elapsedMs)");
+    expect(REPORT_BODY).toContain("formatElapsed(formatMessage, card.elapsedMs)");
   });
 
   it("경과를 이름 붙이는 낱말도 코어의 것이다 (#1468)", () => {
     // 「작업 시간」을 여기 적어 두면 작업 세션 정보의 같은 줄과 언젠가 갈라진다 —
     // 갈라진 결과가 정확히 이 티켓이 온 이유(「실행 시간」)다.
-    expect(REPORT_BODY).toContain("label={WORKED_ELAPSED_LABEL}");
+    expect(REPORT_BODY).toContain("label={formatMessage(WORKED_ELAPSED_LABEL_KEY)}");
     expect(CODE_ONLY).not.toContain(`label="${WORKED_ELAPSED_LABEL}"`);
   });
 
   it("결과 낱말과 집계는 코어의 것을 그대로 쓴다", () => {
-    expect(REPORT_BODY).toContain("COMPLETION_CHECK_OUTCOME_LABEL[");
+    expect(REPORT_BODY).toContain("COMPLETION_CHECK_OUTCOME_LABEL_KEY[");
     expect(REPORT_BODY).toContain("completionCheckCounts(");
     // 「확인 필요」 같은 낱말을 인라인으로 적어 두지 않는다.
     expect(CODE_ONLY).not.toContain(COMPLETION_OUTCOME_LABEL.attention);

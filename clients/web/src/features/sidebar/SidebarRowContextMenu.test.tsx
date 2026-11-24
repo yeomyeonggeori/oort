@@ -22,8 +22,8 @@ import {
   DM_CLOSE_KEY,
 } from "@momo/core/features/channels/model";
 import {
-  COPY_LINK_ACTION_LABEL,
-  COPY_LINK_DONE_LABEL,
+  COPY_LINK_ACTION_KEY,
+  COPY_LINK_DONE_KEY,
 } from "@momo/core/features/timeline/copyLabels";
 import {
   CHANNEL_STAR_KEY,
@@ -532,7 +532,7 @@ describe("링크·이름 복사", () => {
     // 영수증 동안 두 판이 다 열려 있다(위 판 · 하위 판).
     expect(menu()).not.toBeNull();
     expect(subMenu("copy-group")).not.toBeNull();
-    expect(item("copy-link")?.textContent?.trim()).toBe(COPY_LINK_DONE_LABEL);
+    expect(item("copy-link")?.textContent?.trim()).toBe(koCopy(COPY_LINK_DONE_KEY));
   });
 
   it("이름 복사는 화면에 보이는 이름을 그대로 올린다", async () => {
@@ -604,7 +604,7 @@ describe("나가기", () => {
       Array.from(subMenu("copy-group")?.querySelectorAll('[role="menuitem"]') ?? []).map(
         (el) => el.textContent?.trim()
       )
-    ).toEqual(["이름 복사하기", COPY_LINK_ACTION_LABEL, koCopy(CHANNEL_COPY_ID_KEY)]);
+    ).toEqual(["이름 복사하기", koCopy(COPY_LINK_ACTION_KEY), koCopy(CHANNEL_COPY_ID_KEY)]);
   });
 
   it("일반 멤버에게도 나가기가 선다 — 본인 나가기 길이다 (#5778)", () => {

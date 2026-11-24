@@ -69,6 +69,7 @@ import {
   useTeamBoardRail,
 } from '../features/work/teamBoard/useTeamBoard';
 import {useSession} from '../session/useSession';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {queryFailureDetail} from './SidebarScreen';
 
 // =============================================================================
@@ -118,6 +119,7 @@ export default function WorkJobsScreen({
   const styles = useStyles(buildStyles);
   const {workspaceId, member} = useSession();
   const online = useOnline();
+  const formatMessage = useFormatMessage();
   const nowMs = useActiveMinuteNow(active);
   const [filter, setFilter] = useWorkFilter(initialFilter);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -132,9 +134,9 @@ export default function WorkJobsScreen({
   const rows = useMemo<WorkJobRow[]>(
     () =>
       itemsForFilter(list.items, filter, member.id, list.mode).map(item =>
-        workJobRow(item, nowMs),
+        workJobRow(item, nowMs, formatMessage),
       ),
-    [list.items, list.mode, filter, member.id, nowMs],
+    [list.items, list.mode, filter, member.id, nowMs, formatMessage],
   );
   const facts = useMacSessionFacts(workspaceId, member.id, list.items, active);
   // 「응답 필요」: 내 맥 세션의 권한 요청, 그리고 내 대기 승인이 걸린 run(#5593 수리 M1 — 인박스 알약과 같은 원장).

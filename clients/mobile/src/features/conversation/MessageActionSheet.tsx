@@ -2,10 +2,10 @@ import {ReactionPicker} from '../expressions/ReactionPicker';
 import type {Channel, Message} from '@momo/core/lib/api';
 import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
-import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
+import {QUOTE_ACTION_KEY} from '@momo/core/features/timeline/quote';
 import {editedMark} from '@momo/core/features/timeline/editedLabel';
 import {pinActionLabelKey} from '@momo/core/features/timeline/pins';
-import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
+import {COPY_MESSAGE_ACTION_KEY} from '@momo/core/features/timeline/copyLabels';
 import {
   QUICK_REACTIONS,
   type ReactionChip,
@@ -120,7 +120,7 @@ export interface MessageActionSheetProps {
   onToggleReaction: (emoji: string) => void;
   onReply: () => void;
   /**
-   * 인용하기 (ADR-0148). 낱말은 코어의 `QUOTE_ACTION_LABEL` 이다 — 웹과 폰이 같은 말을 해야 한다.
+   * 인용하기 (ADR-0148). 낱말은 코어의 `QUOTE_ACTION_KEY` 이다 — 웹과 폰이 같은 말을 해야 한다.
    * 항목이 서는 조건은 `availability.quote`(코어의 `canQuoteMessage`)와 이 핸들러 **둘 다**다.
    */
   onQuote?: () => void;
@@ -236,17 +236,17 @@ function SheetBody({
     availability.quote && onQuote ? (
       <ListRow
         key="quote"
-        title={QUOTE_ACTION_LABEL}
+        title={locale.formatMessage(QUOTE_ACTION_KEY)}
         onPress={onQuote}
         closesSheet
         testID="sheet-quote"
       />
     ) : null,
     onCopy ? (
-      // 동사형. 낱말은 코어의 `COPY_MESSAGE_ACTION_LABEL` — 웹 메뉴와 이 시트가 같은 말을 쓴다.
+      // 동사형. 낱말은 코어의 `COPY_MESSAGE_ACTION_KEY` — 웹 메뉴와 이 시트가 같은 말을 쓴다.
       <ListRow
         key="copy"
-        title={COPY_MESSAGE_ACTION_LABEL}
+        title={locale.formatMessage(COPY_MESSAGE_ACTION_KEY)}
         onPress={onCopy}
         closesSheet
         testID="sheet-copy"

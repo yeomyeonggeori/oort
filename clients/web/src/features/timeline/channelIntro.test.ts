@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_ADD_MEMBER_ACTION_LABEL,
-  EMPTY_WRITE_ACTION_LABEL,
+  EMPTY_ADD_MEMBER_ACTION_KEY,
+  EMPTY_WRITE_ACTION_KEY,
 } from "@momo/core/features/timeline/model";
 import {
-  buildChannelIntro,
+  buildChannelIntro as buildIntro,
   CHANNEL_INTRO_STARTED,
   DM_INTRO_STARTED,
   shouldShowChannelIntro,
 } from "./channelIntro";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const buildChannelIntro = (input: Omit<Parameters<typeof buildIntro>[0], "formatMessage">) =>
+  buildIntro({ ...input, formatMessage: ko });
+const EMPTY_ADD_MEMBER_ACTION_LABEL = ko(EMPTY_ADD_MEMBER_ACTION_KEY);
+const EMPTY_WRITE_ACTION_LABEL = ko(EMPTY_WRITE_ACTION_KEY);
 
 const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
 

@@ -1,9 +1,9 @@
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
-  QUOTE_CANCEL_LABEL,
-  QUOTE_DELETED_TEXT,
-  QUOTE_JUMP_HINT,
-  QUOTE_NESTED_MARK,
+  QUOTE_CANCEL_KEY,
+  QUOTE_DELETED_KEY,
+  QUOTE_JUMP_KEY,
+  QUOTE_NESTED_KEY,
   quoteHeadAuthorId,
   type QuoteBlock as QuoteBlockModel,
 } from '@momo/core/features/timeline/quote';
@@ -200,7 +200,7 @@ export function QuoteBlock({
         ) : null}
         {block.kind === 'ready' && block.quotesAnother ? (
           <Text style={[styles.mark, {color: c.excerpt}]} testID="quote-nested">
-            {QUOTE_NESTED_MARK}
+            {formatMessage(QUOTE_NESTED_KEY)}
           </Text>
         ) : null}
       </View>
@@ -213,7 +213,7 @@ export function QuoteBlock({
         // 사본을 남기지 않는 것이 삭제의 뜻이다(규칙 3). 행의 묘비와 같은
         // 낱말이고, 그 낱말은 코어가 든다.
         <Text style={[styles.excerpt, {color: c.excerpt}]} numberOfLines={1} testID="quote-tombstone">
-          {appNote(QUOTE_DELETED_TEXT)}
+          {appNote(formatMessage(QUOTE_DELETED_KEY))}
         </Text>
       ) : (
         <Text style={[styles.excerpt, {color: c.excerpt}]} numberOfLines={1} testID="quote-body">
@@ -246,7 +246,7 @@ export function QuoteBlock({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={QUOTE_JUMP_HINT}
+      accessibilityLabel={formatMessage(QUOTE_JUMP_KEY)}
       onPress={onJump}
       style={({pressed}) => [headStyle, pressed && styles.headPressed]}
       testID="quote-block">
@@ -274,7 +274,7 @@ export function quoteAccessibilityPhrase(
 ): string {
   const head = quoteHeadLabel(block, directory, formatMessage);
   if (block.kind === 'unresolved') return `${head}, 원본을 아직 불러오지 않음`;
-  if (block.kind === 'deleted') return `${head}, ${QUOTE_DELETED_TEXT}`;
+  if (block.kind === 'deleted') return formatMessage('timeline.quote.deletedSpoken', {head});
   return `${head}, ${excerptText(block.lines, ' ')}${
     attachmentCount > 0 ? `, 첨부 파일 ${attachmentCount}개` : ''
   }`;
@@ -315,7 +315,7 @@ export function QuoteDraftBar({
   const label = quoteHeadLabel(block, directory, formatMessage);
   const preview =
     block.kind === 'deleted'
-      ? QUOTE_DELETED_TEXT
+      ? formatMessage(QUOTE_DELETED_KEY)
       : block.kind === 'unresolved'
       ? '원본을 아직 불러오지 않음'
       : excerptText(block.lines, ' ');
@@ -339,7 +339,7 @@ export function QuoteDraftBar({
       </View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={QUOTE_CANCEL_LABEL}
+        accessibilityLabel={formatMessage(QUOTE_CANCEL_KEY)}
         onPress={onCancel}
         style={({pressed}) => [styles.draftCancel, pressed && styles.pressed]}
         testID="quote-draft-cancel">

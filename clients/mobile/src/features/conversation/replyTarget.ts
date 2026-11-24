@@ -1,3 +1,4 @@
+import type {LocaleService} from '@momo/core/i18n';
 import {isPhotoAttachment} from '@momo/core/features/attachments/model';
 import {
   expressionMessageSize,
@@ -77,6 +78,7 @@ export function canReplyBySwipe(message: Message): boolean {
 }
 
 function excerptOf(
+  formatMessage: LocaleService['formatMessage'],
   message: Message,
   expressions: readonly Expression[],
 ): ReplyExcerpt {
@@ -91,7 +93,7 @@ function excerptOf(
     return {kind: 'expression'};
   }
   // 발췌는 **인용과 같은 규칙**(코어 `quoteExcerpt`·종류 라벨)이다 — 같은 글을 가리키는 두 장치가 다르게 자르지 않는다.
-  const draft = quoteDraftFor(message);
+  const draft = quoteDraftFor(formatMessage, message);
   const lines = draft?.block.kind === 'ready' ? draft.block.lines : [];
   if (lines.length > 0) return {kind: 'text', text: lines.join(' ')};
   const attachments = message.attachments ?? [];
@@ -104,7 +106,11 @@ function excerptOf(
 /** 이 행을 입력칸 머리에 걸 답글 대상으로. 밀 수 없는 행이면 `null`. */
 export function replyTargetFor(
   message: Message,
-  context: {myMemberId: string | undefined; expressions: readonly Expression[]},
+  context: {
+    myMemberId: string | undefined;
+    expressions: readonly Expression[];
+    formatMessage: LocaleService['formatMessage'];
+  },
 ): ReplyTarget | null {
   if (!canReplyBySwipe(message)) return null;
   return {
@@ -112,7 +118,7 @@ export function replyTargetFor(
     authorMemberId: message.authorMemberId,
     rootId: replyRootId(message),
     mine: uuidEq(message.authorMemberId, context.myMemberId),
-    excerpt: excerptOf(message, context.expressions),
+    excerpt: excerptOf(context.formatMessage, message, context.expressions),
   };
 }
 

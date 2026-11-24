@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { payloadDetail, type PayloadDetail } from "./agentCardModel";
 
 // =============================================================================
@@ -114,15 +116,13 @@ const CHECK_OUTCOME_SYNONYMS: ReadonlyMap<string, CompletionCheckOutcome> =
   ]);
 
 /** 결과의 이름. 칩·셀에 서는 한 낱말. */
-export const COMPLETION_CHECK_OUTCOME_LABEL: Readonly<
-  Record<CompletionCheckOutcome, string>
-> = {
-  pass: "통과",
-  fail: "실패",
-  skip: "건너뜀",
-  pending: "진행 중",
-  unknown: "미상 결과",
-};
+export const COMPLETION_CHECK_OUTCOME_LABEL_KEY = {
+  pass: "timeline.completion.checkPass",
+  fail: "timeline.completion.checkFail",
+  skip: "timeline.completion.checkSkip",
+  pending: "timeline.completion.checkPending",
+  unknown: "timeline.completion.checkUnknown",
+} as const satisfies Record<CompletionCheckOutcome, PlainMessageKey>;
 
 /**
  * 결과가 지는 **역할**. 값이 아니라 역할이다 — 어느 토큰이 이 역할을 지는지는 각
@@ -189,12 +189,10 @@ export function parseCompletionCheckOutcome(
  */
 export type CompletionOutcome = "clean" | "attention";
 
-export const COMPLETION_OUTCOME_LABEL: Readonly<
-  Record<CompletionOutcome, string>
-> = {
-  clean: "완료",
-  attention: "확인 필요",
-};
+export const COMPLETION_OUTCOME_LABEL_KEY = {
+  clean: "timeline.completion.outcomeClean",
+  attention: "timeline.completion.outcomeAttention",
+} as const satisfies Record<CompletionOutcome, PlainMessageKey>;
 
 /**
  * 머리 칩의 역할. `attention` 이 `danger` 가 아니라 `warn` 인 이유: 리포트를 만든
@@ -251,7 +249,8 @@ export interface CompletionOmitted {
 
 export interface CompletionReportCard {
   kind: "completion_report";
-  title: string;
+  /** 서버가 실어 보낸 제목. 없으면 `null`이고 화면이 `completionReportTitle`로 기본 제목을 푼다. */
+  titleText: string | null;
   /** 한 문단 요약. 에이전트가 자기 말로 쓴 것만, 쓰인 그대로. */
   summary?: string;
   actions: CompletionAction[];
@@ -266,10 +265,19 @@ export interface CompletionReportCard {
 
 // ---- copy -------------------------------------------------------------------
 
-export const COMPLETION_REPORT_TITLE = "작업 완료 리포트";
+/** 서버가 제목을 안 줄 때의 기본 제목. 인용이 이 카드를 부르는 이름과 같은 낱말이다. */
+export const COMPLETION_REPORT_TITLE_KEY = "timeline.quote.kindCompletionReport" satisfies PlainMessageKey;
+
+/** 카드 제목: 서버가 준 제목이 먼저이고, 없으면 이 빌드의 기본 제목이다. */
+export function completionReportTitle(
+  formatMessage: LocaleService["formatMessage"],
+  card: Pick<CompletionReportCard, "titleText">
+): string {
+  return card.titleText ?? formatMessage(COMPLETION_REPORT_TITLE_KEY);
+}
 
 /** 게이트 표 위에 서는 열 제목(표면 열). */
-export const COMPLETION_GATE_SURFACE_LABEL = "표면";
+export const COMPLETION_GATE_SURFACE_LABEL_KEY = "timeline.completion.surface" satisfies PlainMessageKey;
 
 // ---- 상한 (M3) --------------------------------------------------------------
 //
@@ -391,7 +399,12 @@ export function completionRowChecks(row: CompletionGateRow): CompletionCheck[] {
  * 그 문법을 아는 자리(`workSessionFormat`)가 값을 다시 적지 않고 이 상수와 견줄 수
  * 있어야 낱말이 한 곳에만 남는다.
  */
-export const ELAPSED_SUB_SECOND = "1초 미만";
+export const ELAPSED_SUB_SECOND_KEY = "timeline.completion.elapsedSubSecond" satisfies PlainMessageKey;
+
+/** 이 경과가 「1초 미만」 낱말로 말해지는가. 문법이 갈리는 자리(`workSessionFormat`)가 글자 비교 대신 묻는다. */
+export function isSubSecondElapsed(ms: number): boolean {
+  return Number.isFinite(ms) && ms >= 0 && Math.round(ms / 1000) === 0;
+}
 
 /**
  * 경과를 **라벨:값 쌍**으로 세우는 자리가 쓰는 낱말. 완료 리포트 카드의 그 줄과
@@ -405,7 +418,7 @@ export const ELAPSED_SUB_SECOND = "1초 미만";
  * 술어 자리(라벨 없이 홀로 서는 조각)는 이 낱말을 쓰지 않는다 —
  * `workSessionFormat.SESSION_WORKED_SUFFIX` 가 그 자리의 형태를 진다.
  */
-export const WORKED_ELAPSED_LABEL = "작업 시간";
+export const WORKED_ELAPSED_LABEL_KEY = "timeline.completion.workedLabel" satisfies PlainMessageKey;
 
 /**
  * 경과 시간을 사람의 낱말로. **가장 큰 두 단위까지만** — "24분 28초", "1시간 3분",
@@ -416,17 +429,20 @@ export const WORKED_ELAPSED_LABEL = "작업 시간";
  * 문자열에 자릿폭 고정(`data-numeric`)을 걸지 않는다 — 걸면 음절 사이가 벌어진다
  * (`divider.ts` 가 같은 이유로 날짜와 시각을 가른다).
  */
-export function formatElapsed(ms: number): string {
+export function formatElapsed(
+  formatMessage: LocaleService["formatMessage"],
+  ms: number
+): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
   const totalSeconds = Math.round(ms / 1000);
-  if (totalSeconds === 0) return ELAPSED_SUB_SECOND;
+  if (totalSeconds === 0) return formatMessage(ELAPSED_SUB_SECOND_KEY);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   const parts: string[] = [];
-  if (hours > 0) parts.push(`${hours}시간`);
-  if (minutes > 0) parts.push(`${minutes}분`);
-  if (seconds > 0) parts.push(`${seconds}초`);
+  if (hours > 0) parts.push(formatMessage("timeline.completion.elapsedHours", { count: hours }));
+  if (minutes > 0) parts.push(formatMessage("timeline.completion.elapsedMinutes", { count: minutes }));
+  if (seconds > 0) parts.push(formatMessage("timeline.completion.elapsedSeconds", { count: seconds }));
   return parts.slice(0, 2).join(" ");
 }
 
@@ -566,7 +582,7 @@ export function completionReportCard(props: Props): CompletionReportCard | null 
 
   const card: CompletionReportCard = {
     kind: "completion_report",
-    title: readString(props, "title") ?? COMPLETION_REPORT_TITLE,
+    titleText: readString(props, "title") ?? null,
     actions,
     gates,
     outcome: completionOutcome(allGates),
