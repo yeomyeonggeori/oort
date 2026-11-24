@@ -11,13 +11,16 @@
 // 「다시 시도」를 주는데 자동완성만 조용한 것이 정확히 이 결함이었다.
 // =============================================================================
 
+/** 문장은 사전(`emoji.json`)에 있고 이 표는 그 키다(#6058). 화면이 `formatMessage`로 풀어 그린다. */
+import type { PlainMessageKey } from "../../i18n/keys";
+
 export const EMOJI_CATALOG_COPY = {
   /** 카탈로그 청크를 못 실었다. */
-  error: "이모티콘 목록을 불러오지 못했습니다.",
+  error: "emoji.catalog.error",
   /** 브라우저가 오프라인이라고 말한다 — 이 실패는 그 사실로 설명된다. */
-  offline: "지금 오프라인입니다. 연결되면 다시 여세요.",
-  retry: "다시 시도",
+  offline: "emoji.catalog.offline",
+  retry: "common.action.retry",
   /** 카탈로그는 있는데 질의가 아무것도 못 맞췄다. */
-  emptyHeadline: "찾는 이모티콘이 없습니다",
-  emptyDetail: "다른 이름이나 :code:로 검색하세요.",
-} as const;
+  emptyHeadline: "emoji.catalog.emptyHeadline",
+  emptyDetail: "emoji.catalog.emptyDetail",
+} as const satisfies Record<string, PlainMessageKey>;

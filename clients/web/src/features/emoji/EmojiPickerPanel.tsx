@@ -32,6 +32,7 @@ import { EMOJI_CATALOG_COPY } from "./copy";
 import { filterEmojis, isEmojiSearchQuery } from "./search";
 import { useEmojiSkinTone } from "./skinToneStore";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 
 
@@ -108,6 +109,7 @@ export function EmojiPickerPanel({
    */
   renderTeam?: (query: string) => ReactNode;
 }) {
+  const formatMessage = useFormatMessage();
   const id = useId();
   const tablistId = `${id}-tabs`;
   const listId = `${id}-list`;
@@ -330,7 +332,7 @@ export function EmojiPickerPanel({
                     type="button"
                     role="option"
                     aria-selected={tone === option.tone}
-                    aria-label={option.label}
+                    aria-label={formatMessage(option.labelKey)}
                     data-testid={`emoji-skin-${option.tone}`}
                     onClick={() => {
                       setTone(option.tone);
@@ -411,20 +413,20 @@ export function EmojiPickerPanel({
           <Skeleton ready={false} rows={6} className="p-0" />
         ) : error ? (
           <InlineBanner
-            message={
+            message={formatMessage(
               browserOffline
                 ? EMOJI_CATALOG_COPY.offline
                 : EMOJI_CATALOG_COPY.error
-            }
-            actionLabel={EMOJI_CATALOG_COPY.retry}
+            )}
+            actionLabel={formatMessage(EMOJI_CATALOG_COPY.retry)}
             onAction={onRetry}
             separator={false}
             testId="emoji-catalog-error"
           />
         ) : visible.length === 0 && searching ? (
           <EmptyInvite
-            headline={EMOJI_CATALOG_COPY.emptyHeadline}
-            detail={EMOJI_CATALOG_COPY.emptyDetail}
+            headline={formatMessage(EMOJI_CATALOG_COPY.emptyHeadline)}
+            detail={formatMessage(EMOJI_CATALOG_COPY.emptyDetail)}
             className="px-0 py-4"
             testId="emoji-search-empty"
             actions={

@@ -32,7 +32,9 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import type {LocaleService} from '@momo/core/i18n';
 import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {
   usePageSheetClose,
   usePageSheetScrollProps,
@@ -91,6 +93,13 @@ export interface EmojiPickerProps {
 
 type Tab = (typeof EMOJI_CATEGORIES)[number]['id'] | 'team';
 const TABS = [...EMOJI_CATEGORIES, {id: 'team', label: '우리 팀'}] as const;
+/** 탭 낱말: 분류는 사전 키, 「우리 팀」은 아직 글이다(#6058 보고). */
+function tabLabel(
+  item: (typeof TABS)[number],
+  formatMessage: LocaleService['formatMessage'],
+): string {
+  return 'labelKey' in item ? formatMessage(item.labelKey) : item.label;
+}
 // 줄 사이 틈은 `space.sm`(8) — 앞 판의 `space.xs`(4)는 이모티콘 칸이 위아래로 붙어 보였다(#5330).
 const ROW_HEIGHT = TOUCH_TARGET + space.sm;
 
@@ -122,6 +131,7 @@ export function EmojiPicker({
   embedded,
 }: EmojiPickerProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const {width} = useWindowDimensions();
   const keyboardAppearance = useKeyboardAppearance();
   const keyboardHeight = useKeyboardHeight();
@@ -238,7 +248,7 @@ export function EmojiPicker({
             <Pressable
               key={item.id}
               accessibilityRole="tab"
-              accessibilityLabel={item.label}
+              accessibilityLabel={tabLabel(item, formatMessage)}
               accessibilityState={{selected: tab === item.id}}
               testID={`emoji-tab-${item.id}`}
               onPress={() => {
@@ -253,7 +263,7 @@ export function EmojiPicker({
                 pressed && styles.pressed,
               ]}
             >
-              <Text style={styles.label}>{item.label}</Text>
+              <Text style={styles.label}>{tabLabel(item, formatMessage)}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -263,7 +273,7 @@ export function EmojiPicker({
               <Pressable
                 key={item.tone}
                 accessibilityRole="button"
-                accessibilityLabel={item.label}
+                accessibilityLabel={formatMessage(item.labelKey)}
                 accessibilityState={{selected: tone === item.tone}}
                 testID={`emoji-tone-${item.tone}`}
                 onPress={() => {

@@ -1,3 +1,4 @@
+import type { PlainMessageKey } from "@momo/core/i18n/keys";
 import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { CatalogEmoji, SkinTone } from "@/features/emoji/catalog";
 import { displayGlyph } from "@/features/emoji/catalog";
@@ -46,12 +47,13 @@ export type ComposerTriggerKind = "mention" | "channel" | "emoji" | "command";
  * 에서만 로딩·오류·무결과를 그리고, `@`·`#` 는 예전처럼 후보가 없으면 아무것도
  * 그리지 않는다.
  */
+/** 키 표다(#6058): 목록이 그릴 때 `formatMessage`로 푼다. */
 export interface ComposerDeferredCopy {
-  error: string;
-  offline: string;
-  retry: string;
-  emptyHeadline: string;
-  emptyDetail: string;
+  error: PlainMessageKey;
+  offline: PlainMessageKey;
+  retry: PlainMessageKey;
+  emptyHeadline: PlainMessageKey;
+  emptyDetail: PlainMessageKey;
 }
 
 /**

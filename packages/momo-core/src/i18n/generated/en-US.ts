@@ -5607,6 +5607,120 @@ export const catalog: MessageCatalog = {
       "value": "Choose a role"
     }
   ],
+  "emoji.catalog.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Search by another name or :code:."
+    }
+  ],
+  "emoji.catalog.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "No emoji found"
+    }
+  ],
+  "emoji.catalog.error": [
+    {
+      "type": 0,
+      "value": "Couldn't load the emoji list."
+    }
+  ],
+  "emoji.catalog.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Open this again once you're connected."
+    }
+  ],
+  "emoji.category.activity": [
+    {
+      "type": 0,
+      "value": "Activities"
+    }
+  ],
+  "emoji.category.flags": [
+    {
+      "type": 0,
+      "value": "Flags"
+    }
+  ],
+  "emoji.category.foods": [
+    {
+      "type": 0,
+      "value": "Food"
+    }
+  ],
+  "emoji.category.frequent": [
+    {
+      "type": 0,
+      "value": "Frequently used"
+    }
+  ],
+  "emoji.category.nature": [
+    {
+      "type": 0,
+      "value": "Nature"
+    }
+  ],
+  "emoji.category.objects": [
+    {
+      "type": 0,
+      "value": "Objects"
+    }
+  ],
+  "emoji.category.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "emoji.category.places": [
+    {
+      "type": 0,
+      "value": "Places"
+    }
+  ],
+  "emoji.category.symbols": [
+    {
+      "type": 0,
+      "value": "Symbols"
+    }
+  ],
+  "emoji.tone.dark": [
+    {
+      "type": 0,
+      "value": "Dark skin tone"
+    }
+  ],
+  "emoji.tone.default": [
+    {
+      "type": 0,
+      "value": "Default skin tone"
+    }
+  ],
+  "emoji.tone.light": [
+    {
+      "type": 0,
+      "value": "Light skin tone"
+    }
+  ],
+  "emoji.tone.medium": [
+    {
+      "type": 0,
+      "value": "Medium skin tone"
+    }
+  ],
+  "emoji.tone.mediumDark": [
+    {
+      "type": 0,
+      "value": "Medium-dark skin tone"
+    }
+  ],
+  "emoji.tone.mediumLight": [
+    {
+      "type": 0,
+      "value": "Medium-light skin tone"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

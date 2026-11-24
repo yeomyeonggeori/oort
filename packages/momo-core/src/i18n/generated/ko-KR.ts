@@ -5118,6 +5118,120 @@ export const catalog: MessageCatalog = {
       "value": "역할 고르기"
     }
   ],
+  "emoji.catalog.emptyDetail": [
+    {
+      "type": 0,
+      "value": "다른 이름이나 :code:로 검색하세요."
+    }
+  ],
+  "emoji.catalog.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "찾는 이모티콘이 없습니다"
+    }
+  ],
+  "emoji.catalog.error": [
+    {
+      "type": 0,
+      "value": "이모티콘 목록을 불러오지 못했습니다."
+    }
+  ],
+  "emoji.catalog.offline": [
+    {
+      "type": 0,
+      "value": "지금 오프라인입니다. 연결되면 다시 여세요."
+    }
+  ],
+  "emoji.category.activity": [
+    {
+      "type": 0,
+      "value": "활동"
+    }
+  ],
+  "emoji.category.flags": [
+    {
+      "type": 0,
+      "value": "깃발"
+    }
+  ],
+  "emoji.category.foods": [
+    {
+      "type": 0,
+      "value": "음식"
+    }
+  ],
+  "emoji.category.frequent": [
+    {
+      "type": 0,
+      "value": "자주 씀"
+    }
+  ],
+  "emoji.category.nature": [
+    {
+      "type": 0,
+      "value": "자연"
+    }
+  ],
+  "emoji.category.objects": [
+    {
+      "type": 0,
+      "value": "물건"
+    }
+  ],
+  "emoji.category.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "emoji.category.places": [
+    {
+      "type": 0,
+      "value": "장소"
+    }
+  ],
+  "emoji.category.symbols": [
+    {
+      "type": 0,
+      "value": "기호"
+    }
+  ],
+  "emoji.tone.dark": [
+    {
+      "type": 0,
+      "value": "어두운 피부"
+    }
+  ],
+  "emoji.tone.default": [
+    {
+      "type": 0,
+      "value": "기본 피부"
+    }
+  ],
+  "emoji.tone.light": [
+    {
+      "type": 0,
+      "value": "밝은 피부"
+    }
+  ],
+  "emoji.tone.medium": [
+    {
+      "type": 0,
+      "value": "중간 피부"
+    }
+  ],
+  "emoji.tone.mediumDark": [
+    {
+      "type": 0,
+      "value": "중간 어두운 피부"
+    }
+  ],
+  "emoji.tone.mediumLight": [
+    {
+      "type": 0,
+      "value": "중간 밝은 피부"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

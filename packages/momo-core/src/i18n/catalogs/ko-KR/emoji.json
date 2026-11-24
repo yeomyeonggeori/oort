@@ -1,0 +1,21 @@
+{
+  "emoji.catalog.error": "이모티콘 목록을 불러오지 못했습니다.",
+  "emoji.catalog.offline": "지금 오프라인입니다. 연결되면 다시 여세요.",
+  "emoji.catalog.emptyHeadline": "찾는 이모티콘이 없습니다",
+  "emoji.catalog.emptyDetail": "다른 이름이나 :code:로 검색하세요.",
+  "emoji.tone.default": "기본 피부",
+  "emoji.tone.light": "밝은 피부",
+  "emoji.tone.mediumLight": "중간 밝은 피부",
+  "emoji.tone.medium": "중간 피부",
+  "emoji.tone.mediumDark": "중간 어두운 피부",
+  "emoji.tone.dark": "어두운 피부",
+  "emoji.category.frequent": "자주 씀",
+  "emoji.category.people": "사람",
+  "emoji.category.nature": "자연",
+  "emoji.category.foods": "음식",
+  "emoji.category.activity": "활동",
+  "emoji.category.places": "장소",
+  "emoji.category.objects": "물건",
+  "emoji.category.symbols": "기호",
+  "emoji.category.flags": "깃발"
+}

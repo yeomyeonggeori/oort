@@ -726,6 +726,25 @@ export const messageKeys = [
   "directory.role.lockedAdminCeiling",
   "directory.role.lockedOwnerPeer",
   "directory.role.placeholder",
+  "emoji.catalog.emptyDetail",
+  "emoji.catalog.emptyHeadline",
+  "emoji.catalog.error",
+  "emoji.catalog.offline",
+  "emoji.category.activity",
+  "emoji.category.flags",
+  "emoji.category.foods",
+  "emoji.category.frequent",
+  "emoji.category.nature",
+  "emoji.category.objects",
+  "emoji.category.people",
+  "emoji.category.places",
+  "emoji.category.symbols",
+  "emoji.tone.dark",
+  "emoji.tone.default",
+  "emoji.tone.light",
+  "emoji.tone.medium",
+  "emoji.tone.mediumDark",
+  "emoji.tone.mediumLight",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -3611,6 +3630,25 @@ export const argumentSpecs = {
     "owner": "string"
   },
   "directory.role.placeholder": {},
+  "emoji.catalog.emptyDetail": {},
+  "emoji.catalog.emptyHeadline": {},
+  "emoji.catalog.error": {},
+  "emoji.catalog.offline": {},
+  "emoji.category.activity": {},
+  "emoji.category.flags": {},
+  "emoji.category.foods": {},
+  "emoji.category.frequent": {},
+  "emoji.category.nature": {},
+  "emoji.category.objects": {},
+  "emoji.category.people": {},
+  "emoji.category.places": {},
+  "emoji.category.symbols": {},
+  "emoji.tone.dark": {},
+  "emoji.tone.default": {},
+  "emoji.tone.light": {},
+  "emoji.tone.medium": {},
+  "emoji.tone.mediumDark": {},
+  "emoji.tone.mediumLight": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -7001,6 +7039,25 @@ export interface MessageArgs {
   "directory.role.lockedAdminCeiling": { admin: string; owner: string };
   "directory.role.lockedOwnerPeer": { owner: string };
   "directory.role.placeholder": Record<string, never>;
+  "emoji.catalog.emptyDetail": Record<string, never>;
+  "emoji.catalog.emptyHeadline": Record<string, never>;
+  "emoji.catalog.error": Record<string, never>;
+  "emoji.catalog.offline": Record<string, never>;
+  "emoji.category.activity": Record<string, never>;
+  "emoji.category.flags": Record<string, never>;
+  "emoji.category.foods": Record<string, never>;
+  "emoji.category.frequent": Record<string, never>;
+  "emoji.category.nature": Record<string, never>;
+  "emoji.category.objects": Record<string, never>;
+  "emoji.category.people": Record<string, never>;
+  "emoji.category.places": Record<string, never>;
+  "emoji.category.symbols": Record<string, never>;
+  "emoji.tone.dark": Record<string, never>;
+  "emoji.tone.default": Record<string, never>;
+  "emoji.tone.light": Record<string, never>;
+  "emoji.tone.medium": Record<string, never>;
+  "emoji.tone.mediumDark": Record<string, never>;
+  "emoji.tone.mediumLight": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
