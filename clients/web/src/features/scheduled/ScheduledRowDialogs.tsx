@@ -1,15 +1,15 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
-import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
+import { SCHEDULED_COPY, type ScheduledRef } from "@momo/core/features/scheduled/copy";
 import type { ScheduledErrorLine } from "@momo/core/features/scheduled/errors";
 import { isScheduledStub } from "@momo/core/features/scheduled/events";
-import { reviewAttachmentsLine } from "@momo/core/features/scheduled/model";
+import { reviewAttachmentsRef } from "@momo/core/features/scheduled/model";
 import {
   formatScheduledAt,
   scheduledZoneLine,
   sendAtFromInputs,
   sendAtInputs,
-  sendAtProblemSentence,
+  sendAtProblemRef,
   validateSendAt,
 } from "@momo/core/features/scheduled/presets";
 import { editBodyProblem, scheduledPatch } from "@momo/core/features/scheduled/request";
@@ -24,6 +24,7 @@ import {
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { Skeleton } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: edit / confirm dialogs for one scheduled message, opened from the scheduled list,
 // internal team users on web+Tauri, density 7/10, motion 2/10.
@@ -48,18 +49,21 @@ import { Skeleton } from "@/features/common/States";
 
 /** 오류 줄. 잠금 > 호출부의 오류 순이다. */
 function ErrorLines({ line }: { line: ScheduledErrorLine | null }) {
+  const formatMessage = useFormatMessage();
   if (line === null) return null;
   return (
     <div className="flex flex-col gap-1" role="alert">
-      <p className="break-keep text-meta text-danger">{line.text}</p>
-      {line.next !== undefined && <p className="break-keep text-meta text-ink-muted">{line.next}</p>}
+      <p className="break-keep text-meta text-danger">{formatMessage(line.text.key, line.text.values as never)}</p>
+      {line.next !== undefined && (
+        <p className="break-keep text-meta text-ink-muted">{formatMessage(line.next.key, line.next.values as never)}</p>
+      )}
     </div>
   );
 }
 
 function lockLine(lock: "open" | "tooLate" | "gone"): ScheduledErrorLine | null {
-  if (lock === "tooLate") return { text: SCHEDULED_COPY.error.tooLate };
-  if (lock === "gone") return { text: SCHEDULED_COPY.errors.alreadySent };
+  if (lock === "tooLate") return { text: { key: SCHEDULED_COPY.error.tooLate } };
+  if (lock === "gone") return { text: { key: SCHEDULED_COPY.errors.alreadySent } };
   return null;
 }
 
@@ -99,6 +103,7 @@ export function ScheduledEditDialog({
   onCloseAutoFocus,
   nowMs,
 }: ScheduledEditDialogProps) {
+  const formatMessage = useFormatMessage();
   const bodyId = useId();
   const dateId = useId();
   const timeId = useId();
@@ -106,7 +111,7 @@ export function ScheduledEditDialog({
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [touched, setTouched] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<ScheduledRef | null>(null);
   // 한글 조합 중의 Esc는 대화상자를 닫지 않는다(조합을 취소하는 키다).
   const composing = useRef(false);
   const seededFor = useRef<string | null>(null);
@@ -130,17 +135,18 @@ export function ScheduledEditDialog({
   const locked = lock !== "open";
   const busy = pending || offline || locked;
   const chosen = hasTime && touched ? sendAtFromInputs(date, time) : null;
+  const zoneRef = scheduledZoneLine(chosen ?? row?.sendAtMs ?? now);
   const shown: ScheduledErrorLine | null =
     lockLine(lock) ??
     (offline
-      ? { text: SCHEDULED_COPY.dialog.offline }
+      ? { text: { key: SCHEDULED_COPY.dialog.offline } }
       : (error ?? (localError === null ? null : { text: localError })));
 
   const commit = (event?: FormEvent) => {
     event?.preventDefault();
     if (busy || row === undefined) return;
     if (editBodyProblem(row, body) === "empty") {
-      setLocalError(SCHEDULED_COPY.errors.emptyMessage);
+      setLocalError({ key: SCHEDULED_COPY.errors.emptyMessage });
       return;
     }
     let sendAtMs: number | undefined;
@@ -148,7 +154,7 @@ export function ScheduledEditDialog({
       const picked = sendAtFromInputs(date, time);
       const problem = validateSendAt(picked, nowMs ?? Date.now());
       if (problem !== null || picked === null) {
-        setLocalError(sendAtProblemSentence(problem ?? "invalid"));
+        setLocalError(sendAtProblemRef(problem ?? "invalid"));
         return;
       }
       sendAtMs = picked;
@@ -180,14 +186,14 @@ export function ScheduledEditDialog({
           if (composing.current) event.preventDefault();
         }}
       >
-        <DialogTitle>{SCHEDULED_COPY.edit.title}</DialogTitle>
+        <DialogTitle>{formatMessage(SCHEDULED_COPY.edit.title)}</DialogTitle>
         <p className="min-w-0 truncate text-meta font-semibold text-ink" data-testid="scheduled-edit-place">
           {placeLabel}
         </p>
         <form className="flex min-w-0 flex-col gap-3" onSubmit={commit} noValidate>
           <div className="flex min-w-0 flex-col gap-1">
             <label htmlFor={bodyId} className="sr-only">
-              {SCHEDULED_COPY.review.bodyLabel}
+              {formatMessage(SCHEDULED_COPY.review.bodyLabel)}
             </label>
             <textarea
               id={bodyId}
@@ -209,7 +215,7 @@ export function ScheduledEditDialog({
             />
             {/* 보이는 한 줄이 곧 이 대화상자의 설명이다: 숨은 설명과 같은 문장을 두 번 두면 낭독이 두 번 읽는다. */}
             <DialogDescription className="break-keep text-meta" data-testid="scheduled-edit-attach-note">
-              {SCHEDULED_COPY.edit.attachNote}
+              {formatMessage(SCHEDULED_COPY.edit.attachNote)}
             </DialogDescription>
           </div>
 
@@ -218,7 +224,7 @@ export function ScheduledEditDialog({
               <div className="flex flex-wrap gap-2">
                 <div className="flex min-w-0 flex-col gap-1">
                   <label htmlFor={dateId} className="text-meta text-ink-muted">
-                    {SCHEDULED_COPY.dialog.date}
+                    {formatMessage(SCHEDULED_COPY.dialog.date)}
                   </label>
                   <Input
                     id={dateId}
@@ -235,7 +241,7 @@ export function ScheduledEditDialog({
                 </div>
                 <div className="flex min-w-0 flex-col gap-1">
                   <label htmlFor={timeId} className="text-meta text-ink-muted">
-                    {SCHEDULED_COPY.dialog.time}
+                    {formatMessage(SCHEDULED_COPY.dialog.time)}
                   </label>
                   <Input
                     id={timeId}
@@ -253,12 +259,12 @@ export function ScheduledEditDialog({
               </div>
               {chosen !== null && (
                 <p className="text-body text-ink" aria-live="polite" data-numeric data-testid="scheduled-edit-result">
-                  {SCHEDULED_COPY.dialog.preview(formatScheduledAt(chosen, now).full)}
+                  {formatMessage(SCHEDULED_COPY.dialog.preview, { when: formatScheduledAt(chosen, now).full })}
                 </p>
               )}
               {/* 시각을 고르는 자리는 시간대를 늘 적는다(명세 0.2). 칸을 건드리기 전에는 그 행의 시각 기준이다. */}
               <p className="text-meta text-ink-muted" data-testid="scheduled-edit-zone">
-                {scheduledZoneLine(chosen ?? row?.sendAtMs ?? now)}
+                {formatMessage(zoneRef.key, zoneRef.values as never)}
               </p>
             </div>
           )}
@@ -273,7 +279,7 @@ export function ScheduledEditDialog({
               data-testid="scheduled-edit-cancel"
               onClick={() => onOpenChange(false)}
             >
-              {SCHEDULED_COPY.dialog.cancel}
+              {formatMessage(SCHEDULED_COPY.dialog.cancel)}
             </Button>
             <Button
               type="submit"
@@ -282,7 +288,7 @@ export function ScheduledEditDialog({
               data-testid="scheduled-edit-commit"
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? SCHEDULED_COPY.edit.saving : SCHEDULED_COPY.edit.commit}
+              {formatMessage(pending ? SCHEDULED_COPY.edit.saving : SCHEDULED_COPY.edit.commit)}
             </Button>
           </div>
         </form>
@@ -313,6 +319,7 @@ export function ScheduledDeleteDialog({
   /** 지운 행의 다음 행으로 초점을 보내려고 호출부가 가로챈다. 생략하면 열었던 단추로 돌아간다. */
   onCloseAutoFocus?: (event: Event) => void;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <Dialog
       open={open}
@@ -327,9 +334,9 @@ export function ScheduledDeleteDialog({
         className="gap-3 p-4"
         {...(onCloseAutoFocus === undefined ? {} : { onCloseAutoFocus })}
       >
-        <DialogTitle>{SCHEDULED_COPY.delete.title}</DialogTitle>
-        <DialogDescription className="break-keep">{SCHEDULED_COPY.delete.body}</DialogDescription>
-        <ErrorLines line={offline ? { text: SCHEDULED_COPY.dialog.offline } : error} />
+        <DialogTitle>{formatMessage(SCHEDULED_COPY.delete.title)}</DialogTitle>
+        <DialogDescription className="break-keep">{formatMessage(SCHEDULED_COPY.delete.body)}</DialogDescription>
+        <ErrorLines line={offline ? { text: { key: SCHEDULED_COPY.dialog.offline } } : error} />
         <div className="flex justify-end gap-2 pt-1">
           <Button
             type="button"
@@ -338,7 +345,7 @@ export function ScheduledDeleteDialog({
             data-testid="scheduled-delete-cancel"
             onClick={() => onOpenChange(false)}
           >
-            {SCHEDULED_COPY.dialog.cancel}
+            {formatMessage(SCHEDULED_COPY.dialog.cancel)}
           </Button>
           <Button
             type="button"
@@ -349,7 +356,7 @@ export function ScheduledDeleteDialog({
             onClick={onConfirm}
           >
             {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-            {pending ? SCHEDULED_COPY.delete.pending : SCHEDULED_COPY.delete.confirm}
+            {formatMessage(pending ? SCHEDULED_COPY.delete.pending : SCHEDULED_COPY.delete.confirm)}
           </Button>
         </div>
       </DialogContent>
@@ -392,6 +399,7 @@ export function ScheduledReviewDialog({
   onCloseAutoFocus,
   nowMs,
 }: ScheduledReviewDialogProps) {
+  const formatMessage = useFormatMessage();
   const titleRef = useRef<HTMLHeadingElement>(null);
   const deleteRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -414,7 +422,9 @@ export function ScheduledReviewDialog({
     }
   }, [confirming]);
 
-  const attachments = row === undefined ? null : reviewAttachmentsLine(row);
+  const attachmentsRef = row === undefined ? null : reviewAttachmentsRef(row);
+  const attachments =
+    attachmentsRef === null ? null : formatMessage(attachmentsRef.key, attachmentsRef.values as never);
 
   return (
     <Dialog
@@ -443,9 +453,9 @@ export function ScheduledReviewDialog({
         }}
       >
         <DialogTitle ref={titleRef} tabIndex={-1} className="focus-visible:focus-ring">
-          {SCHEDULED_COPY.review.title}
+          {formatMessage(SCHEDULED_COPY.review.title)}
         </DialogTitle>
-        <DialogDescription className="break-keep">{SCHEDULED_COPY.review.body}</DialogDescription>
+        <DialogDescription className="break-keep">{formatMessage(SCHEDULED_COPY.review.body)}</DialogDescription>
 
         <div className="flex min-w-0 flex-col gap-1">
           <p className="min-w-0 truncate text-meta font-semibold text-ink" data-testid="scheduled-review-place">
@@ -464,7 +474,7 @@ export function ScheduledReviewDialog({
               // 막대가 자리를 차지해 항상 보인다(`tokens.css`의 `scrollbar-visible`, 컨텍스트 메뉴·`ArtifactCard`와 같은 처방).
               tabIndex={0}
               role="region"
-              aria-label={SCHEDULED_COPY.review.bodyLabel}
+              aria-label={formatMessage(SCHEDULED_COPY.review.bodyLabel)}
               className="scrollbar-visible max-h-pane overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line px-3 py-2 text-body text-ink focus-visible:focus-ring"
               data-testid="scheduled-review-body"
             >
@@ -478,12 +488,12 @@ export function ScheduledReviewDialog({
           )}
           {row !== undefined && (
             <p className="text-meta text-ink-muted" data-numeric data-testid="scheduled-review-when">
-              {SCHEDULED_COPY.review.when(formatScheduledAt(row.sendAtMs, now).full)}
+              {formatMessage(SCHEDULED_COPY.review.when, { when: formatScheduledAt(row.sendAtMs, now).full })}
             </p>
           )}
         </div>
 
-        <ErrorLines line={offline ? { text: SCHEDULED_COPY.dialog.offline } : error} />
+        <ErrorLines line={offline ? { text: { key: SCHEDULED_COPY.dialog.offline } } : error} />
 
         {confirming ? (
           // 푸터가 확인 줄로 바뀐다(대화상자는 겹치지 않는다). 그룹 이름이 「예약을 지울까요?」라서 초점이 「취소」에
@@ -495,9 +505,9 @@ export function ScheduledReviewDialog({
             data-testid="scheduled-review-confirm"
           >
             <p id={confirmLabelId} className="text-body font-semibold text-ink">
-              {SCHEDULED_COPY.delete.title}
+              {formatMessage(SCHEDULED_COPY.delete.title)}
             </p>
-            <p className="break-keep text-meta text-ink-muted">{SCHEDULED_COPY.delete.body}</p>
+            <p className="break-keep text-meta text-ink-muted">{formatMessage(SCHEDULED_COPY.delete.body)}</p>
             <div className="flex justify-end gap-2 pt-1">
               <Button
                 ref={cancelRef}
@@ -510,7 +520,7 @@ export function ScheduledReviewDialog({
                   setConfirming(false);
                 }}
               >
-                {SCHEDULED_COPY.dialog.cancel}
+                {formatMessage(SCHEDULED_COPY.dialog.cancel)}
               </Button>
               <Button
                 type="button"
@@ -521,7 +531,7 @@ export function ScheduledReviewDialog({
                 onClick={onDelete}
               >
                 {pending === "delete" && <Loader2 aria-hidden="true" className="spinner-busy" />}
-                {pending === "delete" ? SCHEDULED_COPY.delete.pending : SCHEDULED_COPY.delete.confirm}
+                {formatMessage(pending === "delete" ? SCHEDULED_COPY.delete.pending : SCHEDULED_COPY.delete.confirm)}
               </Button>
             </div>
           </div>
@@ -534,7 +544,7 @@ export function ScheduledReviewDialog({
               data-testid="scheduled-review-close"
               onClick={() => onOpenChange(false)}
             >
-              {SCHEDULED_COPY.review.close}
+              {formatMessage(SCHEDULED_COPY.review.close)}
             </Button>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
@@ -545,7 +555,7 @@ export function ScheduledReviewDialog({
                 data-testid="scheduled-review-delete"
                 onClick={() => setConfirming(true)}
               >
-                {SCHEDULED_COPY.action.delete}
+                {formatMessage(SCHEDULED_COPY.action.delete)}
               </Button>
               {/* 본문을 보이기 전에는 이 둘이 서지 않는다(ADR-0208 D14). 로딩 중에는 흐리다. */}
               <Button
@@ -555,7 +565,7 @@ export function ScheduledReviewDialog({
                 data-testid="scheduled-review-rearm"
                 onClick={onRearm}
               >
-                {SCHEDULED_COPY.action.rearm}
+                {formatMessage(SCHEDULED_COPY.action.rearm)}
               </Button>
               <Button
                 type="button"
@@ -565,7 +575,7 @@ export function ScheduledReviewDialog({
                 onClick={onSendNow}
               >
                 {pending === "sendNow" && <Loader2 aria-hidden="true" className="spinner-busy" />}
-                {pending === "sendNow" ? SCHEDULED_COPY.list.sending : SCHEDULED_COPY.action.sendNow}
+                {formatMessage(pending === "sendNow" ? SCHEDULED_COPY.list.sending : SCHEDULED_COPY.action.sendNow)}
               </Button>
             </div>
           </div>

@@ -8,6 +8,17 @@ import {
   placeWord,
 } from "./copy";
 import { SCHEDULED_FAILURE_REASONS } from "./types";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`scheduled.json`)에 있고 `SCHEDULED_COPY`는 그 키 표다(#6058). 명세의 문장을 단정하는 이 시험은 제품과 같은
+// 한국어 생성물로 키를 풀어서 예전과 똑같이 한 글자씩 견준다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const say = (ref: MessageRef) => {
+  const speak = ko as unknown as (key: string, values?: unknown) => string;
+  return ref.values === undefined ? speak(ref.key) : speak(ref.key, ref.values);
+};
 
 // 아래 문장은 UI 명세(ADR-0208 부록 B) 3절의 표를 글자 그대로 옮긴 것이다. 코어 `copy.ts`가 이 문장과
 // 한 글자라도 다르면 이 시험이 깨진다. 명세를 먼저 고치고 여기를 맞춘다.
@@ -94,117 +105,128 @@ const SPEC_3_1: ReadonlyArray<readonly [string, string]> = [
   ["offline.list", "연결이 없어요. 연결되면 예약을 바꿀 수 있어요."],
 ];
 
+const sayLines = (lines: { reason: MessageRef; next: MessageRef }) => ({
+  reason: say(lines.reason),
+  next: say(lines.next),
+});
+
 function lookup(path: string): unknown {
   return path.split(".").reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], SCHEDULED_COPY);
 }
 
 describe("scheduled copy table (UI spec section 3)", () => {
   it.each(SPEC_3_1)("%s is the spec sentence, character for character", (path, sentence) => {
-    expect(lookup(path)).toBe(sentence);
+    expect(ko(lookup(path) as PlainMessageKey)).toBe(sentence);
   });
 
   it("builds the parameterised sentences the spec writes with placeholders", () => {
     const copy = SCHEDULED_COPY;
-    expect(copy.menu.zone("Asia/Seoul (UTC+9)")).toBe("Asia/Seoul (UTC+9) 기준이에요");
-    expect(copy.dialog.preview("내일 오전 9:00")).toBe("내일 오전 9:00에 보내요");
-    expect(copy.status.scheduled("내일 오전 9:00")).toBe("내일 오전 9:00에 보낼게요");
-    expect(copy.banner.pending("채널", 2)).toBe("이 채널에 예약된 메시지 2개");
-    expect(copy.banner.pending("대화", 2)).toBe("이 대화에 예약된 메시지 2개");
-    expect(copy.banner.pending("스레드", 1)).toBe("이 스레드에 예약된 메시지 1개");
-    expect(copy.banner.failed(1)).toBe("예약한 메시지 1개를 보내지 못했어요");
-    expect(copy.nav.badgeLabel(3)).toBe("보내지 못한 예약 3개");
-    expect(copy.list.count(3)).toBe("내 예약 3개");
-    expect(copy.list.when("10월 26일 (월) 오전 9:00")).toBe("10월 26일 (월) 오전 9:00에 보내요");
-    expect(copy.list.attachments(2)).toBe("첨부 2개");
-    expect(copy.list.filter("#일반")).toBe("#일반 예약만 보고 있어요");
-    expect(copy.action.rowMenu("#일반", "내일 오전 9:00")).toBe("#일반, 내일 오전 9:00 예약 동작");
-    expect(copy.review.attachments(2, ["일정.pdf", "변경목록.csv"])).toBe(
+    expect(ko(copy.menu.zone, { zone: "Asia/Seoul (UTC+9)" })).toBe("Asia/Seoul (UTC+9) 기준이에요");
+    expect(ko(copy.dialog.preview, { when: "내일 오전 9:00" })).toBe("내일 오전 9:00에 보내요");
+    expect(ko(copy.status.scheduled, { when: "내일 오전 9:00" })).toBe("내일 오전 9:00에 보낼게요");
+    expect(ko(copy.banner.pending, { place: "channel", count: 2 })).toBe("이 채널에 예약된 메시지 2개");
+    expect(ko(copy.banner.pending, { place: "dm", count: 2 })).toBe("이 대화에 예약된 메시지 2개");
+    expect(ko(copy.banner.pending, { place: "thread", count: 1 })).toBe("이 스레드에 예약된 메시지 1개");
+    expect(ko(copy.banner.failed, { count: 1 })).toBe("예약한 메시지 1개를 보내지 못했어요");
+    expect(ko(copy.nav.badgeLabel, { count: 3 })).toBe("보내지 못한 예약 3개");
+    expect(ko(copy.list.count, { count: 3 })).toBe("내 예약 3개");
+    expect(ko(copy.list.when, { when: "10월 26일 (월) 오전 9:00" })).toBe("10월 26일 (월) 오전 9:00에 보내요");
+    expect(ko(copy.list.attachments, { count: 2 })).toBe("첨부 2개");
+    expect(ko(copy.list.filter, { placeLabel: "#일반" })).toBe("#일반 예약만 보고 있어요");
+    expect(ko(copy.action.rowMenu, { channelLabel: "#일반", when: "내일 오전 9:00" })).toBe(
+      "#일반, 내일 오전 9:00 예약 동작"
+    );
+    expect(ko(copy.review.attachments, { count: 2, names: "일정.pdf, 변경목록.csv" })).toBe(
       "첨부 2개: 일정.pdf, 변경목록.csv"
     );
-    expect(copy.review.when("내일 오전 9:00")).toBe("내일 오전 9:00에 보내려던 예약이에요");
+    expect(ko(copy.review.when, { when: "내일 오전 9:00" })).toBe("내일 오전 9:00에 보내려던 예약이에요");
   });
 
-  it("picks the place word: 채널, 대화 for any DM, 스레드 for a thread reply", () => {
-    expect(placeWord({ kind: "public" })).toBe("채널");
-    expect(placeWord({ kind: "private" })).toBe("채널");
-    expect(placeWord({ kind: "dm" })).toBe("대화");
-    expect(placeWord({ kind: "dm", thread: true })).toBe("스레드");
-    expect(placeWord({ kind: undefined })).toBe("채널");
+  it("picks the place word: channel, dm for any DM, thread for a thread reply", () => {
+    expect(placeWord({ kind: "public" })).toBe("channel");
+    expect(placeWord({ kind: "private" })).toBe("channel");
+    expect(placeWord({ kind: "dm" })).toBe("dm");
+    expect(placeWord({ kind: "dm", thread: true })).toBe("thread");
+    expect(placeWord({ kind: undefined })).toBe("channel");
     // 오류 문장은 스레드가 아니라 그 채널·대화의 멤버십을 말한다.
-    expect(errorPlaceWord("dm")).toBe("대화");
-    expect(errorPlaceWord("public")).toBe("채널");
+    expect(errorPlaceWord("dm")).toBe("dm");
+    expect(errorPlaceWord("public")).toBe("channel");
   });
 
   it("labels a DM row with the right 과/와 and reuses the reminder's unknown-channel label", () => {
-    expect(dmConversationLabel("김인턴")).toBe("김인턴과의 대화");
-    expect(dmConversationLabel("하나")).toBe("하나와의 대화");
+    expect(say(dmConversationLabel("김인턴"))).toBe("김인턴과의 대화");
+    expect(say(dmConversationLabel("하나"))).toBe("하나와의 대화");
+    expect(say(dmConversationLabel("Hermes"))).toBe("Hermes와의 대화");
     expect(SCHEDULED_UNKNOWN_CHANNEL_LABEL).toBe("알 수 없는 채널");
   });
 });
 
 describe("copy failure sentence (not in the spec table, design-review #4215 round 2 M5)", () => {
   it("says it in two haeyo lines: the reason, then where the whole text can be copied from", () => {
-    expect(SCHEDULED_COPY.list.copyFailed).toEqual({
+    expect({
+      reason: ko(SCHEDULED_COPY.list.copyFailed.reason),
+      next: ko(SCHEDULED_COPY.list.copyFailed.next),
+    }).toEqual({
       reason: "복사하지 못했어요",
       next: "고치기에서 글을 열어 복사할 수 있어요",
     });
   });
 
   it("names an action that exists: 고치기 is the row action that opens the whole text", () => {
-    expect(SCHEDULED_COPY.list.copyFailed.next).toContain(SCHEDULED_COPY.action.edit);
+    expect(ko(SCHEDULED_COPY.list.copyFailed.next)).toContain(ko(SCHEDULED_COPY.action.edit));
   });
 });
 
 describe("failure reason sentences (UI spec 3.2)", () => {
   it("names all eight reasons with the spec's reason line and next-action line", () => {
-    expect(failureLines("sessions_ended", "채널")).toEqual({
+    expect(sayLines(failureLines("sessions_ended", "channel"))).toEqual({
       reason: "로그인이 끝나서 예약을 멈췄어요",
       next: "내용을 확인하고 보내거나 다시 예약해 주세요",
     });
-    expect(failureLines("author_inactive", "채널")).toEqual({
+    expect(sayLines(failureLines("author_inactive", "channel"))).toEqual({
       reason: "계정이 정지돼 있어서 보내지 못했어요",
       next: "정지가 풀린 뒤에 다시 예약해 주세요",
     });
-    expect(failureLines("missed", "채널")).toEqual({
+    expect(sayLines(failureLines("missed", "channel"))).toEqual({
       reason: "예약한 시각이 많이 지나서 보내지 않았어요",
       next: "지금 보내거나 다시 예약할 수 있어요",
     });
-    expect(failureLines("send_error", "채널")).toEqual({
+    expect(sayLines(failureLines("send_error", "channel"))).toEqual({
       reason: "서버 문제로 보내지 못했어요",
       next: "잠시 뒤에 지금 보내기로 다시 해 볼 수 있어요",
     });
-    expect(failureLines("attachment_unavailable", "채널")).toEqual({
+    expect(sayLines(failureLines("attachment_unavailable", "channel"))).toEqual({
       reason: "첨부한 파일을 쓸 수 없어서 보내지 못했어요",
       next: "파일을 다시 올려서 새로 예약해 주세요",
     });
-    expect(failureLines("root_unavailable", "채널")).toEqual({
+    expect(sayLines(failureLines("root_unavailable", "channel"))).toEqual({
       reason: "답하려던 메시지가 지워져서 보내지 못했어요",
       next: "내용을 복사해서 채널에 새로 보내 주세요",
     });
   });
 
   it("puts the 장소 word where the spec has a placeholder", () => {
-    expect(failureLines("not_member", "채널")).toEqual({
+    expect(sayLines(failureLines("not_member", "channel"))).toEqual({
       reason: "이 채널에서 나가서 보내지 못했어요",
       next: "채널에 다시 들어간 뒤에 보낼 수 있어요",
     });
-    expect(failureLines("not_member", "대화")).toEqual({
+    expect(sayLines(failureLines("not_member", "dm"))).toEqual({
       reason: "이 대화에서 나가서 보내지 못했어요",
       next: "대화에 다시 들어간 뒤에 보낼 수 있어요",
     });
-    expect(failureLines("not_allowed", "대화")).toEqual({
+    expect(sayLines(failureLines("not_allowed", "dm"))).toEqual({
       reason: "이 대화의 규칙 때문에 보내지 못했어요",
       next: "관리자에게 물어보세요",
     });
-    expect(failureLines("root_unavailable", "대화").next).toBe("내용을 복사해서 대화에 새로 보내 주세요");
+    expect(say(failureLines("root_unavailable", "dm").next)).toBe("내용을 복사해서 대화에 새로 보내 주세요");
   });
 
   it("reads a missing reason like not_allowed, and every closed reason has two non-empty lines", () => {
-    expect(failureLines(undefined, "채널")).toEqual(failureLines("not_allowed", "채널"));
+    expect(failureLines(undefined, "channel")).toEqual(failureLines("not_allowed", "channel"));
     for (const reason of SCHEDULED_FAILURE_REASONS) {
-      const lines = failureLines(reason, "채널");
-      expect(lines.reason.length, reason).toBeGreaterThan(0);
-      expect(lines.next.length, reason).toBeGreaterThan(0);
+      const lines = failureLines(reason, "channel");
+      expect(say(lines.reason).length, reason).toBeGreaterThan(0);
+      expect(say(lines.next).length, reason).toBeGreaterThan(0);
     }
   });
 });

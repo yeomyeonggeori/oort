@@ -10970,6 +10970,1148 @@ export const catalog: MessageCatalog = {
       "value": "Open the thread this reply is in"
     }
   ],
+  "scheduled.action.change": [
+    {
+      "type": 0,
+      "value": "Change time"
+    }
+  ],
+  "scheduled.action.copy": [
+    {
+      "type": 0,
+      "value": "Copy text"
+    }
+  ],
+  "scheduled.action.delete": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "scheduled.action.edit": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "scheduled.action.rearm": [
+    {
+      "type": 0,
+      "value": "Schedule again"
+    }
+  ],
+  "scheduled.action.review": [
+    {
+      "type": 0,
+      "value": "Review"
+    }
+  ],
+  "scheduled.action.rowMenu": [
+    {
+      "type": 0,
+      "value": "Scheduled message actions, "
+    },
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.action.sendNow": [
+    {
+      "type": 0,
+      "value": "Send now"
+    }
+  ],
+  "scheduled.banner.action": [
+    {
+      "type": 0,
+      "value": "View"
+    }
+  ],
+  "scheduled.banner.failed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " couldn't be sent"
+    }
+  ],
+  "scheduled.banner.pending": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "dm": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "thread"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.block.titleTwoLines": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "scheduled.delete.body": [
+    {
+      "type": 0,
+      "value": "It won't be sent. This can't be undone."
+    }
+  ],
+  "scheduled.delete.confirm": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "scheduled.delete.pending": [
+    {
+      "type": 0,
+      "value": "Deleting"
+    }
+  ],
+  "scheduled.delete.title": [
+    {
+      "type": 0,
+      "value": "Delete this scheduled message?"
+    }
+  ],
+  "scheduled.dialog.commit": [
+    {
+      "type": 0,
+      "value": "Schedule"
+    }
+  ],
+  "scheduled.dialog.commitChange": [
+    {
+      "type": 0,
+      "value": "Save change"
+    }
+  ],
+  "scheduled.dialog.date": [
+    {
+      "type": 0,
+      "value": "Date"
+    }
+  ],
+  "scheduled.dialog.description": [
+    {
+      "type": 0,
+      "value": "This message will be sent at the time you pick, even if your device is off."
+    }
+  ],
+  "scheduled.dialog.errFar": [
+    {
+      "type": 0,
+      "value": "Pick a time within 120 days"
+    }
+  ],
+  "scheduled.dialog.errInvalid": [
+    {
+      "type": 0,
+      "value": "Check the date and time"
+    }
+  ],
+  "scheduled.dialog.errSoon": [
+    {
+      "type": 0,
+      "value": "Pick a time at least 1 minute from now"
+    }
+  ],
+  "scheduled.dialog.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so this isn't available right now. Try again once you're connected."
+    }
+  ],
+  "scheduled.dialog.preview": [
+    {
+      "type": 0,
+      "value": "Sends "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.dialog.saving": [
+    {
+      "type": 0,
+      "value": "Scheduling"
+    }
+  ],
+  "scheduled.dialog.time": [
+    {
+      "type": 0,
+      "value": "Time"
+    }
+  ],
+  "scheduled.dialog.title": [
+    {
+      "type": 0,
+      "value": "Pick a send time"
+    }
+  ],
+  "scheduled.dialog.titleChange": [
+    {
+      "type": 0,
+      "value": "Change send time"
+    }
+  ],
+  "scheduled.dialog.titleRearm": [
+    {
+      "type": 0,
+      "value": "Schedule again"
+    }
+  ],
+  "scheduled.disabled.attachFailedNextRemove": [
+    {
+      "type": 0,
+      "value": "Remove it to schedule"
+    }
+  ],
+  "scheduled.disabled.attachFailedNextRetry": [
+    {
+      "type": 0,
+      "value": "Upload it again or remove it to schedule"
+    }
+  ],
+  "scheduled.disabled.attachFailedReason": [
+    {
+      "type": 0,
+      "value": "A file didn't upload"
+    }
+  ],
+  "scheduled.disabled.attachUploadingNext": [
+    {
+      "type": 0,
+      "value": "You can schedule once it finishes"
+    }
+  ],
+  "scheduled.disabled.attachUploadingReason": [
+    {
+      "type": 0,
+      "value": "A file is still uploading"
+    }
+  ],
+  "scheduled.disabled.commandNext": [
+    {
+      "type": 0,
+      "value": "Remove the command to schedule it"
+    }
+  ],
+  "scheduled.disabled.commandReason": [
+    {
+      "type": 0,
+      "value": "Commands can't be scheduled"
+    }
+  ],
+  "scheduled.disabled.emptyReason": [
+    {
+      "type": 0,
+      "value": "Write something to schedule it"
+    }
+  ],
+  "scheduled.disabled.limit": [
+    {
+      "type": 0,
+      "value": "You can schedule up to 50 messages. Delete a pending one or send it now, then try again."
+    }
+  ],
+  "scheduled.disabled.personalCallNext": [
+    {
+      "type": 0,
+      "value": "Remove the call to schedule it"
+    }
+  ],
+  "scheduled.disabled.personalCallReason": [
+    {
+      "type": 0,
+      "value": "Personal agent calls can't be scheduled"
+    }
+  ],
+  "scheduled.disabled.quoteNext": [
+    {
+      "type": 0,
+      "value": "Remove the quote to schedule it"
+    }
+  ],
+  "scheduled.disabled.quoteReason": [
+    {
+      "type": 0,
+      "value": "Quoted replies can't be scheduled"
+    }
+  ],
+  "scheduled.disabled.unavailableNext": [
+    {
+      "type": 0,
+      "value": "Ask an admin"
+    }
+  ],
+  "scheduled.disabled.unavailableReason": [
+    {
+      "type": 0,
+      "value": "Scheduling isn't available on this server"
+    }
+  ],
+  "scheduled.dm.conversationLabel": [
+    {
+      "type": 0,
+      "value": "Conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "scheduled.edit.attachNote": [
+    {
+      "type": 0,
+      "value": "Attachments can't be changed. To change them, delete this and schedule it again."
+    }
+  ],
+  "scheduled.edit.commit": [
+    {
+      "type": 0,
+      "value": "Save changes"
+    }
+  ],
+  "scheduled.edit.title": [
+    {
+      "type": 0,
+      "value": "Edit scheduled message"
+    }
+  ],
+  "scheduled.empty.action": [
+    {
+      "type": 0,
+      "value": "Back to the conversation"
+    }
+  ],
+  "scheduled.empty.bodyPhone": [
+    {
+      "type": 0,
+      "value": "Long-press Send to schedule a message"
+    }
+  ],
+  "scheduled.empty.bodyWeb": [
+    {
+      "type": 0,
+      "value": "Write a message, then pick a time from the arrow next to Send"
+    }
+  ],
+  "scheduled.empty.title": [
+    {
+      "type": 0,
+      "value": "No scheduled messages"
+    }
+  ],
+  "scheduled.error.tooLate": [
+    {
+      "type": 0,
+      "value": "Sending soon, so it can't be changed. You can send it now or delete it."
+    }
+  ],
+  "scheduled.errors.alreadySent": [
+    {
+      "type": 0,
+      "value": "Already sent"
+    }
+  ],
+  "scheduled.errors.attachmentReserved": [
+    {
+      "type": 0,
+      "value": "This file is used by another scheduled message. Pick a different file or delete that one."
+    }
+  ],
+  "scheduled.errors.attachmentUnusable": [
+    {
+      "type": 0,
+      "value": "An attached file can't be used. Upload it again."
+    }
+  ],
+  "scheduled.errors.busyAct": [
+    {
+      "type": 0,
+      "value": "It's being sent right now. Reload the list in a moment."
+    }
+  ],
+  "scheduled.errors.busyEdit": [
+    {
+      "type": 0,
+      "value": "It's being sent right now, so it can't be changed. Try again in a moment."
+    }
+  ],
+  "scheduled.errors.createBadRequest": [
+    {
+      "type": 0,
+      "value": "Check the attachments and the message you're replying to. You can attach up to 20 files, and each file only once."
+    }
+  ],
+  "scheduled.errors.createForbidden": [
+    {
+      "type": 0,
+      "value": "You can't schedule in this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": ". Check that you're a member and that the attachments are your own files."
+    }
+  ],
+  "scheduled.errors.createNotFound": [
+    {
+      "type": 0,
+      "value": "The message you were replying to or an attachment can't be found. Check the content and try again."
+    }
+  ],
+  "scheduled.errors.emptyMessage": [
+    {
+      "type": 0,
+      "value": "Add some text or an attachment to send"
+    }
+  ],
+  "scheduled.errors.otherCreate": [
+    {
+      "type": 0,
+      "value": "Couldn't schedule it. Try again."
+    }
+  ],
+  "scheduled.errors.otherWrite": [
+    {
+      "type": 0,
+      "value": "Couldn't process that. Reload the list and try again."
+    }
+  ],
+  "scheduled.errors.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "scheduled.errors.rowNotFound": [
+    {
+      "type": 0,
+      "value": "This scheduled message can't be found. It may have been deleted."
+    }
+  ],
+  "scheduled.errors.unknownCreate": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm it was scheduled. Check your connection and try again."
+    }
+  ],
+  "scheduled.errors.unknownDelete": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm it was deleted. Check your connection and reload the list."
+    }
+  ],
+  "scheduled.errors.unknownEdit": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm the change. Check your connection and reload the list."
+    }
+  ],
+  "scheduled.errors.unknownSendNow": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm it was sent. Check your connection and reload the list."
+    }
+  ],
+  "scheduled.failure.attachmentUnavailableNext": [
+    {
+      "type": 0,
+      "value": "Upload the file again and schedule it as new"
+    }
+  ],
+  "scheduled.failure.attachmentUnavailableReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because an attached file can't be used"
+    }
+  ],
+  "scheduled.failure.authorInactiveNext": [
+    {
+      "type": 0,
+      "value": "Schedule it again once the suspension is lifted"
+    }
+  ],
+  "scheduled.failure.authorInactiveReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because the account is suspended"
+    }
+  ],
+  "scheduled.failure.missedNext": [
+    {
+      "type": 0,
+      "value": "You can send it now or schedule it again"
+    }
+  ],
+  "scheduled.failure.missedReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because the scheduled time passed long ago"
+    }
+  ],
+  "scheduled.failure.notAllowedNext": [
+    {
+      "type": 0,
+      "value": "Ask an admin"
+    }
+  ],
+  "scheduled.failure.notAllowedReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because of this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "'s rules"
+    }
+  ],
+  "scheduled.failure.notMemberNext": [
+    {
+      "type": 0,
+      "value": "You can send it after you rejoin the "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.failure.notMemberReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because you left this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.failure.rootUnavailableNext": [
+    {
+      "type": 0,
+      "value": "Copy the text and send it as a new message in the "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.failure.rootUnavailableReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because the message you were replying to was deleted"
+    }
+  ],
+  "scheduled.failure.sendErrorNext": [
+    {
+      "type": 0,
+      "value": "Try Send now again in a moment"
+    }
+  ],
+  "scheduled.failure.sendErrorReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because of a server problem"
+    }
+  ],
+  "scheduled.failure.sessionsEndedNext": [
+    {
+      "type": 0,
+      "value": "Review it, then send it or schedule it again"
+    }
+  ],
+  "scheduled.failure.sessionsEndedReason": [
+    {
+      "type": 0,
+      "value": "Scheduling paused because your session ended"
+    }
+  ],
+  "scheduled.list.attachments": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "scheduled.list.copyFailedNext": [
+    {
+      "type": 0,
+      "value": "Open the text in Edit to copy it"
+    }
+  ],
+  "scheduled.list.copyFailedReason": [
+    {
+      "type": 0,
+      "value": "Couldn't copy"
+    }
+  ],
+  "scheduled.list.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "scheduled.list.filter": [
+    {
+      "type": 0,
+      "value": "Showing scheduled messages for "
+    },
+    {
+      "type": 1,
+      "value": "placeLabel"
+    },
+    {
+      "type": 0,
+      "value": " only"
+    }
+  ],
+  "scheduled.list.filterAction": [
+    {
+      "type": 0,
+      "value": "Show all"
+    }
+  ],
+  "scheduled.list.sectionFailed": [
+    {
+      "type": 0,
+      "value": "Not sent"
+    }
+  ],
+  "scheduled.list.sectionPending": [
+    {
+      "type": 0,
+      "value": "Upcoming"
+    }
+  ],
+  "scheduled.list.soon": [
+    {
+      "type": 0,
+      "value": "Sending soon"
+    }
+  ],
+  "scheduled.list.title": [
+    {
+      "type": 0,
+      "value": "Scheduled"
+    }
+  ],
+  "scheduled.list.when": [
+    {
+      "type": 0,
+      "value": "Sends "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.load.error": [
+    {
+      "type": 0,
+      "value": "Couldn't load scheduled messages"
+    }
+  ],
+  "scheduled.lock.reason": [
+    {
+      "type": 0,
+      "value": "Sending soon, so it can't be changed"
+    }
+  ],
+  "scheduled.menu.custom": [
+    {
+      "type": 0,
+      "value": "Pick a time…"
+    }
+  ],
+  "scheduled.menu.customDetail": [
+    {
+      "type": 0,
+      "value": "Choose a date and time"
+    }
+  ],
+  "scheduled.menu.routingNote": [
+    {
+      "type": 0,
+      "value": "The model you pick isn't saved with a scheduled message"
+    }
+  ],
+  "scheduled.menu.zone": [
+    {
+      "type": 0,
+      "value": "Times are in "
+    },
+    {
+      "type": 1,
+      "value": "zone"
+    }
+  ],
+  "scheduled.nav.badgeLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " not sent"
+    }
+  ],
+  "scheduled.nav.label": [
+    {
+      "type": 0,
+      "value": "Scheduled"
+    }
+  ],
+  "scheduled.offline.list": [
+    {
+      "type": 0,
+      "value": "You're offline. You can change scheduled messages once you're connected."
+    }
+  ],
+  "scheduled.preset.nextMonday": [
+    {
+      "type": 0,
+      "value": "Next Monday"
+    }
+  ],
+  "scheduled.preset.tomorrow": [
+    {
+      "type": 0,
+      "value": "Tomorrow"
+    }
+  ],
+  "scheduled.review.attachments": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "scheduled.review.body": [
+    {
+      "type": 0,
+      "value": "This scheduled message paused because your session ended. Check that it's what you wrote, then send it."
+    }
+  ],
+  "scheduled.review.bodyLabel": [
+    {
+      "type": 0,
+      "value": "Scheduled message text"
+    }
+  ],
+  "scheduled.review.title": [
+    {
+      "type": 0,
+      "value": "Review the message"
+    }
+  ],
+  "scheduled.review.when": [
+    {
+      "type": 0,
+      "value": "It was set to send "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.row.ariaNoPreview": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "tail"
+    }
+  ],
+  "scheduled.row.ariaWithPreview": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "tail"
+    }
+  ],
+  "scheduled.secretKey.lead": [
+    {
+      "type": 0,
+      "value": "Don't paste keys into chat. This message wasn't scheduled."
+    }
+  ],
+  "scheduled.status.scheduled": [
+    {
+      "type": 0,
+      "value": "Scheduled to send "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.status.sentNow": [
+    {
+      "type": 0,
+      "value": "Message sent"
+    }
+  ],
+  "scheduled.trigger.hint": [
+    {
+      "type": 0,
+      "value": "Long-press to schedule"
+    }
+  ],
+  "scheduled.trigger.label": [
+    {
+      "type": 0,
+      "value": "Schedule send"
+    }
+  ],
   "search.group.channels": [
     {
       "type": 0,

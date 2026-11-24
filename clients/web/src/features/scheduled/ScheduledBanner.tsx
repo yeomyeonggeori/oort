@@ -2,11 +2,12 @@ import { CircleAlert, Clock } from "lucide-react";
 import { useInRouterContext, useNavigate } from "react-router-dom";
 import { SCHEDULED_COPY, type PlaceWord } from "@momo/core/features/scheduled/copy";
 import {
-  bannerLine,
+  bannerRef,
   scheduledBanner,
   type ScheduledPlace as ScheduledBannerPlace,
 } from "@momo/core/features/scheduled/model";
 import { InlineBanner } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { scheduledListPath } from "./scheduledPaths";
 import { useScheduled } from "./useScheduled";
 
@@ -40,11 +41,13 @@ function BannerBody({
   className,
   onOpen,
 }: BannerProps & { onOpen?: () => void }) {
+  const formatMessage = useFormatMessage();
   const { rows, surface } = useScheduled();
   if (surface === "absent") return null;
   const banner = scheduledBanner(rows, place);
   if (banner === null) return null;
   const failed = banner.tone === "failed";
+  const bannerText = bannerRef(banner, word);
   return (
     <InlineBanner
       tone={failed ? "error" : "neutral"}
@@ -57,8 +60,8 @@ function BannerBody({
       }
       // 좁은 칸(320px 스레드 패널)에서 한 줄이 넘으면 두 줄이 비슷한 길이로 접힌다(`text-balance`, `PauseBanner`와 같은
       // 처방): 안 그러면 「1개」나 「못했어요」가 홀로 다음 줄에 남는다(design-review #4215 M3).
-      message={<span className="block text-balance">{bannerLine(banner, word)}</span>}
-      {...(onOpen === undefined ? {} : { actionLabel: SCHEDULED_COPY.banner.action, onAction: onOpen })}
+      message={<span className="block text-balance">{formatMessage(bannerText.key, bannerText.values as never)}</span>}
+      {...(onOpen === undefined ? {} : { actionLabel: formatMessage(SCHEDULED_COPY.banner.action), onAction: onOpen })}
       separator={false}
       {...(className === undefined ? {} : { className })}
       testId={testId}

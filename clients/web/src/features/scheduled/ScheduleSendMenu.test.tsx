@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import {cleanupMounts, control, createCopy, flush, mount as mountUi} from "@/testkit";
 import {SCHEDULED_COPY} from "@momo/core/features/scheduled/copy";
 
@@ -9,8 +9,17 @@ import { scheduleGate, type ScheduleGate } from "@momo/core/features/scheduled/g
 import { scheduledPresets, scheduledZoneLine } from "@momo/core/features/scheduled/presets";
 import { ScheduleSendMenu, type ScheduleSendMenuProps } from "./ScheduleSendMenu";
 import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 
-const copy = createCopy(SCHEDULED_COPY);
+// 문장은 사전에 있고 `SCHEDULED_COPY`는 키 표다(#6058). 시험은 한국어 생성물로 키를 풀어 예전 문장 그대로 단정한다.
+const keyOf = createCopy(SCHEDULED_COPY);
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const copy = (path: Parameters<typeof keyOf>[0]) => (ko as unknown as (key: string) => string)(keyOf(path));
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // ADR-0208 부록 B 1.1·1.3·1.10(#4215): 보내기 옆 ▾와 예약 메뉴를 호스트 없이 잰다. 판정(`scheduleGate`)은 진짜이고
@@ -23,8 +32,9 @@ const SUNDAY = new Date("2026-10-25T22:00:00+09:00").getTime();
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let host: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  koLocale = await koreanLocale();
 });
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -53,13 +63,18 @@ function gateOf(over: Partial<Parameters<typeof scheduleGate>[0]> = {}): Schedul
   });
 }
 
+function zoneText(atMs: number): string {
+  const ref = scheduledZoneLine(atMs);
+  return (ko as unknown as (key: string, values?: unknown) => string)(ref.key, ref.values);
+}
+
 function propsOf(over: Partial<ScheduleSendMenuProps> = {}): ScheduleSendMenuProps {
   const presets = scheduledPresets(NOW);
   return {
     gate: gateOf(),
     busy: false,
     presets,
-    zoneLine: scheduledZoneLine(presets[0]?.atMs ?? NOW),
+    zoneLine: zoneText(presets[0]?.atMs ?? NOW),
     onOpen: vi.fn(),
     onPickPreset: vi.fn(),
     onPickCustom: vi.fn(),
@@ -76,7 +91,7 @@ async function mount(props: ScheduleSendMenuProps) {
   parentClicks = 0;
   await act(async () => {
     host = mountUi(
-      createElement("div", { "data-testid": "parent", onClick: () => { parentClicks += 1; } }, createElement(ScheduleSendMenu, props))
+      withKo(createElement("div", { "data-testid": "parent", onClick: () => { parentClicks += 1; } }, createElement(ScheduleSendMenu, props)))
     );
   });
 }

@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 보내기 옆 ▾ 반쪽과 예약 메뉴 (UI 명세 1.1·1.3, ADR-0208 D16, #4215).
@@ -92,6 +93,7 @@ export function ScheduleSendMenu({
   blockedTitle,
   testIdPrefix,
 }: ScheduleSendMenuProps) {
+  const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -123,7 +125,7 @@ export function ScheduleSendMenu({
               ref={triggerRef}
               type="button"
               className={triggerClass}
-              aria-label={SCHEDULED_COPY.trigger.label}
+              aria-label={formatMessage(SCHEDULED_COPY.trigger.label)}
               aria-haspopup="menu"
               aria-expanded={open}
               aria-disabled={blocked || undefined}
@@ -179,7 +181,7 @@ export function ScheduleSendMenu({
               className="max-w-pane break-keep px-2 py-1 text-meta text-ink-muted"
               data-testid={`${testIdPrefix}-schedule-limit`}
             >
-              {SCHEDULED_COPY.disabled.limit}
+              {formatMessage(SCHEDULED_COPY.disabled.limit)}
             </p>
           )}
           {presets.map((preset) => (
@@ -200,7 +202,7 @@ export function ScheduleSendMenu({
               }}
             >
               <span className="min-w-0 flex-1 truncate" data-numeric>
-                {preset.label} {preset.time}
+                {formatMessage(preset.labelKey)} {preset.time}
               </span>
               <span className="shrink-0 text-meta text-ink-muted" data-numeric>
                 {preset.date}
@@ -221,7 +223,7 @@ export function ScheduleSendMenu({
               chosen.current = "custom";
             }}
           >
-            {SCHEDULED_COPY.menu.custom}
+            {formatMessage(SCHEDULED_COPY.menu.custom)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {gate.routingNote && (
@@ -229,7 +231,7 @@ export function ScheduleSendMenu({
               className="max-w-pane break-keep px-2 py-1 text-meta text-ink-muted"
               data-testid={`${testIdPrefix}-schedule-routing-note`}
             >
-              {SCHEDULED_COPY.menu.routingNote}
+              {formatMessage(SCHEDULED_COPY.menu.routingNote)}
             </p>
           )}
           <p className="px-2 py-1 text-meta text-ink-muted" data-testid={`${testIdPrefix}-schedule-zone`}>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -11,6 +11,15 @@ import type { ScheduledMessageFrame } from "@momo/core/features/scheduled/events
 import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
 import type { ScheduledMessage } from "@momo/core/features/scheduled/types";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // ADR-0208 부록 B(#4215): 사이드바 「예약됨」 줄. 보낼 예정 또는 보내지 못함이 있을 때만 서고, 잉크 알약은 **보내지
@@ -121,7 +130,7 @@ async function mount(realtime: RealtimeHandle | null = null) {
   mountedRoot = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   await act(async () => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(
         QueryClientProvider,
         { client },
@@ -131,7 +140,7 @@ async function mount(realtime: RealtimeHandle | null = null) {
           createElement(SessionProvider, { value: session(realtime) }, createElement(SidebarDestinations, { active: ACTIVE, needsMe: NEEDS_ME }))
         )
       )
-    );
+    ));
   });
   for (let i = 0; i < 3; i += 1) {
     await act(async () => {

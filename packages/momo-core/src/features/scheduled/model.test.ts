@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SCHEDULED_REFETCH_GRACE_MS,
-  actionLabel,
-  attachmentChipLine,
+  actionLabelKey,
+  attachmentChipRef,
   attachmentCount,
-  bannerLine,
+  bannerRef,
   compareScheduled,
   editLock,
   editableUntilMs,
@@ -13,21 +13,58 @@ import {
   needsReview,
   nextScheduledBoundaryMs,
   rowActions,
-  rowAriaName,
-  rowMenuAriaName,
+  rowAriaName as rowAriaNameWith,
+  rowMenuAriaName as rowMenuAriaNameWith,
   rowPhase,
-  rowWhenLine,
+  rowWhenRef,
   rowsInPlace,
-  reviewAttachmentsLine,
+  reviewAttachmentsRef,
   scheduledBanner,
   scheduledDisplayOrder,
-  scheduledNavEntry,
+  scheduledNavEntry as scheduledNavRefs,
   scheduledPreview,
   scheduledRefetchAtMs,
   scheduledSections,
   scheduledTotals,
 } from "./model";
 import type { ScheduledFailureReason, ScheduledMessage } from "./types";
+import type { ErrorPlaceWord, PlaceWord, ScheduledRef } from "./copy";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`scheduled.json`)에 있고 모델은 키를 돌려준다(#6058). 아래 단정은 예전 한국어 문장 그대로이고, 제품과 같은
+// 한국어 생성물로 키를 풀어 견준다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+const say = (ref: ScheduledRef) => {
+  const speak = ko as unknown as (key: string, values?: unknown) => string;
+  return ref.values === undefined ? speak(ref.key) : speak(ref.key, ref.values);
+};
+const PLACE: Record<string, PlaceWord> = { 채널: "channel", 대화: "dm", 스레드: "thread" };
+const bannerLine = (banner: Parameters<typeof bannerRef>[0], place: keyof typeof PLACE) =>
+  say(bannerRef(banner, PLACE[place]));
+const rowWhenLine = (row: ScheduledMessage, nowMs: number) => {
+  const ref = rowWhenRef(row, nowMs);
+  return ref === null ? "" : say(ref);
+};
+const actionLabel = (id: Parameters<typeof actionLabelKey>[0]) => ko(actionLabelKey(id));
+const attachmentChipLine = (row: ScheduledMessage) => {
+  const ref = attachmentChipRef(row);
+  return ref === null ? null : say(ref);
+};
+const reviewAttachmentsLine = (row: ScheduledMessage) => {
+  const ref = reviewAttachmentsRef(row);
+  return ref === null ? null : say(ref);
+};
+const rowAriaName = (row: ScheduledMessage, channelLabel: string, nowMs: number, place: keyof typeof PLACE) =>
+  rowAriaNameWith(formatMessage, row, channelLabel, nowMs, PLACE[place] as ErrorPlaceWord);
+const rowMenuAriaName = (row: ScheduledMessage, channelLabel: string, nowMs: number) =>
+  rowMenuAriaNameWith(formatMessage, row, channelLabel, nowMs);
+const scheduledNavEntry = (rows: Parameters<typeof scheduledNavRefs>[0]) => {
+  const entry = scheduledNavRefs(rows);
+  return { ...entry, badgeLabel: entry.badgeLabel === null ? null : say(entry.badgeLabel) };
+};
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";

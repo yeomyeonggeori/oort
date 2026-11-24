@@ -8,7 +8,7 @@ import {
   formatScheduledAt,
   scheduledPresets,
   scheduledZoneLine,
-  sendAtProblemSentence,
+  sendAtProblemRef,
   validateSendAt,
   type ScheduledPreset,
 } from "@momo/core/features/scheduled/presets";
@@ -23,6 +23,7 @@ import type { ScheduleSendMenuProps } from "./ScheduleSendMenu";
 import { useScheduled, useScheduledPlaces } from "./useScheduled";
 import { useTransientStatus } from "@/features/common/useTransientStatus";
 import { useComposerBlockedLine } from "@/features/common/blockedLines";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 입력창의 「예약해서 보내기」 흐름 한 벌 (ADR-0208 D16, UI 명세 0.3·0.4·0.5, #4215).
@@ -107,6 +108,7 @@ interface DialogState {
 const CLOSED_DIALOG: DialogState = { open: false, seedAtMs: 0, error: null };
 
 export function useComposerSchedule(options: ComposerScheduleOptions): ComposerSchedule {
+  const formatMessage = useFormatMessage();
   const data = useScheduled();
   const places = useScheduledPlaces();
   const { status, announce } = useTransientStatus();
@@ -154,7 +156,7 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
       // 메뉴를 열어 둔 사이 시각이 지났을 수 있다: 서버에 보내기 전에 말한다.
       const problem = validateSendAt(atMs, Date.now());
       if (problem !== null) {
-        openDialog(seedForDialog, { text: sendAtProblemSentence(problem) });
+        openDialog(seedForDialog, { text: sendAtProblemRef(problem) });
         return false;
       }
       // 키 모양 글은 고르는 순간 막는다(기존 키 차단 줄이 선다).
@@ -190,7 +192,11 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
         setDialog(CLOSED_DIALOG);
         // 요청 중에 다른 곳으로 옮겼으면 그 입력창에 이 확인을 말하지 않는다.
         if (now.channelId === channelId && now.rootId === rootId) {
-          announce(SCHEDULED_COPY.status.scheduled(formatScheduledAt(row.sendAtMs, Date.now()).full));
+          announce(
+            formatMessage(SCHEDULED_COPY.status.scheduled, {
+              when: formatScheduledAt(row.sendAtMs, Date.now()).full,
+            })
+          );
           // 메뉴에서 고른 예약은 메뉴가 닫히며 입력창으로 돌려준다. 대화상자에서 건 예약은 대화상자가 닫힌 뒤(Radix의
           // 초점 반환이 열었던 단추로 되돌리기 전에 가로채서) 입력창으로 보낸다.
           if (via === "dialog") focusInputOnClose.current = true;
@@ -208,7 +214,7 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
         setBusy(false);
       }
     },
-    [announce, data.mutations, openDialog]
+    [announce, data.mutations, formatMessage, openDialog]
   );
 
   const onOpen = useCallback((opener: HTMLElement | null) => {
@@ -216,11 +222,12 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
     setPresets(scheduledPresets(Date.now()));
   }, []);
 
+  const zoneRef = scheduledZoneLine(presets[0]?.atMs ?? Date.now());
   const menuProps: ScheduleSendMenuProps = {
     gate,
     busy: busy || options.hostBusy === true,
     presets,
-    zoneLine: scheduledZoneLine(presets[0]?.atMs ?? Date.now()),
+    zoneLine: formatMessage(zoneRef.key, zoneRef.values as never),
     onOpen,
     onPickPreset: (preset) => {
       void run(preset.atMs, "preset", preset.atMs);
@@ -236,11 +243,11 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
     },
     onBlockedPress: () => {
       const reason = gateRef.current.lines?.reason;
-      if (reason !== undefined) announce(reason);
+      if (reason !== undefined) announce(formatMessage(reason));
     },
     returnFocus: () => latest.current.focusInput(),
     blockedTitle:
-      scheduleBlockTitle(gate.lines) ?? (gate.block === "offline" ? blockedLine : null),
+      scheduleBlockTitle(formatMessage, gate.lines) ?? (gate.block === "offline" ? blockedLine : null),
     testIdPrefix: options.surface === "thread" ? "thread-composer" : "composer",
   };
 
@@ -277,10 +284,10 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
     // 프리셋 요청이 나는 동안은 **「예약 중」**이 3초 줄·낭독 노드에 선다: `aria-busy`는 낭독이 알리지 않고 눈에는 아무 신호도
     // 없어서, 느린 서버에서는 입력창이 몇 초 멈춘 것처럼 보이고 두 번째 누름이 말없이 무시됐다(design-review #4215 2회차 M4).
     // 직접 고르기에서 건 요청은 대화상자의 「예약 중」 단추가 말한다. 성공하면 같은 자리가 「…에 보낼게요」로 바뀐다.
-    statusText: busy && !dialog.open ? SCHEDULED_COPY.dialog.saving : status,
+    statusText: busy && !dialog.open ? formatMessage(SCHEDULED_COPY.dialog.saving) : status,
     menuProps,
     dialogProps,
     place: options.rootId === undefined ? { channelId: options.channelId } : { channelId: options.channelId, rootId: options.rootId },
-    bannerWord: options.rootId === undefined ? place.word : "스레드",
+    bannerWord: options.rootId === undefined ? place.word : "thread",
   };
 }

@@ -130,6 +130,7 @@ import {
   composerFormatHasPendingLink,
 } from "@/features/chat/composerFormat";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -328,6 +329,7 @@ export function Composer({
   const secretBlocked = secretBlocks > 0;
   // 키 차단 줄의 첫 문장은 막은 길이 정한다: 보내기는 「보내지 않았어요」, 예약은 「예약하지 않았어요」(예약 UI 명세 0.4).
   const [secretVia, setSecretVia] = useState<"send" | "schedule">("send");
+  const formatMessage = useFormatMessage();
   const cardAvailable = hasLocalCardHost(channelId);
   const { session, connStatus } = useSession();
   const autocomplete = useComposerAutocomplete({
@@ -1058,7 +1060,7 @@ export function Composer({
             id="composer-secret-block"
             testId="composer-secret-block"
             cardAvailable={cardAvailable}
-            {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
+            {...(secretVia === "schedule" ? { lead: formatMessage(SCHEDULED_COPY.secretKey.lead) } : {})}
           />
         )}
         <ComposerAutocompleteList

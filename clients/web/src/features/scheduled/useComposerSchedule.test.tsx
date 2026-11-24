@@ -1,12 +1,32 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import type { ScheduledMessage } from "@momo/core/features/scheduled/types";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+import type { ScheduledRef } from "@momo/core/features/scheduled/copy";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 오류 줄은 키와 값이다(#6058). 한국어 생성물로 풀어 예전 문장 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const sayRef = (ref: ScheduledRef | undefined): string | undefined => {
+  if (ref === undefined) return undefined;
+  const speak = koCopy as unknown as (key: string, values?: unknown) => string;
+  return ref.values === undefined ? speak(ref.key) : speak(ref.key, ref.values);
+};
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // ADR-0208 D16(#4215): 입력창의 「예약해서 보내기」 흐름 한 벌(훅)을 호스트 없이 잰다. 채널 입력창과 스레드 입력창이
@@ -145,9 +165,9 @@ async function mount(options: ComposerScheduleOptions) {
   mountedRoot = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   await act(async () => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(QueryClientProvider, { client }, createElement(SessionProvider, { value: session() }, createElement(Probe, { options })))
-    );
+    ));
   });
   await settle();
 }
@@ -170,14 +190,14 @@ describe("호스트가 달라도 같은 것", () => {
     await mount(optionsOf());
     expect(hook().place).toEqual({ channelId: CH });
     expect(hook().menuProps.testIdPrefix).toBe("composer");
-    expect(hook().bannerWord).toBe("채널");
+    expect(hook().bannerWord).toBe("channel");
   });
 
   it("스레드 입력창: 배너가 세는 곳은 채널과 rootId이고 낱말은 「스레드」, 접두사는 thread-composer다", async () => {
     await mount(optionsOf({ surface: "thread", rootId: ROOT }));
     expect(hook().place).toEqual({ channelId: CH, rootId: ROOT });
     expect(hook().menuProps.testIdPrefix).toBe("thread-composer");
-    expect(hook().bannerWord).toBe("스레드");
+    expect(hook().bannerWord).toBe("thread");
   });
 
   it("모델 지정이 켜져 있으면 메뉴와 직접 고르기가 같은 안내를 올린다", async () => {
@@ -259,13 +279,13 @@ describe("요청 한 번의 규칙", () => {
     });
     // 같은 훅이 다른 채널 값으로 다시 그려진다.
     await act(async () => {
-      mountedRoot?.render(
+      mountedRoot?.render(withKo(
         createElement(
           QueryClientProvider,
           { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
           createElement(SessionProvider, { value: session() }, createElement(Probe, { options: optionsOf({ channelId: "00000000-0000-7000-8000-000000000299" }) }))
         )
-      );
+      ));
     });
     await act(async () => {
       finish(row());
@@ -300,7 +320,7 @@ describe("요청 한 번의 규칙", () => {
     });
     expect(scheduledApi.createScheduledMessage).not.toHaveBeenCalled();
     expect(hook().dialogProps.open).toBe(true);
-    expect(hook().dialogProps.error?.text).toBe("1분 뒤부터 예약할 수 있어요");
+    expect(sayRef(hook().dialogProps.error?.text)).toBe("1분 뒤부터 예약할 수 있어요");
   });
 
   it("키 모양 글은 고르는 순간 막고 호출부가 키 차단 줄을 세우게 한다", async () => {
@@ -333,7 +353,7 @@ describe("요청 한 번의 규칙", () => {
     });
     await settle();
     expect(hook().gate.block).toBe("unavailable");
-    expect(hook().dialogProps.error?.text).toBe("이 서버에서는 예약을 쓸 수 없어요");
+    expect(sayRef(hook().dialogProps.error?.text)).toBe("이 서버에서는 예약을 쓸 수 없어요");
     // 직접 고르기의 「예약하기」도 흐리다(명세 0.5 ③).
     expect(hook().dialogProps.unavailable).toBe(true);
   });

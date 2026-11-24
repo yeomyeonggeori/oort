@@ -475,7 +475,7 @@ export function ThreadComposer({
             testId="thread-composer-secret-block"
             cardAvailable={hasLocalCardHost(channelId)}
             surface="thread"
-            {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
+            {...(secretVia === "schedule" ? { lead: formatMessage(SCHEDULED_COPY.secretKey.lead) } : {})}
           />
         )}
         {agentNotice !== null && (

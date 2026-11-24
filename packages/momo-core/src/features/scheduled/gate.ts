@@ -1,6 +1,7 @@
 import { isRetryableIssue, sendBlockReason, type AttachmentDraft } from "../attachments/model";
 import { containsSecretKey } from "../chat/secretKey";
-import { SCHEDULED_COPY } from "./copy";
+import type { LocaleService } from "../../i18n/context";
+import { SCHEDULED_COPY, type ScheduledPlainKey } from "./copy";
 import { SCHEDULED_PENDING_LIMIT } from "./types";
 
 // =============================================================================
@@ -69,8 +70,8 @@ export interface ScheduleGateInput {
 
 /** 이유 줄(한 문장, 입력창의 한 줄 슬롯)과 다음 행동 줄(`title`·낭독). */
 export interface ScheduleReasonLines {
-  reason: string;
-  next: string | null;
+  reason: ScheduledPlainKey;
+  next: ScheduledPlainKey | null;
 }
 
 export interface ScheduleGate {
@@ -93,7 +94,7 @@ export interface ScheduleGate {
 }
 
 /** 첨부 실패의 다음 행동 줄: 다시 올릴 수 있는 실패가 있으면 「다시 올리거나 지우면」, 없으면 「지우면」. */
-function attachFailedNext(drafts: readonly AttachmentDraft[]): string {
+function attachFailedNext(drafts: readonly AttachmentDraft[]): ScheduledPlainKey {
   const retryable = drafts.some(
     (draft) => draft.status === "failed" && draft.issue !== undefined && isRetryableIssue(draft.issue)
   );
@@ -164,7 +165,13 @@ export function scheduleGate(input: ScheduleGateInput): ScheduleGate {
  * `title`·`aria-describedby`에 싣는 문장 「이유. 다음 행동.」. 문장이 둘이면 각 문장 끝에 마침표를 달고
  * 하나면 달지 않는다(명세 0.1). 이유가 없으면(오프라인) `null`이다.
  */
-export function scheduleBlockTitle(lines: ScheduleReasonLines | null): string | null {
+export function scheduleBlockTitle(
+  formatMessage: LocaleService["formatMessage"],
+  lines: ScheduleReasonLines | null
+): string | null {
   if (lines === null) return null;
-  return lines.next === null ? lines.reason : `${lines.reason}. ${lines.next}.`;
+  const reason = formatMessage(lines.reason);
+  return lines.next === null
+    ? reason
+    : formatMessage("scheduled.block.titleTwoLines", { reason, next: formatMessage(lines.next) });
 }
