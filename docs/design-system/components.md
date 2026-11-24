@@ -4,14 +4,14 @@
 
 ## 규격 없음의 수
 
-13가지 일 × 웹 · 폰 = 26칸을 센 값이다.
+14가지 일 × 웹 · 폰 = 28칸을 센 값이다.
 
 | 판정 | 칸 수 | 뜻 |
 |---|---|---|
 | **없음** | **3** | 그 일의 규격 절이 문서 어디에도 없다 — 웹 「고르개」 · 폰 「단추」 · 폰 「칩 · 배지」 |
 | 부분 | 14 | 절은 있으나 치수 · 상태 표 없이 일부만 다룬다(규칙 한 문단, 한 화면의 사례, 표면 단위 규칙 등) |
-| 있음 | 7 | 부품의 구성 · 치수 · 상태가 한 절에 있다 |
-| 해당 없음 | 2 | 그 표면에는 그 부품이 필요 없다 |
+| 있음 | 8 | 부품의 구성 · 치수 · 상태가 한 절에 있다 |
+| 해당 없음 | 3 | 그 표면에는 그 부품이 필요 없다 |
 
 규격 절이 생기거나 사라지면 이 표와 아래 표의 해당 칸을 같은 PR에서 고친다.
 
@@ -33,6 +33,7 @@
 | 아바타 | `MemberAvatar` (`features/common`) · `AvatarStatus` (`features/presence`). 타임라인의 `Avatar`는 공용 폴더 밖 | `Avatar` — `design/`이 아니라 `features/conversation/Avatar.tsx`에 있다 | 있음 — README §2.14 ④(상태 점 모양: 사람 오프라인 = 회색으로 채운 원, 에이전트 꺼짐 = 속 빈 고리) | 부분 — README §2.14 ④의 폰 크기 표만 | 웹 Gallery에는 목록 줄 안 이니셜만 / 폰 견본 자리 없음 | 웹 `avatarStatus.browser.test.ts` · `avatarStatus.contrast.test.ts` · `avatarSurfaces.test.tsx` · `avatarTone.test.tsx` / 폰 `avatarRender.test.tsx` · `faceStatusDot5786.test.tsx` |
 | 빈 · 로딩 · 오류 | `Skeleton` · `InlineBanner` · `EmptyInvite` (`States.tsx`), `LoadFailureBox` · `LoadFailureNote` · `LoadFailureLine`, `ConnectionBanner` | `EmptyState` · `LoadingState` · `ErrorState` · `NoticeBlock` · `FailureBanner` · `Sentence` (`atoms.tsx`) | 부분 — README §4(표면 단위 규칙). 부품 치수 절은 없음 | 부분 — README §4. 부품 치수 절은 없음 | 웹 Gallery의 States 행 / 폰 `measure/states.tsx`(실제 Timeline의 빈 · 오류 · 로딩) | 웹 `Skeleton.test.tsx` · `skel.test.ts` · `LoadFailureBox.test.tsx` · `ConnectionBanner.test.tsx` / 폰 `readFailureStates.test.tsx` |
 | 로더 | `OortLoader` (`design/brand/OortLoader.tsx`). 작은 돌림 표시는 부품 없이 `Loader2`를 직접 돌림 | `OortLoader` (`design/brand/OortLoader.tsx`). 작은 돌림 표시는 `ActivityIndicator`를 직접 씀 | 부분 — README §2.6 오르트 로더 문단. 「언제 로더 · 언제 작은 표시」 규칙은 없음 | 부분 — 동 | 웹 · 폰 모두 견본 자리 없음 | 웹 `OortLoader.test.tsx` · `OortLoader.motion.test.tsx` / 폰 `oortLoader.test.tsx` |
+| 키캡 | `Keycaps` (`app/ShortcutHelpDialog.tsx`, 상자 `block` · 글줄 `inline`) — 단축키 창 · ⌘K 팔레트 · 작성창 자동완성 · 설정 › 단축키가 같이 쓴다 | 해당 없음 — 폰에는 키보드 단축키가 없다 | 있음 — README §2.16(단축키 창) | 해당 없음 | 웹 견본 자리 없음(단축키 창 자체가 견본) | 웹 `ShortcutHelpDialog.test.tsx` · `ShortcutHelpDialog.rebind.test.tsx` · `scripts/capture-6081.mjs` |
 | 머리 | 부품 없음 — 대화 머리(`channel-head` 유틸) · 창 띠(`AppTitlebar`). 대화 상자 머리 · 바닥 부품도 없음 | `SheetHeader` · `PageHeader` · `ScreenHeader` · `CloseCircle` · `BackCircle` · `ConfirmCheck` (`SheetChrome.tsx` · `atoms.tsx`) | 부분 — README §2.9(창 띠 · 대화 머리만) | 있음 — phone-sheets §3 | 웹 견본 자리 없음 / 폰 `measure/sheetKit.tsx`의 `headers` 장면 | 웹 `desktopShell.band.browser.test.ts`(`src/app/`) / 폰 `sheetKit.test.tsx` |
 
 ## 카드
