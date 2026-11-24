@@ -49,14 +49,13 @@ import {
   findNodeHandle,
   InteractionManager,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 
-import {PrimaryButton, SectionLabel, Sentence} from '../../design/atoms';
+import {DangerButton, OutlineButton, PrimaryButton, SectionLabel, Sentence} from '../../design/atoms';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
@@ -637,7 +636,7 @@ export function PermissionCard({
             {asking ? null : (
               <>
                 {allowGone ? (
-                  <SecondaryButton
+                  <OutlineButton
                     label="이번 한 번 허락"
                     disabled
                     onPress={() => {}}
@@ -653,7 +652,7 @@ export function PermissionCard({
                     testID="work-permission-allow"
                   />
                 )}
-                <SecondaryButton
+                <OutlineButton
                   label="이 세션 동안 허락"
                   disabled={!allowable || busy !== null}
                   onPress={() => void allow('session')}
@@ -693,7 +692,7 @@ export function PermissionCard({
                   onPress={() => void reject()}
                   testID="work-permission-reject-commit"
                 />
-                <SecondaryButton
+                <OutlineButton
                   label="취소"
                   disabled={busy !== null}
                   onPress={() => setAsking(false)}
@@ -701,7 +700,7 @@ export function PermissionCard({
                 />
               </View>
             ) : (
-              <SecondaryButton
+              <OutlineButton
                 label="거부"
                 disabled={!rejectable || busy !== null}
                 onPress={() => {
@@ -798,7 +797,7 @@ function InstructionBox({
           testID="work-instruction-input"
         />
         {quiet ? (
-          <SecondaryButton
+          <OutlineButton
             label={busy === 'queue' ? 'Face ID 확인 중' : '다음 차례로 보내기'}
             disabled={!ready || text.trim() === '' || busy !== null}
             onPress={() => void send('queue')}
@@ -814,7 +813,7 @@ function InstructionBox({
             testID="work-instruction-queue"
           />
         )}
-        <SecondaryButton
+        <OutlineButton
           label="지금 끼어들기"
           disabled={!ready || text.trim() === '' || busy !== null}
           onPress={() => void send('interrupt')}
@@ -829,64 +828,6 @@ function InstructionBox({
         </Sentence>
       </View>
     </View>
-  );
-}
-
-function SecondaryButton({
-  label,
-  onPress,
-  disabled,
-  testID,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  testID?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{disabled: disabled === true}}
-      disabled={disabled}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.secondary,
-        disabled && styles.inert,
-        pressed && !disabled && styles.pressed,
-      ]}
-      testID={testID}>
-      <Text style={styles.secondaryLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function DangerButton({
-  label,
-  onPress,
-  disabled,
-  testID,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  testID?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{disabled: disabled === true}}
-      disabled={disabled}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.danger,
-        disabled && styles.inert,
-        pressed && !disabled && styles.dangerPressed,
-      ]}
-      testID={testID}>
-      <Text style={styles.dangerLabel}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -940,37 +881,4 @@ const buildStyles = (color: Palette) =>
       color: color.text,
       textAlignVertical: 'top',
     },
-    secondary: {
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-    },
-    secondaryLabel: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.text,
-      fontWeight: '600',
-    },
-    danger: {
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: ds2Radius.row,
-      backgroundColor: color.dangerFill,
-      paddingHorizontal: space.md,
-    },
-    dangerLabel: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.onDangerFill,
-      fontWeight: '600',
-    },
-    inert: {opacity: 0.5},
-    dangerPressed: {opacity: 0.85},
-    pressed: {backgroundColor: color.surfacePressed},
   });

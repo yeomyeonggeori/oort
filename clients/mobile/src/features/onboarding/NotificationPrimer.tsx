@@ -46,6 +46,7 @@ import {
   PUSH_WORK_COMPLETE_LABEL,
 } from '@momo/core/features/settings/notificationRules';
 
+import {PrimaryButton} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 import {font, slopTo, space, type Palette} from '../../design/tokens';
 import {usePushPrompt} from '../../push/PushProvider';
@@ -53,7 +54,6 @@ import {useSession} from '../../session/useSession';
 import {usePushKinds} from '../profile/selfStatus';
 import {KomettoGuide, OnboardingCanvas} from './KomettoGuide';
 import {
-  OnboardingButton,
   OnboardingPhoneScreen,
   OnboardingTopBar,
   PHONE_OB,
@@ -147,7 +147,7 @@ export function NotificationPrimer(
       pinBottom
       bottom={
         view.mode === 'ask' ? (
-          <OnboardingButton
+          <PrimaryButton
             label={NOTIFY_CONTINUE_LABEL}
             busy={view.busy}
             onPress={view.onContinue}
@@ -155,7 +155,7 @@ export function NotificationPrimer(
             testID="notify-primer-continue"
           />
         ) : (
-          <OnboardingButton
+          <PrimaryButton
             label={NOTIFY_DECLINED_LABEL}
             onPress={view.onDone}
             testID="notify-declined-continue"

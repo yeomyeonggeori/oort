@@ -6,11 +6,11 @@ import {Linking, StyleSheet} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {QuietButton} from '../src/design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../src/design/icons';
 import {ListRow} from '../src/design/sheetParts';
 import {FixedScheme, ThemeProvider} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
-import {OnboardingGhostButton} from '../src/features/onboarding/OnboardingControls';
 import {createMobileLocaleController, type MobileLocaleController} from '../src/i18n/controller';
 import {LanguageSettingsPage} from '../src/i18n/LanguageSettings';
 import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
@@ -171,12 +171,13 @@ describe('언어 칩 다듬기 (#5101)', () => {
     expect(within(chip()).getByTestId('language-chip-expand', {includeHiddenElements: true})).toBeTruthy();
     screen.unmount();
 
-    // 2) 부품: 같은 PNG·같은 크기(ListRow 펼침 행과 나란히), 고르는 단추가 아닌 「뒤로」에는 글리프도 줄 배치도 없다.
+    // 2) 부품: 같은 PNG·같은 크기(ListRow 펼침 행과 나란히), 고르는 단추가 아닌 「뒤로」에는 글리프가 없다. (줄 배치는 이제 단추
+    //    네 종류의 공통 몸이라 「뒤로」도 줄이다 — #6075.)
     render(
       <ThemeProvider>
         <ListRow title="행" accessory="expand" onPress={() => {}} testID="row" />
-        <OnboardingGhostButton label="한국어" accessory="expand" onPress={() => {}} testID="probe" />
-        <OnboardingGhostButton label="뒤로" onPress={() => {}} testID="back" />
+        <QuietButton flush="end" label="한국어" accessory="expand" onPress={() => {}} testID="probe" />
+        <QuietButton flush="start" label="뒤로" onPress={() => {}} testID="back" />
       </ThemeProvider>,
     );
     const row = expandOf('row');
@@ -185,19 +186,18 @@ describe('언어 칩 다듬기 (#5101)', () => {
     expect({width: flat(probe).width, height: flat(probe).height}).toEqual({width: flat(row).width, height: flat(row).height});
     expect(flat(probe).width).toBe(HOME_ICON_SIZE.down);
     expect(screen.queryByTestId('back-expand', {includeHiddenElements: true})).toBeNull();
-    expect(flat(screen.getByTestId('back')).flexDirection).toBeUndefined();
     screen.unmount();
 
-    // 3) 색 역할: ⌄ 는 곁의 글자와 같은 textMuted 이고, 밝음·어두움 모두 그렇다.
+    // 3) 색 역할: ⌄ 는 곁의 글자와 같은 색이고, 그 색은 조용한 단추의 글자색(text)이다 — 밝음·어두움 모두(#6075 이전에는 textMuted).
     for (const [scheme, palette] of [['light', lightPalette], ['dark', darkPalette]] as const) {
       render(
         <FixedScheme scheme={scheme}>
-          <OnboardingGhostButton label="한국어" accessory="expand" onPress={() => {}} testID="probe" />
+          <QuietButton flush="end" label="한국어" accessory="expand" onPress={() => {}} testID="probe" />
         </FixedScheme>,
       );
       const label = within(screen.getByTestId('probe')).getByText('한국어');
-      expect([scheme, flat(label).color]).toEqual([scheme, palette.textMuted]);
-      expect([scheme, flat(expandOf('probe')).tintColor]).toEqual([scheme, palette.textMuted]);
+      expect([scheme, flat(label).color]).toEqual([scheme, palette.text]);
+      expect([scheme, flat(expandOf('probe')).tintColor]).toEqual([scheme, palette.text]);
       screen.unmount();
     }
   });

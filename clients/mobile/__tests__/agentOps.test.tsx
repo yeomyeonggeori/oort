@@ -16,6 +16,7 @@ import '../src/boot/coreHost';
 
 import {FixedScheme, type ColorScheme} from '../src/design/theme';
 import {lightPalette} from '../src/design/tokens';
+import {circleLook} from '../src/design/sheetModel';
 import {channelListText, spokenChannels} from '../src/features/agents/channelTags';
 import AppShell from '../src/shell/AppShell';
 import {
@@ -667,9 +668,9 @@ describe('폰 에이전트 상세 (성재 2026-10-16)', () => {
     const secondary = screen.getByTestId('agent-delegate-work');
     const sec = flat(secondary);
     expect(secondary).toHaveTextContent('작업 맡기기');
-    // 보조는 채움이 아니라 테두리 — 주 행동과 같은 위계가 아니다.
-    expect(sec.backgroundColor).toBeUndefined();
-    expect(sec.borderWidth).toBe(1);
+    // 보조는 잉크 채움이 아니라 옅은 채움(시트 위 알약 문법, 폰 단추 네 종류 #6075) — 주 행동과 같은 위계가 아니다.
+    expect(sec.backgroundColor).not.toBe(lightPalette.primary);
+    expect(sec.backgroundColor).toBe(circleLook(lightPalette).fill);
     expect(sec.minHeight).toBeGreaterThanOrEqual(44);
     // 같은 묶음 안에서 주가 먼저다.
     const group = screen.getByTestId('agent-actions');

@@ -64,7 +64,7 @@ ko/en 네이티브 기능을 확인한 뒤 Locale → PluralRules → RelativeTi
 - 시트 안의 목록은 설정 페이지와 **같은 부품**(`LanguageSettings.tsx`의 `LanguageChoices`)이에요. 같은 컨트롤러의 같은
   `setPreference()`, 같은 MMKV 칸(`oort.mobile.locale.v1`), 같은 목록(코어 `languageChoices(CATALOG_LOCALES)`), 같은
   저장 중·실패와 다시 시도·영어 UI의 한 줄이에요. 저장이 **성공했을 때만** 시트가 내려가요.
-- 칩은 막대 왼쪽의 「뒤로」와 같은 말씨의 가벼운 단추(`OnboardingGhostButton`)로, 지금 쓰는 말의 자칭 표기(「한국어」·
+- 칩은 막대 왼쪽의 「뒤로」와 같은 말씨의 가벼운 단추(조용한 단추 `QuietButton`, #6075)로, 지금 쓰는 말의 자칭 표기(「한국어」·
   「English」) 뒤에 ⌄ 가 붙어요(`accessory="expand"`, #5101): 첫 화면(M0)에는 짝이 되는 「뒤로」도 없어서 낱말 하나만 서면
   지금 언어를 알리는 라벨로 읽혀요. ⌄ 는 `ListRow accessory="expand"` 와 같은 글리프(「여기서 고른다」)이고 색은 글자와
   같아요. 새 아이콘도 새 모양도 만들지 않았어요. 낭독 이름은 「현재 언어: 한국어」(설정과 같은 문장)이고 ⌄ 는 낭독에서 빠져요.

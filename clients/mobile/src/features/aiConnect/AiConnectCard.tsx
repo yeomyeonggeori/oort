@@ -53,8 +53,10 @@ import {
 } from 'react-native';
 
 import {
+  buttonInk,
   FOLDED_MAX_SCALE,
   HEAD_MAX_SCALE,
+  OutlineButton,
   Sentence,
   STACK_PILL_SCALE,
 } from '../../design/atoms';
@@ -525,7 +527,8 @@ export function AiConnectTeamSection({
         <Sentence style={styles.errorText} accessibilityRole="alert">
           {`${AI_CONNECT_CARD_COPY.teamLoadFailed} ${errorMessage(query.error)}`}
         </Sentence>
-        <SecondaryButton
+        <OutlineButton
+          size="small"
           label={AI_CONNECT_CARD_COPY.teamReload}
           onPress={() => void query.refetch()}
           testID={`${idPrefix}-team-reload`}
@@ -698,9 +701,10 @@ function TeamRow({
       </View>
       {canCheck ? (
         <View style={[styles.rowAction, {paddingLeft: scaled(MARK_SIZE) + space.sm}]}>
-          <SecondaryButton
+          <OutlineButton
+            size="small"
             label={checking ? AI_CONNECT_CARD_COPY.checking : AI_CONNECT_CARD_COPY.check}
-            icon={checking ? null : CARD_ICONS.refresh}
+            icon={<ButtonGlyph source={CARD_ICONS.refresh} />}
             busy={checking}
             disabled={locked}
             onPress={onCheck}
@@ -782,56 +786,25 @@ function pillColors(palette: Palette, tone: AiPillTone): {bg: string; fg: string
   }
 }
 
-function SecondaryButton({
-  label,
-  icon = null,
-  busy = false,
-  disabled = false,
-  onPress,
-  testID,
+/**
+ * 단추 낱말 앞의 작은 글리프(「연결 확인」의 새로 고침). 단추는 공용 보조 단추(작게)이고(#6075), 글리프는 카드의 다른 글리프와
+ * 같은 배율 상한으로 자란다. 색은 보조 단추의 글자색이다(`buttonInk`).
+ */
+function ButtonGlyph({
+  source,
 }: {
-  label: string;
-  icon?: React.ComponentProps<typeof Image>['source'] | null;
-  busy?: boolean;
-  disabled?: boolean;
-  onPress: () => void;
-  testID?: string;
+  source: React.ComponentProps<typeof Image>['source'];
 }): React.JSX.Element {
-  const styles = useStyles(buildStyles);
   const palette = usePalette();
   const scaled = useScaled();
-  const glyph = (size: number) => ({width: scaled(size), height: scaled(size)});
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{disabled, busy}}
-      onPress={disabled ? undefined : onPress}
-      hitSlop={slopTo(scaled(BUTTON_HEIGHT))}
-      style={({pressed}) => [
-        styles.button,
-        disabled && styles.buttonLocked,
-        pressed && !disabled && styles.pressed,
-      ]}
-      testID={testID}>
-      {icon ? (
-        <Image
-          source={icon}
-          style={[glyph(14), {tintColor: palette.text}]}
-          accessibilityIgnoresInvertColors
-        />
-      ) : null}
-      <Text style={styles.buttonText} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
+    <Image
+      source={source}
+      style={{width: scaled(14), height: scaled(14), tintColor: buttonInk(palette, 'secondary')}}
+      accessibilityIgnoresInvertColors
+    />
   );
 }
-
-// ---- 스타일 --------------------------------------------------------------------
-
-/** 시안 `.btn` 높이. 44pt 는 슬롭이 채운다(`slopTo`). */
-const BUTTON_HEIGHT = 30;
 /**
  * 카드(머리 + 몸)가 창에서 가져갈 수 있는 몫(자판이 내려가 있을 때만 몸이 선다).
  * 나머지는 화면 머리·입력창·대화의 것이다. 375×667 큰 글씨(AXL)에서 머리 두 줄
@@ -985,20 +958,6 @@ function buildStyles(color: Palette) {
     pillSpin: {width: PILL_SPIN, height: PILL_SPIN, transform: [{scale: 0.6}]},
     pillText: {fontSize: font.meta, lineHeight: lineHeight.head, fontWeight: '600'},
     // 높이가 아니라 **바닥**이다(design-review #2945 H2): 큰 글씨에서 라벨이 자란다.
-    button: {
-      minHeight: BUTTON_HEIGHT,
-      paddingVertical: space.xs,
-      paddingHorizontal: space.md,
-      borderRadius: ds2Radius.pill,
-      borderWidth: StyleSheet.hairlineWidth * 2,
-      borderColor: color.border,
-      backgroundColor: color.surface,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.xs,
-    },
-    buttonLocked: {opacity: 0.5},
-    buttonText: {fontSize: font.label, fontWeight: '600', color: color.text},
     foot: {
       flexDirection: 'row',
       alignItems: 'center',
