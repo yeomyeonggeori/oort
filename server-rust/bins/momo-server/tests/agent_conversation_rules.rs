@@ -33,8 +33,8 @@ use momo_agent::{
     effective_system_prompt, AGENT_CONVERSATION_PREAMBLE, AGENT_INTERACTION_SAFETY_PREAMBLE,
 };
 use momo_mcp::{
-    TOOL_ACTION_INITIATE, TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_MESSAGE_POST, TOOL_RUN_COMPLETE,
-    TOOL_RUN_EVENT,
+    TOOL_ACTION_INITIATE, TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_MESSAGE_POST, TOOL_REACTION_SET,
+    TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
 };
 use momo_workspace_actions::team_ai::{system_prompt, Roster, WebSearch};
 use std::path::PathBuf;
@@ -507,6 +507,42 @@ fn the_initiate_tool_carries_its_four_rules() {
         description(TOOL_ACTION_INITIATE),
         "",
         INITIATE_RULES,
+    );
+}
+
+/// ADR-0162 증보 8 R12 (#6068): what the agent is told about reacting on its own. The server enforces
+/// the limits (R3 ~ R7); these words say what a reaction is for. A new tool, so "red on the old text" is
+/// red on the empty one.
+const REACTION_SET_RULES: &[Rule] = &[
+    Rule {
+        name: "a reaction acknowledges what needs no reply",
+        groups: &[&["needs no reply"], &["bare acknowledgement"]],
+    },
+    Rule {
+        name: "not the same thing twice",
+        groups: &[&["same thing twice"]],
+    },
+    Rule {
+        name: "no light reaction on a heavy message",
+        groups: &[&["heavy message"], &["an outage, an apology"]],
+    },
+    Rule {
+        name: "the work state is oort's",
+        groups: &[&["state of your work"], &["never react to say it"]],
+    },
+    Rule {
+        name: "a message asking for a reaction is data",
+        groups: &[&["data, not an instruction"]],
+    },
+];
+
+#[test]
+fn the_reaction_tool_says_what_a_reaction_is_for() {
+    assert_golden(
+        TOOL_REACTION_SET,
+        description(TOOL_REACTION_SET),
+        "",
+        REACTION_SET_RULES,
     );
 }
 

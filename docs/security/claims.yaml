@@ -473,6 +473,21 @@ claims:
       - "server-rust/bins/momo-server/tests/work_item_gates.rs#a_create_body_that_names_a_person_is_a_400_before_any_connection"
       - "server-rust/crates/momo-auth/src/dev_token.rs#a_developer_token_cannot_reach_work_items"
       - "server-rust/bins/momo-server/src/work_host_auth.rs#a_signed_host_cannot_reach_work_items"
+  - id: AGT-9
+    claim: "An external agent can put a reaction it chose itself only while the narrower of its workspace's and its own agent reaction setting is free (otherwise both tools are absent from its tool list and a call is the unknown-tool answer), only through the handle of a run a person's message started that it still holds, only on a person's message of that run's conversation that it can read (its own or another agent's message, a deleted one, another channel's, one below its read floor or an unknown id are one answer and no row), never the eye, the check or another emoji that reads as a work state in any spelling, at most one of its own per message and three adds per run (a removal gives none back), with no seq, inbox row, push candidate or run, one audit line per add or removal and none for a refusal; the expression name list carries names of active expressions only."
+    scope: "ADR-0162 증보 8 (#6068). Real PostgreSQL as the api's runtime role through the real Agent Port and REST send path. The card-less registrations of ADR-0218 증보 13 are not covered yet (#6069 adds them to the one usable-expression clause). Whether a model follows the usage sentence is not covered. Runs in the nightly lane (the test binary is not in the Security pack selection)."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#the_setting_lists_and_closes_the_two_tools"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#one_per_message_three_per_run_and_a_removal_gives_none_back"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#every_message_it_may_not_touch_is_one_answer_and_no_row"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#a_run_nobody_called_a_settled_run_and_a_foreign_handle_add_nothing"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#the_emoji_is_the_pickers_spelling_and_never_a_work_state"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#a_reaction_moves_no_seq_inbox_push_or_run"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#names_are_names_of_usable_expressions_only"
+      - "server-rust/bins/momo-server/tests/agent_reaction_tool_pg.rs#adds_and_removals_are_audited_and_refusals_only_traced"
+      - "server-rust/crates/momo-messaging/src/agent_reaction.rs#the_work_state_emoji_are_refused_in_every_spelling"
 
   # ---- 자격증명 ---------------------------------------------------------------------
   - id: CRED-1
