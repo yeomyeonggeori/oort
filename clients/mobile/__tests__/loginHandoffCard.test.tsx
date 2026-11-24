@@ -2,21 +2,22 @@ import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
 import {
-  LOGIN_HANDOFF_DECISION,
-  LOGIN_HANDOFF_DEPLOYMENT_COPY,
-  LOGIN_HANDOFF_ELSEWHERE_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_LEAD,
+  LOGIN_HANDOFF_DECISION_KEY,
+  LOGIN_HANDOFF_DEPLOYMENT_KEY,
+  LOGIN_HANDOFF_ELSEWHERE_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY,
   LOGIN_HANDOFF_KIND,
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
-  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
-  LOGIN_HANDOFF_STOPPED_COPY,
-  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED,
-  loginHandoffOutcomeDetail,
-  loginHandoffStatusLabel,
-  loginHandoffStoppedCopy,
-  loginHandoffWaitingCopy,
+  LOGIN_HANDOFF_OUTCOME_DETAIL_KEY,
+  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY,
+  LOGIN_HANDOFF_STOPPED_KEY,
+  loginHandoffOutcomeDetailKey,
+  loginHandoffStatusKey,
+  loginHandoffStoppedKey,
+  loginHandoffWaitingKey,
 } from '@momo/core/features/timeline/loginHandoffCard';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import type {Message} from '@momo/core/lib/api';
 
 // =============================================================================
@@ -39,6 +40,44 @@ import type {Message} from '@momo/core/lib/api';
 // 부재는 밖에서 관측되지 않는다 — 나타났을 때 빨개지는 것이 유일한 방법이다.
 // (`displayStream.test.ts` 머리말의 같은 논증.)
 // =============================================================================
+
+// 문장은 사전에 있다(#6044). 시험은 한국어 사전으로 풀어 예전과 같은 한국어를 단정한다.
+const koPlain = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage as unknown as (
+  key: string,
+) => string;
+const LOGIN_HANDOFF_DECISION = {
+  lead: koPlain(LOGIN_HANDOFF_DECISION_KEY.lead),
+  resume: koPlain(LOGIN_HANDOFF_DECISION_KEY.resume),
+  stop: koPlain(LOGIN_HANDOFF_DECISION_KEY.stop),
+};
+const LOGIN_HANDOFF_DEPLOYMENT_COPY = koPlain(LOGIN_HANDOFF_DEPLOYMENT_KEY);
+const LOGIN_HANDOFF_ELSEWHERE_COPY = koPlain(LOGIN_HANDOFF_ELSEWHERE_KEY);
+const LOGIN_HANDOFF_IN_CONTROL_COPY = koPlain(LOGIN_HANDOFF_IN_CONTROL_KEY);
+const LOGIN_HANDOFF_IN_CONTROL_LEAD = koPlain(LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY);
+const LOGIN_HANDOFF_OUTCOME_DETAIL = Object.fromEntries(
+  Object.entries(LOGIN_HANDOFF_OUTCOME_DETAIL_KEY).map(([k, v]) => [k, koPlain(v)]),
+);
+const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL = koPlain(LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY);
+// 대기 문장 뒤에 이어지는 「창이 닫혔다」 꼬리. 사전은 대기 문장과 꼬리를 한 문장으로 든다.
+const LOGIN_HANDOFF_WAITING_WINDOW_CLOSED = {
+  returned: '직접 조작 창은 닫혔습니다. 필요하면 다시 열 수 있습니다.',
+  expired: '직접 조작 창은 연결이 끊겨 닫혔습니다. 필요하면 다시 열 수 있습니다.',
+  session_ended: '작업 세션이 끝나면서 직접 조작 창도 닫혔습니다.',
+};
+const LOGIN_HANDOFF_STOPPED_COPY = {
+  cancelled: koPlain(LOGIN_HANDOFF_STOPPED_KEY.cancelled),
+  neverStarted: '개입은 시작되지 않았습니다.',
+};
+const loginHandoffStatusLabel = (card: Parameters<typeof loginHandoffStatusKey>[0]) =>
+  koPlain(loginHandoffStatusKey(card));
+const loginHandoffOutcomeDetail = (card: Parameters<typeof loginHandoffOutcomeDetailKey>[0]) => {
+  const key = loginHandoffOutcomeDetailKey(card);
+  return key === null ? null : koPlain(key);
+};
+const loginHandoffStoppedCopy = (card: Parameters<typeof loginHandoffStoppedKey>[0]) =>
+  koPlain(loginHandoffStoppedKey(card));
+const loginHandoffWaitingCopy = (card: Parameters<typeof loginHandoffWaitingKey>[0]) =>
+  koPlain(loginHandoffWaitingKey(card));
 
 const MESSAGE_ROW = readFileSync(
   path.join(__dirname, '../src/features/conversation/MessageRow.tsx'),
@@ -115,12 +154,12 @@ describe('폰은 그리되 결정하지 않는다', () => {
     // 만든다: 폰에는 그 동선이 배포와 무관하게 없다. 자리의 문제와 배포의
     // 문제를 구분하는 것이 정직 카피 2분법의 전부다.
     expect(MESSAGE_ROW_CODE).not.toContain(LOGIN_HANDOFF_DEPLOYMENT_COPY);
-    expect(MESSAGE_ROW_CODE).toContain('LOGIN_HANDOFF_ELSEWHERE_COPY');
+    expect(MESSAGE_ROW_CODE).toContain('LOGIN_HANDOFF_ELSEWHERE_KEY');
     expect(LOGIN_HANDOFF_ELSEWHERE_COPY).toContain('데스크탑이나 웹에서');
   });
 
   it('세 결과의 문장을 폰이 다시 쓰지 않는다', () => {
-    expect(MESSAGE_ROW_CODE).toContain('loginHandoffOutcomeDetail(card)');
+    expect(MESSAGE_ROW_CODE).toContain('loginHandoffOutcomeDetailKey(card)');
     for (const sentence of Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL)) {
       expect(MESSAGE_ROW_CODE).not.toContain(sentence);
     }
@@ -129,13 +168,13 @@ describe('폰은 그리되 결정하지 않는다', () => {
     );
     // 표를 손으로 인덱싱하면 창 없는 `returned` 에서 실행기와 어긋난다
     // (freeze M2) — 조건은 코어의 것이다.
-    expect(MESSAGE_ROW_CODE).not.toContain('LOGIN_HANDOFF_OUTCOME_DETAIL[');
+    expect(MESSAGE_ROW_CODE).not.toContain('LOGIN_HANDOFF_OUTCOME_DETAIL_KEY[');
   });
 
   it('창이 닫힌 뒤에도 대기인 카드가 그 사실을 말한다 (freeze M1)', () => {
     // 폰은 결정 동선이 없어 이 줄이 창의 상태를 말하는 유일한 자리다. 문장도
     // 조건도 코어에서 온다.
-    expect(MESSAGE_ROW_CODE).toContain('loginHandoffWaitingCopy(card)');
+    expect(MESSAGE_ROW_CODE).toContain('loginHandoffWaitingKey(card)');
     for (const sentence of Object.values(LOGIN_HANDOFF_WAITING_WINDOW_CLOSED)) {
       expect(MESSAGE_ROW_CODE).not.toContain(sentence);
     }
@@ -202,7 +241,7 @@ describe('폰은 그리되 결정하지 않는다', () => {
     for (const sentence of Object.values(LOGIN_HANDOFF_STOPPED_COPY)) {
       expect(MESSAGE_ROW_CODE).not.toContain(sentence);
     }
-    expect(MESSAGE_ROW_CODE).toContain('loginHandoffStoppedCopy(card)');
+    expect(MESSAGE_ROW_CODE).toContain('loginHandoffStoppedKey(card)');
     // 그리고 그 조건이 실제로 이 카드에서 갈린다.
     const card = agentCardModel(
       handoffMessage({

@@ -264,12 +264,13 @@ import {
   type ApprovalNoteTone,
 } from '@momo/core/features/timeline/approvalNote';
 import {
-  LOGIN_HANDOFF_ELSEWHERE_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_LEAD,
-  loginHandoffOutcomeDetail,
-  loginHandoffStatusLabel,
-  loginHandoffStoppedCopy,
-  loginHandoffWaitingCopy,
+  LOGIN_HANDOFF_ELSEWHERE_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY,
+  loginHandoffOutcomeDetailKey,
+  loginHandoffStatusKey,
+  loginHandoffStoppedKey,
+  loginHandoffTitle,
+  loginHandoffWaitingKey,
   type LoginHandoffCard,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import {
@@ -1087,20 +1088,22 @@ function LoginHandoffCardView({
   styles: ReturnType<typeof buildStyles>;
   noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const settled = card.phase !== 'waiting';
   const underControl = card.control !== null && card.control.endedAtMs === null;
+  const outcomeDetailKey = loginHandoffOutcomeDetailKey(card);
   return (
     <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.title}
+          {loginHandoffTitle(formatMessage, card)}
         </Text>
         {/* 칩 색이 국면이 아니라 결과를 따르는 것은 웹과 같다. 폰의 팔레트에는
             `ok`·`warn`·`muted` 셋뿐이라 그 셋으로 옮긴다: 개입 완료는 `ok`,
             완료 불확실은 `warn`(사고가 아니라 불확실이므로 danger 가 아니다),
             세션 종료와 중단은 조용한 종결이라 `muted`. */}
         <StatusChip
-          label={loginHandoffStatusLabel(card)}
+          label={formatMessage(loginHandoffStatusKey(card))}
           tone={
             card.outcome === 'returned'
               ? 'ok'
@@ -1117,7 +1120,7 @@ function LoginHandoffCardView({
         // 창이 닫혔는데 아직 대기인 갈래에서 한 문장이 더 붙는다 (freeze M1).
         // 폰은 결정 동선이 없으므로 이 줄이 이 화면에서 창의 상태를 말하는
         // 유일한 자리다 — 조건도 문장도 코어가 답한다.
-        <Text style={styles.cardBody}>{loginHandoffWaitingCopy(card)}</Text>
+        <Text style={styles.cardBody}>{formatMessage(loginHandoffWaitingKey(card))}</Text>
       ) : null}
       {card.control !== null ? (
         <Text style={styles.cardMeta} testID="card-handoff-boundary">
@@ -1139,15 +1142,15 @@ function LoginHandoffCardView({
         <Text
           style={[styles.cardNote, noteStyle.blocked]}
           testID="card-handoff-in-control">
-          {LOGIN_HANDOFF_IN_CONTROL_LEAD}
+          {formatMessage(LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY)}
         </Text>
       ) : null}
-      {card.outcome !== null ? (
+      {outcomeDetailKey !== null ? (
         // 표를 그대로 인덱싱하지 않는다 (freeze M2). 창 없이 `returned` 인
         // 카드에서 「화면을 돌려주었습니다」는 실행기가 모델에게 하는 말과
         // 어긋난다.
         <Text style={styles.cardNote} testID="card-handoff-outcome">
-          {loginHandoffOutcomeDetail(card)}
+          {formatMessage(outcomeDetailKey)}
         </Text>
       ) : null}
       {card.phase === 'stopped' ? (
@@ -1155,7 +1158,7 @@ function LoginHandoffCardView({
         // stopped 카드에서 「개입은 시작되지 않았습니다」는 바로 윗줄의 경계 행
         // (정지 시각)과 모순된다.
         <Text style={styles.cardNote} testID="card-handoff-stopped">
-          {loginHandoffStoppedCopy(card)}
+          {formatMessage(loginHandoffStoppedKey(card))}
         </Text>
       ) : null}
       {/* 안내는 **대기 중일 때만** 선다. 끝난 카드에 「데스크톱에서 하세요」를
@@ -1165,7 +1168,7 @@ function LoginHandoffCardView({
         <Text
           style={[styles.cardNote, noteStyle.guidance]}
           testID="card-handoff-elsewhere">
-          {LOGIN_HANDOFF_ELSEWHERE_COPY}
+          {formatMessage(LOGIN_HANDOFF_ELSEWHERE_KEY)}
         </Text>
       ) : null}
     </AgentCardFrame>

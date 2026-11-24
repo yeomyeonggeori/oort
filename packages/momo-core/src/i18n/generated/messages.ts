@@ -1856,6 +1856,18 @@ export const messageKeys = [
   "timeline.actionFailure.replyNotAllowed",
   "timeline.actionFailure.replyNotMember",
   "timeline.actionFailure.replyOriginalNotFound",
+  "timeline.actionResult.avatarExpired",
+  "timeline.actionResult.avatarRejected",
+  "timeline.actionResult.avatarRoleRequired",
+  "timeline.actionResult.fallbackTitle",
+  "timeline.actionResult.nameExpired",
+  "timeline.actionResult.nameRejected",
+  "timeline.actionResult.nameRoleRequired",
+  "timeline.actionResult.noteExecuted",
+  "timeline.actionResult.noteRejected",
+  "timeline.actionResult.noteRoleRequired",
+  "timeline.actionResult.permissionNeeded",
+  "timeline.actionResult.secretOnce",
   "timeline.addMember.createdDescription",
   "timeline.addMember.createdDescriptionPublic",
   "timeline.addMember.later",
@@ -2011,6 +2023,30 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.loginHandoff.decisionLead",
+  "timeline.loginHandoff.decisionResume",
+  "timeline.loginHandoff.decisionStop",
+  "timeline.loginHandoff.deploymentNotice",
+  "timeline.loginHandoff.detailExpired",
+  "timeline.loginHandoff.detailReturned",
+  "timeline.loginHandoff.detailReturnedWithoutWindow",
+  "timeline.loginHandoff.detailSessionEnded",
+  "timeline.loginHandoff.elsewhere",
+  "timeline.loginHandoff.inControl",
+  "timeline.loginHandoff.inControlLead",
+  "timeline.loginHandoff.offline",
+  "timeline.loginHandoff.outcomeExpired",
+  "timeline.loginHandoff.outcomeReturned",
+  "timeline.loginHandoff.outcomeSessionEnded",
+  "timeline.loginHandoff.phaseStopped",
+  "timeline.loginHandoff.phaseWaiting",
+  "timeline.loginHandoff.stoppedCancelled",
+  "timeline.loginHandoff.stoppedNeverStarted",
+  "timeline.loginHandoff.title",
+  "timeline.loginHandoff.waiting",
+  "timeline.loginHandoff.waitingClosedExpired",
+  "timeline.loginHandoff.waitingClosedReturned",
+  "timeline.loginHandoff.waitingClosedSessionEnded",
   "timeline.memberPanel.agentKind",
   "timeline.memberPanel.elapsedDays",
   "timeline.memberPanel.elapsedHours",
@@ -4657,6 +4693,18 @@ export const argumentSpecs = {
   "timeline.actionFailure.replyNotAllowed": {},
   "timeline.actionFailure.replyNotMember": {},
   "timeline.actionFailure.replyOriginalNotFound": {},
+  "timeline.actionResult.avatarExpired": {},
+  "timeline.actionResult.avatarRejected": {},
+  "timeline.actionResult.avatarRoleRequired": {},
+  "timeline.actionResult.fallbackTitle": {},
+  "timeline.actionResult.nameExpired": {},
+  "timeline.actionResult.nameRejected": {},
+  "timeline.actionResult.nameRoleRequired": {},
+  "timeline.actionResult.noteExecuted": {},
+  "timeline.actionResult.noteRejected": {},
+  "timeline.actionResult.noteRoleRequired": {},
+  "timeline.actionResult.permissionNeeded": {},
+  "timeline.actionResult.secretOnce": {},
   "timeline.addMember.createdDescription": {
     "name": "string"
   },
@@ -4917,6 +4965,30 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.loginHandoff.decisionLead": {},
+  "timeline.loginHandoff.decisionResume": {},
+  "timeline.loginHandoff.decisionStop": {},
+  "timeline.loginHandoff.deploymentNotice": {},
+  "timeline.loginHandoff.detailExpired": {},
+  "timeline.loginHandoff.detailReturned": {},
+  "timeline.loginHandoff.detailReturnedWithoutWindow": {},
+  "timeline.loginHandoff.detailSessionEnded": {},
+  "timeline.loginHandoff.elsewhere": {},
+  "timeline.loginHandoff.inControl": {},
+  "timeline.loginHandoff.inControlLead": {},
+  "timeline.loginHandoff.offline": {},
+  "timeline.loginHandoff.outcomeExpired": {},
+  "timeline.loginHandoff.outcomeReturned": {},
+  "timeline.loginHandoff.outcomeSessionEnded": {},
+  "timeline.loginHandoff.phaseStopped": {},
+  "timeline.loginHandoff.phaseWaiting": {},
+  "timeline.loginHandoff.stoppedCancelled": {},
+  "timeline.loginHandoff.stoppedNeverStarted": {},
+  "timeline.loginHandoff.title": {},
+  "timeline.loginHandoff.waiting": {},
+  "timeline.loginHandoff.waitingClosedExpired": {},
+  "timeline.loginHandoff.waitingClosedReturned": {},
+  "timeline.loginHandoff.waitingClosedSessionEnded": {},
   "timeline.memberPanel.agentKind": {},
   "timeline.memberPanel.elapsedDays": {
     "count": "number"
@@ -7305,6 +7377,18 @@ export interface MessageArgs {
   "timeline.actionFailure.replyNotAllowed": Record<string, never>;
   "timeline.actionFailure.replyNotMember": Record<string, never>;
   "timeline.actionFailure.replyOriginalNotFound": Record<string, never>;
+  "timeline.actionResult.avatarExpired": Record<string, never>;
+  "timeline.actionResult.avatarRejected": Record<string, never>;
+  "timeline.actionResult.avatarRoleRequired": Record<string, never>;
+  "timeline.actionResult.fallbackTitle": Record<string, never>;
+  "timeline.actionResult.nameExpired": Record<string, never>;
+  "timeline.actionResult.nameRejected": Record<string, never>;
+  "timeline.actionResult.nameRoleRequired": Record<string, never>;
+  "timeline.actionResult.noteExecuted": Record<string, never>;
+  "timeline.actionResult.noteRejected": Record<string, never>;
+  "timeline.actionResult.noteRoleRequired": Record<string, never>;
+  "timeline.actionResult.permissionNeeded": Record<string, never>;
+  "timeline.actionResult.secretOnce": Record<string, never>;
   "timeline.addMember.createdDescription": { name: string };
   "timeline.addMember.createdDescriptionPublic": { name: string };
   "timeline.addMember.later": Record<string, never>;
@@ -7460,6 +7544,30 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.loginHandoff.decisionLead": Record<string, never>;
+  "timeline.loginHandoff.decisionResume": Record<string, never>;
+  "timeline.loginHandoff.decisionStop": Record<string, never>;
+  "timeline.loginHandoff.deploymentNotice": Record<string, never>;
+  "timeline.loginHandoff.detailExpired": Record<string, never>;
+  "timeline.loginHandoff.detailReturned": Record<string, never>;
+  "timeline.loginHandoff.detailReturnedWithoutWindow": Record<string, never>;
+  "timeline.loginHandoff.detailSessionEnded": Record<string, never>;
+  "timeline.loginHandoff.elsewhere": Record<string, never>;
+  "timeline.loginHandoff.inControl": Record<string, never>;
+  "timeline.loginHandoff.inControlLead": Record<string, never>;
+  "timeline.loginHandoff.offline": Record<string, never>;
+  "timeline.loginHandoff.outcomeExpired": Record<string, never>;
+  "timeline.loginHandoff.outcomeReturned": Record<string, never>;
+  "timeline.loginHandoff.outcomeSessionEnded": Record<string, never>;
+  "timeline.loginHandoff.phaseStopped": Record<string, never>;
+  "timeline.loginHandoff.phaseWaiting": Record<string, never>;
+  "timeline.loginHandoff.stoppedCancelled": Record<string, never>;
+  "timeline.loginHandoff.stoppedNeverStarted": Record<string, never>;
+  "timeline.loginHandoff.title": Record<string, never>;
+  "timeline.loginHandoff.waiting": Record<string, never>;
+  "timeline.loginHandoff.waitingClosedExpired": Record<string, never>;
+  "timeline.loginHandoff.waitingClosedReturned": Record<string, never>;
+  "timeline.loginHandoff.waitingClosedSessionEnded": Record<string, never>;
   "timeline.memberPanel.agentKind": Record<string, never>;
   "timeline.memberPanel.elapsedDays": { count: number };
   "timeline.memberPanel.elapsedHours": { count: number };

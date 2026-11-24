@@ -13546,6 +13546,78 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't find the original message. It may already be deleted."
     }
   ],
+  "timeline.actionResult.avatarExpired": [
+    {
+      "type": 0,
+      "value": "The deadline passed, so the profile photo stays as it is."
+    }
+  ],
+  "timeline.actionResult.avatarRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't approved, so the profile photo stays as it is."
+    }
+  ],
+  "timeline.actionResult.avatarRoleRequired": [
+    {
+      "type": 0,
+      "value": "The photo's owner needs to approve this."
+    }
+  ],
+  "timeline.actionResult.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Workspace action"
+    }
+  ],
+  "timeline.actionResult.nameExpired": [
+    {
+      "type": 0,
+      "value": "The deadline passed, so the name stays as it is."
+    }
+  ],
+  "timeline.actionResult.nameRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't approved, so the name stays as it is."
+    }
+  ],
+  "timeline.actionResult.nameRoleRequired": [
+    {
+      "type": 0,
+      "value": "The person who asked needs to approve this."
+    }
+  ],
+  "timeline.actionResult.noteExecuted": [
+    {
+      "type": 0,
+      "value": "Finished running."
+    }
+  ],
+  "timeline.actionResult.noteRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't approved, so it didn't run."
+    }
+  ],
+  "timeline.actionResult.noteRoleRequired": [
+    {
+      "type": 0,
+      "value": "An admin needs to approve this."
+    }
+  ],
+  "timeline.actionResult.permissionNeeded": [
+    {
+      "type": 0,
+      "value": "Permission needed"
+    }
+  ],
+  "timeline.actionResult.secretOnce": [
+    {
+      "type": 0,
+      "value": "The link was shown once to the person who approved. Create a new one if you need it again."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 0,
@@ -15034,6 +15106,150 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.loginHandoff.decisionLead": [
+    {
+      "type": 0,
+      "value": "The agent is waiting for a person to step in."
+    }
+  ],
+  "timeline.loginHandoff.decisionResume": [
+    {
+      "type": 0,
+      "value": "Resume"
+    }
+  ],
+  "timeline.loginHandoff.decisionStop": [
+    {
+      "type": 0,
+      "value": "Stop"
+    }
+  ],
+  "timeline.loginHandoff.deploymentNotice": [
+    {
+      "type": 0,
+      "value": "Screen streaming isn't ready on this deployment yet, so there is no way to open the screen from chat. After you open the session screen and finish stepping in, press Resume here."
+    }
+  ],
+  "timeline.loginHandoff.detailExpired": [
+    {
+      "type": 0,
+      "value": "The connection dropped without a sign that the person finished. The agent does not assume it is done and checks the state on its own screen before continuing."
+    }
+  ],
+  "timeline.loginHandoff.detailReturned": [
+    {
+      "type": 0,
+      "value": "The person finished stepping in and handed the screen back. The agent treats the sign-in as done and continues."
+    }
+  ],
+  "timeline.loginHandoff.detailReturnedWithoutWindow": [
+    {
+      "type": 0,
+      "value": "The person said they finished. No control window was opened on this deployment, so the agent checks the state on the session screen and continues."
+    }
+  ],
+  "timeline.loginHandoff.detailSessionEnded": [
+    {
+      "type": 0,
+      "value": "The work session ended, so the control window closed too."
+    }
+  ],
+  "timeline.loginHandoff.elsewhere": [
+    {
+      "type": 0,
+      "value": "You can take control from the desktop or the web. This screen only shows progress."
+    }
+  ],
+  "timeline.loginHandoff.inControl": [
+    {
+      "type": 0,
+      "value": "Someone is controlling this session screen right now. When they finish, you can resume or stop here."
+    }
+  ],
+  "timeline.loginHandoff.inControlLead": [
+    {
+      "type": 0,
+      "value": "Someone is controlling this session screen right now."
+    }
+  ],
+  "timeline.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're back online you can resume or stop here."
+    }
+  ],
+  "timeline.loginHandoff.outcomeExpired": [
+    {
+      "type": 0,
+      "value": "Unconfirmed"
+    }
+  ],
+  "timeline.loginHandoff.outcomeReturned": [
+    {
+      "type": 0,
+      "value": "Handled"
+    }
+  ],
+  "timeline.loginHandoff.outcomeSessionEnded": [
+    {
+      "type": 0,
+      "value": "Session ended"
+    }
+  ],
+  "timeline.loginHandoff.phaseStopped": [
+    {
+      "type": 0,
+      "value": "Stopped"
+    }
+  ],
+  "timeline.loginHandoff.phaseWaiting": [
+    {
+      "type": 0,
+      "value": "Waiting for a person"
+    }
+  ],
+  "timeline.loginHandoff.stoppedCancelled": [
+    {
+      "type": 0,
+      "value": "The run that was waiting was cancelled."
+    }
+  ],
+  "timeline.loginHandoff.stoppedNeverStarted": [
+    {
+      "type": 0,
+      "value": "The run that was waiting was cancelled. The hand-off never started."
+    }
+  ],
+  "timeline.loginHandoff.title": [
+    {
+      "type": 0,
+      "value": "Login handoff request"
+    }
+  ],
+  "timeline.loginHandoff.waiting": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedExpired": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen. The control window closed because the connection dropped. You can open it again if needed."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedReturned": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen. The control window is closed. You can open it again if needed."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedSessionEnded": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen. The work session ended, so the control window closed too."
     }
   ],
   "timeline.memberPanel.agentKind": [

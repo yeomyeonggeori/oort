@@ -12780,6 +12780,78 @@ export const catalog: MessageCatalog = {
       "value": "원본 메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다."
     }
   ],
+  "timeline.actionResult.avatarExpired": [
+    {
+      "type": 0,
+      "value": "기한이 지나 프로필 사진은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.avatarRejected": [
+    {
+      "type": 0,
+      "value": "승인하지 않아 프로필 사진은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.avatarRoleRequired": [
+    {
+      "type": 0,
+      "value": "사진 주인 본인이 승인해야 해요."
+    }
+  ],
+  "timeline.actionResult.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "워크스페이스 행동"
+    }
+  ],
+  "timeline.actionResult.nameExpired": [
+    {
+      "type": 0,
+      "value": "기한이 지나 이름은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.nameRejected": [
+    {
+      "type": 0,
+      "value": "승인하지 않아 이름은 그대로예요."
+    }
+  ],
+  "timeline.actionResult.nameRoleRequired": [
+    {
+      "type": 0,
+      "value": "요청한 본인이 승인해야 해요."
+    }
+  ],
+  "timeline.actionResult.noteExecuted": [
+    {
+      "type": 0,
+      "value": "실행을 마쳤어요."
+    }
+  ],
+  "timeline.actionResult.noteRejected": [
+    {
+      "type": 0,
+      "value": "승인하지 않아 실행하지 않았어요."
+    }
+  ],
+  "timeline.actionResult.noteRoleRequired": [
+    {
+      "type": 0,
+      "value": "관리자가 승인해야 해요."
+    }
+  ],
+  "timeline.actionResult.permissionNeeded": [
+    {
+      "type": 0,
+      "value": "권한 필요"
+    }
+  ],
+  "timeline.actionResult.secretOnce": [
+    {
+      "type": 0,
+      "value": "링크는 승인한 사람에게 1회 표시됐어요. 다시 필요하면 새로 만드세요."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 1,
@@ -14165,6 +14237,150 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.loginHandoff.decisionLead": [
+    {
+      "type": 0,
+      "value": "에이전트가 사람의 개입을 기다립니다."
+    }
+  ],
+  "timeline.loginHandoff.decisionResume": [
+    {
+      "type": 0,
+      "value": "재개"
+    }
+  ],
+  "timeline.loginHandoff.decisionStop": [
+    {
+      "type": 0,
+      "value": "중단"
+    }
+  ],
+  "timeline.loginHandoff.deploymentNotice": [
+    {
+      "type": 0,
+      "value": "이 배포에서는 아직 화면 전송이 준비되지 않아, 채팅에서 화면을 여는 동선이 없습니다. 세션 화면을 연 뒤 개입을 마쳤다면 여기서 재개를 누르세요."
+    }
+  ],
+  "timeline.loginHandoff.detailExpired": [
+    {
+      "type": 0,
+      "value": "개입이 끝났다는 신호 없이 연결이 끊겼습니다. 에이전트는 완료를 가정하지 않고, 자기 화면에서 상태를 확인한 뒤 진행합니다."
+    }
+  ],
+  "timeline.loginHandoff.detailReturned": [
+    {
+      "type": 0,
+      "value": "사람이 개입을 마치고 화면을 돌려주었습니다. 에이전트는 로그인이 끝났다고 보고 이어서 진행합니다."
+    }
+  ],
+  "timeline.loginHandoff.detailReturnedWithoutWindow": [
+    {
+      "type": 0,
+      "value": "사람이 개입을 마쳤다고 알렸습니다. 이 배포에서는 조작 창이 열리지 않았으므로, 에이전트가 세션 화면에서 상태를 확인한 뒤 이어서 진행합니다."
+    }
+  ],
+  "timeline.loginHandoff.detailSessionEnded": [
+    {
+      "type": 0,
+      "value": "작업 세션이 끝나면서 조작 창도 닫혔습니다."
+    }
+  ],
+  "timeline.loginHandoff.elsewhere": [
+    {
+      "type": 0,
+      "value": "직접 조작은 데스크탑이나 웹에서 할 수 있습니다. 이 화면에서는 진행 상황만 보여 줍니다."
+    }
+  ],
+  "timeline.loginHandoff.inControl": [
+    {
+      "type": 0,
+      "value": "지금 이 세션 화면을 직접 조작하는 사람이 있습니다. 조작이 끝나면 여기서 재개하거나 중단할 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.inControlLead": [
+    {
+      "type": 0,
+      "value": "지금 이 세션 화면을 직접 조작하는 사람이 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 재개하거나 중단할 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.outcomeExpired": [
+    {
+      "type": 0,
+      "value": "완료 불확실"
+    }
+  ],
+  "timeline.loginHandoff.outcomeReturned": [
+    {
+      "type": 0,
+      "value": "개입 완료"
+    }
+  ],
+  "timeline.loginHandoff.outcomeSessionEnded": [
+    {
+      "type": 0,
+      "value": "세션 종료"
+    }
+  ],
+  "timeline.loginHandoff.phaseStopped": [
+    {
+      "type": 0,
+      "value": "중단됨"
+    }
+  ],
+  "timeline.loginHandoff.phaseWaiting": [
+    {
+      "type": 0,
+      "value": "개입 대기"
+    }
+  ],
+  "timeline.loginHandoff.stoppedCancelled": [
+    {
+      "type": 0,
+      "value": "대기 중이던 실행이 취소됐습니다."
+    }
+  ],
+  "timeline.loginHandoff.stoppedNeverStarted": [
+    {
+      "type": 0,
+      "value": "대기 중이던 실행이 취소됐습니다. 개입은 시작되지 않았습니다."
+    }
+  ],
+  "timeline.loginHandoff.title": [
+    {
+      "type": 0,
+      "value": "로그인 핸드오프 요청"
+    }
+  ],
+  "timeline.loginHandoff.waiting": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedExpired": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다. 직접 조작 창은 연결이 끊겨 닫혔습니다. 필요하면 다시 열 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedReturned": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다. 직접 조작 창은 닫혔습니다. 필요하면 다시 열 수 있습니다."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedSessionEnded": [
+    {
+      "type": 0,
+      "value": "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다. 작업 세션이 끝나면서 직접 조작 창도 닫혔습니다."
     }
   ],
   "timeline.memberPanel.agentKind": [

@@ -4,31 +4,67 @@ import { agentCardModel, cardKeepsBody } from "./agentCardModel";
 import { APPROVAL_NOTE_TONE_ORDER, approvalNoteRank } from "./approvalNote";
 import { rowPresentation } from "./rowModel";
 import {
-  LOGIN_HANDOFF_DEPLOYMENT_COPY,
-  LOGIN_HANDOFF_ELSEWHERE_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_COPY,
-  LOGIN_HANDOFF_IN_CONTROL_LEAD,
+  LOGIN_HANDOFF_DEPLOYMENT_KEY,
+  LOGIN_HANDOFF_ELSEWHERE_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_KEY,
+  LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY,
   LOGIN_HANDOFF_KIND,
-  LOGIN_HANDOFF_OFFLINE_COPY,
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
-  LOGIN_HANDOFF_OUTCOME_LABEL,
-  LOGIN_HANDOFF_PHASE_LABEL,
-  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL,
-  LOGIN_HANDOFF_STOPPED_COPY,
-  LOGIN_HANDOFF_TITLE,
-  LOGIN_HANDOFF_WAITING_COPY,
-  LOGIN_HANDOFF_WAITING_WINDOW_CLOSED,
+  LOGIN_HANDOFF_OFFLINE_KEY,
+  LOGIN_HANDOFF_OUTCOME_DETAIL_KEY,
+  LOGIN_HANDOFF_OUTCOME_LABEL_KEY,
+  LOGIN_HANDOFF_PHASE_LABEL_KEY,
+  LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY,
+  LOGIN_HANDOFF_STOPPED_KEY,
+  LOGIN_HANDOFF_TITLE_KEY,
+  LOGIN_HANDOFF_WAITING_KEY,
   loginHandoffCard,
-  loginHandoffNote,
-  loginHandoffOutcomeDetail,
+  loginHandoffNote as buildLoginHandoffNote,
+  loginHandoffOutcomeDetailKey,
   loginHandoffStateFor,
-  loginHandoffStoppedCopy,
-  loginHandoffWaitingCopy,
+  loginHandoffStoppedKey,
+  loginHandoffTitle,
+  loginHandoffWaitingKey,
   parseLoginHandoffControl,
   parseLoginHandoffOutcome,
   type LoginHandoffNoteInput,
   type LoginHandoffOutcome,
 } from "./loginHandoffCard";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어, 예전과 같은 한국어를 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koPlain = ko as unknown as (key: string) => string;
+const mapKeys = <K extends string>(keys: Record<K, string>): Record<K, string> =>
+  Object.fromEntries(Object.entries<string>(keys).map(([k, v]) => [k, koPlain(v)])) as Record<K, string>;
+const LOGIN_HANDOFF_DEPLOYMENT_COPY = ko(LOGIN_HANDOFF_DEPLOYMENT_KEY);
+const LOGIN_HANDOFF_ELSEWHERE_COPY = ko(LOGIN_HANDOFF_ELSEWHERE_KEY);
+const LOGIN_HANDOFF_IN_CONTROL_COPY = ko(LOGIN_HANDOFF_IN_CONTROL_KEY);
+const LOGIN_HANDOFF_IN_CONTROL_LEAD = ko(LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY);
+const LOGIN_HANDOFF_OFFLINE_COPY = ko(LOGIN_HANDOFF_OFFLINE_KEY);
+const LOGIN_HANDOFF_OUTCOME_DETAIL = mapKeys(LOGIN_HANDOFF_OUTCOME_DETAIL_KEY);
+const LOGIN_HANDOFF_OUTCOME_LABEL = mapKeys(LOGIN_HANDOFF_OUTCOME_LABEL_KEY);
+const LOGIN_HANDOFF_PHASE_LABEL = mapKeys(LOGIN_HANDOFF_PHASE_LABEL_KEY);
+const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL = ko(LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY);
+const LOGIN_HANDOFF_TITLE = ko(LOGIN_HANDOFF_TITLE_KEY);
+const LOGIN_HANDOFF_WAITING_COPY = ko(LOGIN_HANDOFF_WAITING_KEY);
+// 대기 문장 뒤에 이어지는 「창이 닫혔다」 꼬리. 사전은 대기 문장과 꼬리를 한 문장으로 들고 있다.
+const LOGIN_HANDOFF_WAITING_WINDOW_CLOSED: Record<LoginHandoffOutcome, string> = {
+  returned: "직접 조작 창은 닫혔습니다. 필요하면 다시 열 수 있습니다.",
+  expired: "직접 조작 창은 연결이 끊겨 닫혔습니다. 필요하면 다시 열 수 있습니다.",
+  session_ended: "작업 세션이 끝나면서 직접 조작 창도 닫혔습니다.",
+};
+const LOGIN_HANDOFF_STOPPED_COPY = {
+  cancelled: ko(LOGIN_HANDOFF_STOPPED_KEY.cancelled),
+  neverStarted: "개입은 시작되지 않았습니다.",
+};
+const loginHandoffNote = (input: LoginHandoffNoteInput) => buildLoginHandoffNote(input, ko);
+const loginHandoffOutcomeDetail = (card: Parameters<typeof loginHandoffOutcomeDetailKey>[0]) => {
+  const key = loginHandoffOutcomeDetailKey(card);
+  return key === null ? null : ko(key);
+};
+const loginHandoffStoppedCopy = (card: Parameters<typeof loginHandoffStoppedKey>[0]) => ko(loginHandoffStoppedKey(card));
+const loginHandoffWaitingCopy = (card: Parameters<typeof loginHandoffWaitingKey>[0]) => ko(loginHandoffWaitingKey(card));
 
 const APPROVAL_ID = "5f0d2a1e-1c4b-4c9a-9f2a-0d3c8b7e6a11";
 const SESSION_ID = "9a1b2c3d-4e5f-4a6b-8c7d-1e2f3a4b5c6d";
@@ -69,6 +105,16 @@ function noteInput(over: Partial<LoginHandoffNoteInput> = {}): LoginHandoffNoteI
 }
 
 describe("이 메시지가 로그인 핸드오프 카드인가", () => {
+  it("서버가 제목을 안 주면 이 빌드의 기본 제목이 선다", () => {
+    const withServerTitle = loginHandoffCard(message({ title: "서버가 쓴 제목" }).props)!;
+    expect(loginHandoffTitle(ko, withServerTitle)).toBe("서버가 쓴 제목");
+    const props = { ...message().props } as Record<string, unknown>;
+    delete props.title;
+    const fallback = loginHandoffCard(props)!;
+    expect(fallback.titleText).toBeNull();
+    expect(loginHandoffTitle(ko, fallback)).toBe(LOGIN_HANDOFF_TITLE);
+  });
+
   it("승인 카드와 같은 메시지 타입을 쓰고, props.kind 하나로 갈라진다", () => {
     const card = agentCardModel(message());
     expect(card?.kind).toBe("login_handoff");

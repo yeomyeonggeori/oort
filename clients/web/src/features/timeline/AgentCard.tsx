@@ -67,13 +67,14 @@ import {
   type PayloadDetail,
 } from "@momo/core/features/timeline/agentCardModel";
 import {
-  LOGIN_HANDOFF_DECISION,
-  LOGIN_HANDOFF_DEPLOYMENT_COPY,
+  LOGIN_HANDOFF_DECISION_KEY,
+  LOGIN_HANDOFF_DEPLOYMENT_KEY,
   loginHandoffNote,
-  loginHandoffOutcomeDetail,
+  loginHandoffOutcomeDetailKey,
   loginHandoffSeeksControl,
-  loginHandoffStoppedCopy,
-  loginHandoffWaitingCopy,
+  loginHandoffStoppedKey,
+  loginHandoffTitle,
+  loginHandoffWaitingKey,
   type LoginHandoffCard,
   type LoginHandoffNote,
 } from "@momo/core/features/timeline/loginHandoffCard";
@@ -847,7 +848,7 @@ function ApprovalBody({
  * ## 어포던스 부재 원칙
  *
  * 이 빌드에는 채팅에서 화면을 여는 버튼이 없다. 그래서 그 자리에 **비활성
- * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_COPY`).
+ * 버튼을 세우지 않고** 문장 하나만 둔다(`LOGIN_HANDOFF_DEPLOYMENT_KEY`).
  * 영원히 눌리지 않는 버튼은 사람에게 「내가 뭘 잘못했나」를 묻게 하고, 그것은
  * 화면이 거짓을 말하는 가장 조용한 형태다. 대신 실제로 있는 문 하나 — 작업 세션
  * 상세 — 는 진짜 버튼으로 서고, 그 세션 화면은 세션 상세가 그린다.
@@ -861,6 +862,7 @@ function LoginHandoffBody({
   directory: Directory;
   onOpenWorkSession?: OpenWorkSession;
 }) {
+  const formatMessage = useFormatMessage();
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
     decidedAtMs?: number;
@@ -890,6 +892,7 @@ function LoginHandoffBody({
   const showOpenSession =
     card.sessionId !== null && onOpenWorkSession !== undefined;
 
+  const outcomeDetailKey = loginHandoffOutcomeDetailKey(card);
   const note = loginHandoffNote({
     receiptNote: receipt?.note ?? null,
     hasTarget: card.approvalId !== null,
@@ -902,13 +905,13 @@ function LoginHandoffBody({
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback
     }`,
-  });
+  }, formatMessage);
 
   return (
     <CardFrame
       sectionRef={cardRef}
       icon={<KeyRound className="size-4" aria-hidden="true" />}
-      title={card.title}
+      title={loginHandoffTitle(formatMessage, card)}
       chip={<LoginHandoffChip card={card} />}
       status={card.outcome ?? card.phase}
       kind="login_handoff"
@@ -928,7 +931,7 @@ function LoginHandoffBody({
                 className="text-meta text-ink-muted"
                 data-testid="handoff-deployment"
               >
-                {LOGIN_HANDOFF_DEPLOYMENT_COPY}
+                {formatMessage(LOGIN_HANDOFF_DEPLOYMENT_KEY)}
               </p>
             )}
             {showOpenSession && (
@@ -973,10 +976,10 @@ function LoginHandoffBody({
             approvalId={card.approvalId}
             className="border-t border-line"
             testIdPrefix="handoff"
-            lead={LOGIN_HANDOFF_DECISION.lead}
+            lead={formatMessage(LOGIN_HANDOFF_DECISION_KEY.lead)}
             verbs={{
-              approve: LOGIN_HANDOFF_DECISION.resume,
-              reject: LOGIN_HANDOFF_DECISION.stop,
+              approve: formatMessage(LOGIN_HANDOFF_DECISION_KEY.resume),
+              reject: formatMessage(LOGIN_HANDOFF_DECISION_KEY.stop),
             }}
             onSettled={(outcome) => {
               cardRef.current?.focus();
@@ -1007,7 +1010,7 @@ function LoginHandoffBody({
               (freeze M1). 국면은 승인 원장의 것이라 뒤집지 않고, 화면이
               「지금도 조작 중」이라고 읽히는 것만 막는다. 문장도 조건도
               코어가 답한다. */}
-          {loginHandoffWaitingCopy(card)}
+          {formatMessage(loginHandoffWaitingKey(card))}
         </LabeledRow>
       )}
       {/* 경계 사실. 증보 3 D3이 에이전트에게 허락한 것과 같은 것만 그린다 —
@@ -1027,12 +1030,12 @@ function LoginHandoffBody({
           컨트롤 자리에 서는 `in-control` 줄이 같은 사실을 이미 말하고,
           거기에 **다음에 무엇을 하면 되는지**까지 붙는다. 한 카드가 같은
           사실을 두 번 말하면 읽는 사람은 두 가지가 일어났다고 읽는다. */}
-      {card.outcome !== null && (
+      {outcomeDetailKey !== null && (
         <LabeledRow label="결과" testId="handoff-outcome">
           {/* 표를 그대로 인덱싱하지 않는다 (freeze M2): 창 없이 `returned` 인
               카드는 「화면을 돌려주었습니다」라고 말할 수 없다 — 이 배포에서는
               아무도 잡은 적이 없고, 실행기가 모델에게 하는 말도 그렇다. */}
-          {loginHandoffOutcomeDetail(card)}
+          {formatMessage(outcomeDetailKey)}
         </LabeledRow>
       )}
       {card.phase === "stopped" && (
@@ -1043,7 +1046,7 @@ function LoginHandoffBody({
               문장도 조건도 코어가 답한다 (design-review H2·M1). 앞 판은 두
               문장을 인라인으로 붙여 두었고, 그래서 창이 있었던 stopped 카드에서
               바로 윗줄의 「정지」 행과 모순됐다. */}
-          {loginHandoffStoppedCopy(card)}
+          {formatMessage(loginHandoffStoppedKey(card))}
         </LabeledRow>
       )}
       {settled && (decidedBy || decidedAtMs !== undefined) && (

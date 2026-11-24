@@ -825,9 +825,10 @@ export function WorkSessionDetail({
   // 이 세션의 가장 최근 창. 판정(어느 것이 최신인가·닫힘이 이긴다)은 코어가 지고
   // 이 화면은 그 답을 그리기만 한다 — 폰이 언젠가 같은 표시를 그릴 때 두 번째
   // 구현이 생기지 않게.
+  const formatMessage = useFormatMessage();
   const controlNotice = useMemo(
-    () => latestControlNotice(controlFrames, session.id),
-    [controlFrames, session.id]
+    () => latestControlNotice(controlFrames, session.id, formatMessage),
+    [controlFrames, session.id, formatMessage]
   );
   // 이 실행이 어느 목표에 속하는지 (MOMO-679). 반대 방향 — 목표에서 실행으로 —
   // 은 작업 흐름 상세의 이력 행이 이미 걸어주지만, 돌아오는 길이 없어서 이 표면은
@@ -871,7 +872,6 @@ export function WorkSessionDetail({
   // receiving keys and the documented step back (상세 -> 리스트 -> 밖) was dead
   // for exactly the readers who need it. The back control is the right landing
   // spot because it is both the heading's neighbour and the way out.
-  const formatMessage = useFormatMessage();
   const backRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const back = backRef.current;
@@ -1300,7 +1300,7 @@ export function WorkSessionDetail({
                         : "bg-surface-hover text-ink-muted"
                 )}
               >
-                {controlWindowLabel(controlNotice)}
+                {controlWindowLabel(controlNotice, formatMessage)}
               </span>
             </div>
             <dl className="py-1">

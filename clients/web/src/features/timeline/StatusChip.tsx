@@ -7,7 +7,7 @@ import {
   type ApprovalStatus,
 } from "@momo/core/features/timeline/agentCardModel";
 import {
-  loginHandoffStatusLabel,
+  loginHandoffStatusKey,
   type LoginHandoffCard,
   type LoginHandoffOutcome,
   type LoginHandoffPhase,
@@ -22,6 +22,7 @@ import {
   type ActionResultStatus,
 } from "@momo/core/features/timeline/actionResultCard";
 import { COMPLETION_TONE_CLASS } from "./completionTone";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // The one status chip vocabulary for agent surfaces (R-1 §4).
@@ -111,6 +112,7 @@ const LOGIN_HANDOFF_CHIP_CLASS: Readonly<
 };
 
 export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
+  const formatMessage = useFormatMessage();
   const key = card.outcome ?? card.phase;
   return (
     <span
@@ -118,7 +120,7 @@ export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
       data-status={key}
       className={cn(CHIP_CLASS, LOGIN_HANDOFF_CHIP_CLASS[key])}
     >
-      {loginHandoffStatusLabel(card)}
+      {formatMessage(loginHandoffStatusKey(card))}
     </span>
   );
 }
