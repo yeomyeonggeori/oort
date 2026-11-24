@@ -697,8 +697,8 @@ pub async fn prepare(
         Err(fault) => return card_or_retry(&fault),
     };
     match &request.motion {
-        // The still is encoded from the answer's bytes, so it takes the operator's size table (ADR-0218
-        // §20 Z2-4); an assembled motion stays at the old table, like every assembly.
+        // The still is encoded from the answer's bytes at the table the caller names (ADR-0218 §20; the
+        // worker's door names the old one until #6117); an assembled motion stays at the old table.
         DoorMotion::Still => match media::process_waiting(bytes, media::WAIT_MAX, table).await {
             Ok(processed) => Prepared::Ready(vec![Slot::Ready(Box::new(processed))]),
             Err(rejected) => card_or_retry(&Fault::Rejected(rejected)),

@@ -404,7 +404,10 @@ impl AgentWorker {
             opened.picture,
             &program,
             &momo_expressions::media::decoder_slots(),
-            self.config.expression_rendition_table,
+            // ADR-0218 §20 Z2-4 / Z2-7 (#6071): this door stays at the old table. The api alone carries the
+            // operator's switch; a worker that read its own copy could store new sizes while the api is off
+            // (ZA9). Opening this door to the switch is #6117.
+            momo_expressions::media::RenditionTable::Legacy,
         )
         .await
         {
