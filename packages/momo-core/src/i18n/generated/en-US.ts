@@ -14678,6 +14678,144 @@ export const catalog: MessageCatalog = {
       "value": "Show team AI key"
     }
   ],
+  "timeline.completion.checkDetailSpoken": [
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "timeline.completion.checkFail": [
+    {
+      "type": 0,
+      "value": "Failed"
+    }
+  ],
+  "timeline.completion.checkPass": [
+    {
+      "type": 0,
+      "value": "Passed"
+    }
+  ],
+  "timeline.completion.checkPending": [
+    {
+      "type": 0,
+      "value": "In progress"
+    }
+  ],
+  "timeline.completion.checkSkip": [
+    {
+      "type": 0,
+      "value": "Skipped"
+    }
+  ],
+  "timeline.completion.checkUnknown": [
+    {
+      "type": 0,
+      "value": "Unknown result"
+    }
+  ],
+  "timeline.completion.elapsedClock": [
+    {
+      "type": 0,
+      "value": "Elapsed"
+    }
+  ],
+  "timeline.completion.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "h"
+    }
+  ],
+  "timeline.completion.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "m"
+    }
+  ],
+  "timeline.completion.elapsedSeconds": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "s"
+    }
+  ],
+  "timeline.completion.elapsedSubSecond": [
+    {
+      "type": 0,
+      "value": "Under 1s"
+    }
+  ],
+  "timeline.completion.outcomeAttention": [
+    {
+      "type": 0,
+      "value": "Needs a look"
+    }
+  ],
+  "timeline.completion.outcomeClean": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "timeline.completion.surface": [
+    {
+      "type": 0,
+      "value": "Surface"
+    }
+  ],
+  "timeline.completion.tallyItem": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.completion.workedLabel": [
+    {
+      "type": 0,
+      "value": "Work time"
+    }
+  ],
+  "timeline.completion.workedWithElapsed": [
+    {
+      "type": 0,
+      "value": "Work time "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
+    }
+  ],
   "timeline.copy.linkAction": [
     {
       "type": 0,

@@ -79,14 +79,15 @@ import {
   type LoginHandoffNote,
 } from "@momo/core/features/timeline/loginHandoffCard";
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
-  COMPLETION_GATE_SURFACE_LABEL,
+  COMPLETION_GATE_SURFACE_LABEL_KEY,
   completionCellChecks,
   completionCheckCounts,
   completionGateColumns,
+  completionReportTitle,
   formatElapsed,
-  WORKED_ELAPSED_LABEL,
+  WORKED_ELAPSED_LABEL_KEY,
   type CompletionCheck,
   type CompletionCheckOutcome,
   type CompletionReportCard,
@@ -1077,8 +1078,9 @@ function LoginHandoffBody({
  * 붙어 실패 칸이 초록에 접혀 사라지지 않는다.
  */
 function GateCellValue({ check }: { check: CompletionCheck }) {
+  const formatMessage = useFormatMessage();
   const toneClass = COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[check.outcome]];
-  const label = COMPLETION_CHECK_OUTCOME_LABEL[check.outcome];
+  const label = formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[check.outcome]);
   return (
     <span className="block" data-outcome={check.outcome}>
       <span className={cn("text-meta", toneClass)}>{check.detail ?? label}</span>
@@ -1101,6 +1103,7 @@ function GateCellValue({ check }: { check: CompletionCheck }) {
  * 절대 가로로 밀리지 않는다(design-taste-web 반응형 규칙).
  */
 function CompletionGateTable({ card }: { card: CompletionReportCard }) {
+  const formatMessage = useFormatMessage();
   const columns = completionGateColumns(card.gates);
   const counts = completionCheckCounts(card.gates);
   const tally: Array<{ outcome: CompletionCheckOutcome; count: number }> = (
@@ -1125,7 +1128,7 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
                 scope="col"
                 className="px-3 py-1 text-left text-meta font-medium text-ink-muted"
               >
-                {COMPLETION_GATE_SURFACE_LABEL}
+                {formatMessage(COMPLETION_GATE_SURFACE_LABEL_KEY)}
               </th>
               {columns.map((col) => (
                 <th
@@ -1190,7 +1193,7 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
           {tally.map((entry, index) => (
             <span key={entry.outcome}>
               {index > 0 && " · "}
-              {COMPLETION_CHECK_OUTCOME_LABEL[entry.outcome]}{" "}
+              {formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[entry.outcome])}{" "}
               <span data-numeric>{formatCount(entry.count)}</span>
             </span>
           ))}
@@ -1220,11 +1223,12 @@ function CompletionGateTable({ card }: { card: CompletionReportCard }) {
  * 파일은 옷만 입힌다.
  */
 function CompletionReportBody({ card }: { card: CompletionReportCard }) {
-  const elapsed = card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : "";
+  const formatMessage = useFormatMessage();
+  const elapsed = card.elapsedMs !== undefined ? formatElapsed(formatMessage, card.elapsedMs) : "";
   return (
     <CardFrame
       icon={<ClipboardCheck className="size-4" aria-hidden="true" />}
-      title={card.title}
+      title={completionReportTitle(formatMessage, card)}
       chip={<CompletionReportChip outcome={card.outcome} />}
       status={card.outcome}
       kind="completion_report"
@@ -1242,7 +1246,7 @@ function CompletionReportBody({ card }: { card: CompletionReportCard }) {
         // 성과의 단위(벤치마크 차용 C). 숫자와 한글 단위가 섞이므로 자릿폭 고정을
         // 걸지 않는다 — 걸면 음절 사이가 벌어진다(코어 `formatElapsed` 독스트링).
         // 낱말은 코어의 것이다: 작업 세션 정보의 같은 줄이 같은 상수를 쓴다(#1468).
-        <LabeledRow label={WORKED_ELAPSED_LABEL} testId="completion-elapsed">
+        <LabeledRow label={formatMessage(WORKED_ELAPSED_LABEL_KEY)} testId="completion-elapsed">
           {elapsed}
         </LabeledRow>
       )}

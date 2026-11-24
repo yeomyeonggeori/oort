@@ -21,7 +21,7 @@ import {
   searchWithFilter,
   toolCountsText,
   workFilterFromSearch,
-  workJobRow,
+  workJobRow as buildWorkJobRow,
   workJobSections,
   keepNeedsMeSlots,
   awaitingMeItem,
@@ -37,6 +37,8 @@ import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
 import { createMessageCopy } from "../../testkit";
 
 const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const workJobRow = (item: Parameters<typeof buildWorkJobRow>[0], nowMs: number) =>
+  buildWorkJobRow(item, nowMs, ko);
 
 const ME = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000102";

@@ -275,14 +275,15 @@ import {
   type LoginHandoffCard,
 } from '@momo/core/features/timeline/loginHandoffCard';
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
-  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_LABEL_KEY,
+  completionReportTitle,
   COMPLETION_OUTCOME_TONE,
   completionCheckCounts,
   completionRowChecks,
   formatElapsed,
-  WORKED_ELAPSED_LABEL,
+
   type CompletionCheckOutcome,
   type CompletionReportCard,
   type CompletionTone,
@@ -1196,14 +1197,20 @@ function CompletionReportCardView({
   styles: ReturnType<typeof buildStyles>;
   toneStyle: ReturnType<typeof buildCompletionToneStyle>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const elapsed =
-    card.elapsedMs !== undefined ? formatElapsed(card.elapsedMs) : '';
+    card.elapsedMs !== undefined ? formatElapsed(formatMessage, card.elapsedMs) : '';
   const counts = completionCheckCounts(card.gates);
   const tally = (
     ['pass', 'fail', 'skip', 'pending', 'unknown'] as CompletionCheckOutcome[]
   )
     .filter(outcome => counts[outcome] > 0)
-    .map(outcome => `${COMPLETION_CHECK_OUTCOME_LABEL[outcome]} ${counts[outcome]}`)
+    .map(outcome =>
+      formatMessage('timeline.completion.tallyItem', {
+        label: formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[outcome]),
+        count: counts[outcome],
+      }),
+    )
     .join(' · ');
   // 상한에 걸려 그리지 않은 것들(M3). 조용히 자르지 않고 개수를 말한다 — 웹과 같은
   // 「N개 더」.
@@ -1216,12 +1223,12 @@ function CompletionReportCardView({
     <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.title}
+          {completionReportTitle(formatMessage, card)}
         </Text>
         {/* 국면이 아니라 결과가 색을 정한다 — 실패가 있으면 `warn`(사람을 부르는
             색), 없으면 `ok`. 웹과 같은 규칙, 폰 팔레트로. */}
         <StatusChip
-          label={COMPLETION_OUTCOME_LABEL[card.outcome]}
+          label={formatMessage(COMPLETION_OUTCOME_LABEL_KEY[card.outcome])}
           tone={COMPLETION_OUTCOME_TONE[card.outcome]}
         />
       </View>
@@ -1233,7 +1240,7 @@ function CompletionReportCardView({
         // 그 티켓이 온 이유(「실행 시간」)다. 여기서 낱말과 값을 잇는 것은 폰의
         // 배치일 뿐이다: 웹은 `LabeledRow` 두 칸으로, 폰은 한 줄로 세운다.
         <Text style={styles.cardMeta} testID="completion-elapsed">
-          {`${WORKED_ELAPSED_LABEL} ${elapsed}`}
+          {formatMessage('timeline.completion.workedWithElapsed', {elapsed})}
         </Text>
       ) : null}
       {card.actions.length > 0 ? (
@@ -1273,11 +1280,14 @@ function CompletionReportCardView({
                 key={index}
                 state={stepStateForCheck(check.outcome)}
                 label={check.label}
-                meta={check.detail ?? COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}
+                meta={check.detail ?? formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[check.outcome])}
                 metaStyle={toneStyle[COMPLETION_CHECK_TONE[check.outcome]]}
                 metaAccessibilityLabel={
                   check.detail !== undefined
-                    ? `${check.detail} ${COMPLETION_CHECK_OUTCOME_LABEL[check.outcome]}`
+                    ? formatMessage('timeline.completion.checkDetailSpoken', {
+                        detail: check.detail,
+                        label: formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[check.outcome]),
+                      })
                     : undefined
                 }
               />

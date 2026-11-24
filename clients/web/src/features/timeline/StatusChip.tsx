@@ -13,7 +13,7 @@ import {
   type LoginHandoffPhase,
 } from "@momo/core/features/timeline/loginHandoffCard";
 import {
-  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_LABEL_KEY,
   COMPLETION_OUTCOME_TONE,
   type CompletionOutcome,
 } from "@momo/core/features/timeline/completionReportCard";
@@ -141,6 +141,7 @@ export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
  * 의 tokens 락에 걸린다.
  */
 export function CompletionReportChip({ outcome }: { outcome: CompletionOutcome }) {
+  const formatMessage = useFormatMessage();
   return (
     <span
       data-testid="agent-status-chip"
@@ -151,7 +152,7 @@ export function CompletionReportChip({ outcome }: { outcome: CompletionOutcome }
         COMPLETION_TONE_CLASS[COMPLETION_OUTCOME_TONE[outcome]]
       )}
     >
-      {COMPLETION_OUTCOME_LABEL[outcome]}
+      {formatMessage(COMPLETION_OUTCOME_LABEL_KEY[outcome])}
     </span>
   );
 }

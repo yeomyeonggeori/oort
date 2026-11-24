@@ -54,7 +54,7 @@ import {
 import {
   clockLabel,
   ROW_STATE_CLASS,
-  SESSION_ELAPSED_META_LABEL,
+  SESSION_ELAPSED_META_LABEL_KEY,
   SESSION_STATUS_CLASS,
   sessionElapsedReadout,
   silenceLabel,
@@ -900,7 +900,7 @@ export function WorkSessionDetail({
     isSlowStep(session, lastSignalAtMs, nowMs);
   // 도는 세션은 시계, 끝난 세션은 성과 서술, 시작이 관측되지 않았으면 아무것도
   // (코어 `sessionElapsedReadout`). 목록 행이 부르는 것과 같은 함수다.
-  const elapsed = sessionElapsedReadout(session, nowMs);
+  const elapsed = sessionElapsedReadout(session, nowMs, formatMessage);
   // 이 세션이 스스로 보고한 게이트 결과, 또는 없음 (#1463).
   //
   // 절단된 스레드 페이지는 이 판정에 들어가지 않는다 — 그때 없는 것이 정확히 가장
@@ -1139,7 +1139,7 @@ export function WorkSessionDetail({
                 갈림도 화면의 삼항이 아니라 위 조각과 **같은 판정**(`kind`)이
                 진다. 한글이 섞인 값에는 자릿폭 고정을 걸지 않는다. */}
             {elapsed !== null && (
-              <MetaRow label={SESSION_ELAPSED_META_LABEL[elapsed.kind]}>
+              <MetaRow label={formatMessage(SESSION_ELAPSED_META_LABEL_KEY[elapsed.kind])}>
                 <span
                   {...(elapsed.numeric ? { "data-numeric": true } : {})}
                   className={cn(elapsed.numeric && "font-mono")}

@@ -1982,6 +1982,23 @@ export const messageKeys = [
   "timeline.commandSuggest.targetWorkspace",
   "timeline.commandSuggest.teamClose",
   "timeline.commandSuggest.teamOpen",
+  "timeline.completion.checkDetailSpoken",
+  "timeline.completion.checkFail",
+  "timeline.completion.checkPass",
+  "timeline.completion.checkPending",
+  "timeline.completion.checkSkip",
+  "timeline.completion.checkUnknown",
+  "timeline.completion.elapsedClock",
+  "timeline.completion.elapsedHours",
+  "timeline.completion.elapsedMinutes",
+  "timeline.completion.elapsedSeconds",
+  "timeline.completion.elapsedSubSecond",
+  "timeline.completion.outcomeAttention",
+  "timeline.completion.outcomeClean",
+  "timeline.completion.surface",
+  "timeline.completion.tallyItem",
+  "timeline.completion.workedLabel",
+  "timeline.completion.workedWithElapsed",
   "timeline.copy.linkAction",
   "timeline.copy.messageAction",
   "timeline.copy.messageDone",
@@ -4928,6 +4945,37 @@ export const argumentSpecs = {
   "timeline.commandSuggest.targetWorkspace": {},
   "timeline.commandSuggest.teamClose": {},
   "timeline.commandSuggest.teamOpen": {},
+  "timeline.completion.checkDetailSpoken": {
+    "detail": "string",
+    "label": "string"
+  },
+  "timeline.completion.checkFail": {},
+  "timeline.completion.checkPass": {},
+  "timeline.completion.checkPending": {},
+  "timeline.completion.checkSkip": {},
+  "timeline.completion.checkUnknown": {},
+  "timeline.completion.elapsedClock": {},
+  "timeline.completion.elapsedHours": {
+    "count": "number"
+  },
+  "timeline.completion.elapsedMinutes": {
+    "count": "number"
+  },
+  "timeline.completion.elapsedSeconds": {
+    "count": "number"
+  },
+  "timeline.completion.elapsedSubSecond": {},
+  "timeline.completion.outcomeAttention": {},
+  "timeline.completion.outcomeClean": {},
+  "timeline.completion.surface": {},
+  "timeline.completion.tallyItem": {
+    "count": "number",
+    "label": "string"
+  },
+  "timeline.completion.workedLabel": {},
+  "timeline.completion.workedWithElapsed": {
+    "elapsed": "string"
+  },
   "timeline.copy.linkAction": {},
   "timeline.copy.messageAction": {},
   "timeline.copy.messageDone": {},
@@ -7622,6 +7670,23 @@ export interface MessageArgs {
   "timeline.commandSuggest.targetWorkspace": Record<string, never>;
   "timeline.commandSuggest.teamClose": Record<string, never>;
   "timeline.commandSuggest.teamOpen": Record<string, never>;
+  "timeline.completion.checkDetailSpoken": { detail: string; label: string };
+  "timeline.completion.checkFail": Record<string, never>;
+  "timeline.completion.checkPass": Record<string, never>;
+  "timeline.completion.checkPending": Record<string, never>;
+  "timeline.completion.checkSkip": Record<string, never>;
+  "timeline.completion.checkUnknown": Record<string, never>;
+  "timeline.completion.elapsedClock": Record<string, never>;
+  "timeline.completion.elapsedHours": { count: number };
+  "timeline.completion.elapsedMinutes": { count: number };
+  "timeline.completion.elapsedSeconds": { count: number };
+  "timeline.completion.elapsedSubSecond": Record<string, never>;
+  "timeline.completion.outcomeAttention": Record<string, never>;
+  "timeline.completion.outcomeClean": Record<string, never>;
+  "timeline.completion.surface": Record<string, never>;
+  "timeline.completion.tallyItem": { count: number; label: string };
+  "timeline.completion.workedLabel": Record<string, never>;
+  "timeline.completion.workedWithElapsed": { elapsed: string };
   "timeline.copy.linkAction": Record<string, never>;
   "timeline.copy.messageAction": Record<string, never>;
   "timeline.copy.messageDone": Record<string, never>;

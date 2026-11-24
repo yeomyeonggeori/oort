@@ -502,5 +502,22 @@
   "timeline.teamAiReply.sourcesCount": "{count, plural, one {# source} other {# sources}}",
   "timeline.teamAiReply.sourceOpen": "Open source {index, number}, {title}",
   "timeline.teamAiReply.citationOpenHost": "{host}, opens in a new window",
-  "timeline.teamAiReply.citationOpenTitled": "{title}, {host}, opens in a new window"
+  "timeline.teamAiReply.citationOpenTitled": "{title}, {host}, opens in a new window",
+  "timeline.completion.checkPass": "Passed",
+  "timeline.completion.checkFail": "Failed",
+  "timeline.completion.checkSkip": "Skipped",
+  "timeline.completion.checkPending": "In progress",
+  "timeline.completion.checkUnknown": "Unknown result",
+  "timeline.completion.outcomeClean": "Done",
+  "timeline.completion.outcomeAttention": "Needs a look",
+  "timeline.completion.surface": "Surface",
+  "timeline.completion.elapsedSubSecond": "Under 1s",
+  "timeline.completion.elapsedHours": "{count, number}h",
+  "timeline.completion.elapsedMinutes": "{count, number}m",
+  "timeline.completion.elapsedSeconds": "{count, number}s",
+  "timeline.completion.workedLabel": "Work time",
+  "timeline.completion.workedWithElapsed": "Work time {elapsed}",
+  "timeline.completion.elapsedClock": "Elapsed",
+  "timeline.completion.tallyItem": "{label} {count, number}",
+  "timeline.completion.checkDetailSpoken": "{detail} {label}"
 }

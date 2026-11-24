@@ -13861,6 +13861,144 @@ export const catalog: MessageCatalog = {
       "value": "팀 AI 키 보기"
     }
   ],
+  "timeline.completion.checkDetailSpoken": [
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "timeline.completion.checkFail": [
+    {
+      "type": 0,
+      "value": "실패"
+    }
+  ],
+  "timeline.completion.checkPass": [
+    {
+      "type": 0,
+      "value": "통과"
+    }
+  ],
+  "timeline.completion.checkPending": [
+    {
+      "type": 0,
+      "value": "진행 중"
+    }
+  ],
+  "timeline.completion.checkSkip": [
+    {
+      "type": 0,
+      "value": "건너뜀"
+    }
+  ],
+  "timeline.completion.checkUnknown": [
+    {
+      "type": 0,
+      "value": "미상 결과"
+    }
+  ],
+  "timeline.completion.elapsedClock": [
+    {
+      "type": 0,
+      "value": "경과"
+    }
+  ],
+  "timeline.completion.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간"
+    }
+  ],
+  "timeline.completion.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "timeline.completion.elapsedSeconds": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초"
+    }
+  ],
+  "timeline.completion.elapsedSubSecond": [
+    {
+      "type": 0,
+      "value": "1초 미만"
+    }
+  ],
+  "timeline.completion.outcomeAttention": [
+    {
+      "type": 0,
+      "value": "확인 필요"
+    }
+  ],
+  "timeline.completion.outcomeClean": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "timeline.completion.surface": [
+    {
+      "type": 0,
+      "value": "표면"
+    }
+  ],
+  "timeline.completion.tallyItem": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.completion.workedLabel": [
+    {
+      "type": 0,
+      "value": "작업 시간"
+    }
+  ],
+  "timeline.completion.workedWithElapsed": [
+    {
+      "type": 0,
+      "value": "작업 시간 "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
+    }
+  ],
   "timeline.copy.linkAction": [
     {
       "type": 0,

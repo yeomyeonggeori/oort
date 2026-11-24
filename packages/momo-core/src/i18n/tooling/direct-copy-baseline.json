@@ -715,6 +715,7 @@
     "packages/momo-core/src/features/timeline/artifacts.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/cascadeModel.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/commandSuggest.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/completionReportCard.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/copyLabels.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/decisionStage.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/deletedFold.ts": {"ko": 0, "en": 0},
@@ -730,6 +731,7 @@
     "packages/momo-core/src/features/timeline/streamStop.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/teamAi.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/teamAiReply.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/work/workSessionFormat.ts": {"ko": 7, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },
   "raises": [

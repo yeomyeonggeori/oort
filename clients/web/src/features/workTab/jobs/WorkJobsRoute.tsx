@@ -187,9 +187,9 @@ export function WorkJobsRoute() {
   const rows = useMemo<WorkJobRow[]>(
     () =>
       itemsForFilter(list.items, filter, session.member.id, list.mode).map((item) =>
-        workJobRow(item, nowMs)
+        workJobRow(item, nowMs, formatMessage)
       ),
-    [list.items, list.mode, filter, session.member.id, nowMs]
+    [list.items, list.mode, filter, session.member.id, nowMs, formatMessage]
   );
 
   // ---- 「응답 필요」의 칸 (#5738) -----------------------------------------------------------------------------------------------
@@ -715,7 +715,7 @@ export function WorkJobsRoute() {
                           // 칸에 선 줄(#5738): 아직 묻는 칸은 그 사실로 단추를, 결과 칸은 같은 상자에 결과 한 줄을 세운다. 줄은 칸이 처음
                           // 선 때의 것으로 그리고(높이를 지키려고), 결과 칸의 칩만 지금 목록이 말하는 상태다.
                           const live = rows.find((r) => uuidEq(r.id, slot.row.id)) ?? null;
-                          const row = workJobRow(slot.row.item, nowMs);
+                          const row = workJobRow(slot.row.item, nowMs, formatMessage);
                           const kind = workJobResultKind(row, true);
                           const permission = kind === "permission";
                           const openPermission = () => {

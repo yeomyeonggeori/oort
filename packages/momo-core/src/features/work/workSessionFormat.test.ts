@@ -1,16 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { elapsedLabel } from "../agents/workingSignal";
 import {
-  ELAPSED_SUB_SECOND,
-  WORKED_ELAPSED_LABEL,
-  formatElapsed,
+  ELAPSED_SUB_SECOND_KEY,
+  WORKED_ELAPSED_LABEL_KEY,
+  formatElapsed as buildFormatElapsed,
 } from "../timeline/completionReportCard";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import {
-  SESSION_ELAPSED_META_LABEL,
+  SESSION_ELAPSED_META_LABEL_KEY,
   SESSION_WORKED_BARE_SUFFIX,
   SESSION_WORKED_SUFFIX,
-  sessionElapsedReadout,
+  sessionElapsedReadout as buildReadout,
 } from "./workSessionFormat";
+
+// 낱말은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 예전과 같은 한국어를 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const formatElapsed = (ms: number) => buildFormatElapsed(ko, ms);
+const sessionElapsedReadout = (session: Parameters<typeof buildReadout>[0], nowMs: number) =>
+  buildReadout(session, nowMs, ko);
+const ELAPSED_SUB_SECOND = ko(ELAPSED_SUB_SECOND_KEY);
+const WORKED_ELAPSED_LABEL = ko(WORKED_ELAPSED_LABEL_KEY);
+const SESSION_ELAPSED_META_LABEL = {
+  clock: ko(SESSION_ELAPSED_META_LABEL_KEY.clock),
+  worked: ko(SESSION_ELAPSED_META_LABEL_KEY.worked),
+};
 
 // =============================================================================
 // 세션 경과의 세 갈래 (UXC-C / 커서 웹 ADE 벤치마크 §3-C).
