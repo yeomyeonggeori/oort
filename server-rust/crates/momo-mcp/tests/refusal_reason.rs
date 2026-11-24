@@ -15,10 +15,10 @@
 
 use momo_mcp::{
     dispatch, dispatch_with_tools, reason_of_sentence, refusal_reason, tool_failure, ArtifactRule,
-    ArtifactViolation, AssembleParams, HttpRequest, HttpResponse, Outcome, RunEventViolation,
-    ToolCall, ToolCapability, ToolEra, ToolFailure, ToolView, JSON_CONTENT_TYPE,
-    LEGACY_PROTOCOL_VERSION, MAX_BODY_BYTES, MODERN_PROTOCOL_VERSION, REASON_OTHER,
-    REASON_TOOL_ARTIFACTS, REFUSAL_REASONS, TOOL_CATALOG, TOOL_INBOX_READ,
+    ArtifactViolation, AssembleParams, HttpRequest, HttpResponse, Outcome, ReactionRefusal,
+    RunEventViolation, ToolCall, ToolCapability, ToolEra, ToolFailure, ToolView, JSON_CONTENT_TYPE,
+    LEGACY_PROTOCOL_VERSION, MAX_BODY_BYTES, MODERN_PROTOCOL_VERSION, REACTION_REFUSAL_REASONS,
+    REASON_OTHER, REASON_TOOL_ARTIFACTS, REFUSAL_REASONS, TOOL_CATALOG, TOOL_INBOX_READ,
 };
 use serde_json::{json, Value};
 
@@ -482,6 +482,16 @@ fn every_tool_failure_has_a_token() {
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "tool_not_authorized",
             ToolFailure::Unavailable => "tool_unavailable",
             ToolFailure::Conflict | ToolFailure::PictureLimitReached => "tool_conflict",
+            // #6068: the body says only the plain answer; the cause reaches the trace through
+            // `ToolFailure::trace_reason` (see `a_reaction_refusal_is_the_plain_answer_on_the_wire`).
+            ToolFailure::ReactionRefused(
+                ReactionRefusal::NotEmoji
+                | ReactionRefusal::StatusEmoji
+                | ReactionRefusal::ExpressionUnavailable,
+            ) => "tool_arguments",
+            ToolFailure::ReactionRefused(
+                ReactionRefusal::MessageLimit | ReactionRefusal::RunLimit,
+            ) => "tool_conflict",
             ToolFailure::AlreadyClaimed => "tool_already_claimed",
             ToolFailure::ClaimExpired => "tool_claim_expired",
             ToolFailure::Internal => "tool_internal",
@@ -509,6 +519,8 @@ fn every_tool_failure_has_a_token() {
         ToolFailure::Conflict,
         ToolFailure::AttachmentNotLinkable,
         ToolFailure::PictureLimitReached,
+        ToolFailure::ReactionRefused(ReactionRefusal::NotEmoji),
+        ToolFailure::ReactionRefused(ReactionRefusal::RunLimit),
         ToolFailure::AlreadyClaimed,
         ToolFailure::ClaimExpired,
         ToolFailure::Internal,
@@ -522,6 +534,49 @@ fn every_tool_failure_has_a_token() {
         );
         assert_ne!(expected(failure), REASON_OTHER);
     }
+}
+
+/// #6068 (ADR-0162 증보 8 R6 · R11): a refused reaction answers **byte-for-byte** what the plain
+/// failure answers — the emoji causes are the argument refusal of a word that is not an emoji, the limits
+/// the plain conflict, and no `error.data` says which — while the call trace gets a closed token per
+/// cause that is none of the body's tokens.
+#[test]
+fn a_reaction_refusal_is_the_plain_answer_on_the_wire() {
+    let call = some_call();
+    let mut seen = Vec::new();
+    for refusal in ReactionRefusal::ALL {
+        let plain = match refusal {
+            ReactionRefusal::NotEmoji
+            | ReactionRefusal::StatusEmoji
+            | ReactionRefusal::ExpressionUnavailable => ToolFailure::InvalidArguments,
+            ReactionRefusal::MessageLimit | ReactionRefusal::RunLimit => ToolFailure::Conflict,
+        };
+        let refused = tool_failure(&call, ToolFailure::ReactionRefused(refusal));
+        let answered = tool_failure(&call, plain);
+        assert_eq!(refused.status, answered.status, "{refusal:?}");
+        assert_eq!(
+            refused.body, answered.body,
+            "{refusal:?}: the wire says no cause"
+        );
+        assert_eq!(ToolFailure::ReactionRefused(refusal).code(), plain.code());
+        let token = ToolFailure::ReactionRefused(refusal)
+            .trace_reason()
+            .expect("a reaction refusal has a trace token");
+        assert!(REACTION_REFUSAL_REASONS.contains(&token), "{token}");
+        assert!(
+            !REFUSAL_REASONS.iter().any(|(_, known)| *known == token) && token != REASON_OTHER,
+            "{token} is not a body token"
+        );
+        seen.push(token);
+    }
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(
+        seen.len(),
+        REACTION_REFUSAL_REASONS.len(),
+        "one token per cause"
+    );
+    assert_eq!(ToolFailure::InvalidArguments.trace_reason(), None);
 }
 
 /// The string literals passed as argument `index` (0-based) of every call to `callee(` in

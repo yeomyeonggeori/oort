@@ -344,10 +344,12 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         mcp_name: name.value(),
         body: &bytes,
     };
-    let dispatched = match momo_mcp::dispatch_with_tools(request, &view) {
+    // The second half is a refusal's closed call-trace token when the wire does not say its cause
+    // (`ToolFailure::trace_reason`, #6068); `None` for everything else.
+    let (dispatched, trace_reason) = match momo_mcp::dispatch_with_tools(request, &view) {
         momo_mcp::Outcome::Response(response) => {
             log_invalid_params(&response, &bytes);
-            response
+            (response, None)
         }
         momo_mcp::Outcome::Tool(call) => match caller {
             Some(caller) => {
@@ -360,7 +362,10 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             }
             // Unreachable: a non-empty view requires a hosted caller. Answering
             // like an unknown tool keeps the impossible case fail-closed.
-            None => momo_mcp::tool_failure(&call, momo_mcp::ToolFailure::NotAuthorized),
+            None => (
+                momo_mcp::tool_failure(&call, momo_mcp::ToolFailure::NotAuthorized),
+                None,
+            ),
         },
     };
     if let Some(caller) = caller {
@@ -383,7 +388,8 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                 era,
                 status: dispatched.status,
                 rpc_code: momo_mcp::response_rpc_code(dispatched.body.as_deref()),
-                reason: momo_mcp::refusal_reason(dispatched.body.as_deref()),
+                reason: trace_reason
+                    .or_else(|| momo_mcp::refusal_reason(dispatched.body.as_deref())),
                 tools_listed,
                 counts,
             },

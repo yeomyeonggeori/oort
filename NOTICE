@@ -113,3 +113,5 @@ Named runtime companions operators actually run next to these images:
 
 Emoji catalog: emojibase-data 18.0.0, Copyright (c) 2017-2019 Miles Johnson (MIT).
 Includes Unicode CLDR annotations; see packages/momo-core/src/features/emoji/LICENSE.emojibase.
+The server carries the catalog's emoji sequences (no names or keywords) in
+server-rust/crates/momo-messaging/src/agent_reaction_emoji.rs, under the same notice.

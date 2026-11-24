@@ -16,6 +16,8 @@
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
 //! | `oort_action_propose` | `momo_agent::approval`'s producer — the *same* park #979 already wrote for tool calls |
 //! | `oort_card_suggest` | `momo_agent::card_suggest` (the gate the worker shares) + `momo_messaging::send_message_in_tx` |
+//! | `oort_reaction_set` | the card's run gate + `momo_messaging::agent_reaction::set_agent_reaction_in_tx` (ADR-0162 증보 8, #6068) |
+//! | `oort_expression_names` | the same run gate + `momo_messaging::agent_reaction::agent_expression_names_in_tx` |
 //!
 //! There is **no SQL in this file** beyond what those functions own, no second
 //! message or job ledger, and no Centrifugo publish: a hosted answer reaches a
@@ -162,7 +164,7 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
     } else {
         ToolCapability::WITHOUT_PICTURES
     };
-    match hosted_identity(&state.pool, caller).await {
+    let view = match hosted_identity(&state.pool, caller).await {
         Ok(Some(identity)) => ToolView::intersect(
             &identity.approved_scopes,
             &identity.token_scopes,
@@ -180,6 +182,43 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
                 "Agent Port tool view resolution failed"
             );
             ToolView::empty()
+        }
+    };
+    // ADR-0162 증보 8 R3 · ADR-0200 증보 8 L10 (#6068): the agent's own reaction is listed — and callable
+    // — only while the narrower of the workspace's and the agent's setting is 「자유롭게」. Read for
+    // every request, so lowering the setting closes the next call; a read that fails closes it too.
+    let reactions_listed = momo_mcp::AGENT_REACTION_TOOLS
+        .iter()
+        .any(|name| view.callable(name).is_some());
+    if reactions_listed && !agent_reactions_free(&state.pool, caller).await {
+        return view.without(&momo_mcp::AGENT_REACTION_TOOLS);
+    }
+    view
+}
+
+/// Whether the caller's effective agent reaction setting is 「자유롭게」 (ADR-0200 증보 8 L10: the
+/// narrower of the workspace key and the agent's column). A failed read is `false`.
+async fn agent_reactions_free(pool: &PgPool, caller: HostedCaller) -> bool {
+    let read = momo_db::with_tenant_tx(pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_messaging::status_reaction::effective_mode_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await
+        })
+    })
+    .await;
+    match read {
+        Ok(mode) => mode == momo_settings::AgentReactionsMode::Free,
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                route = "/v1/mcp/agent-port",
+                "Agent Port agent reaction setting resolution failed"
+            );
+            false
         }
     }
 }
@@ -235,11 +274,15 @@ async fn hosted_identity(
 ///
 /// The status and the body are built from **one** verdict, in one place, so a
 /// 200 can never carry an error envelope (or the reverse).
+///
+/// Beside the answer: the closed call-trace token of a refusal whose cause the wire does not say
+/// ([`ToolFailure::trace_reason`] — `oort_reaction_set`'s, ADR-0162 증보 8 R6 · R11), for the
+/// `agent_port.call` row only.
 pub(crate) async fn execute(
     state: &AppState,
     caller: HostedCaller,
     call: ToolCall,
-) -> momo_mcp::HttpResponse {
+) -> (momo_mcp::HttpResponse, Option<&'static str>) {
     // ADR-0200 증보 2026-10-15 T1: the server's own monotonic measure, from the
     // moment the dispatcher takes the call to the moment its verdict is known.
     let started = std::time::Instant::now();
@@ -272,14 +315,19 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_PICTURE_UPLOAD_BEGIN => {
             picture_upload_begin(state, caller, &call.arguments).await
         }
+        momo_mcp::TOOL_REACTION_SET => reaction_set(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_EXPRESSION_NAMES => expression_names(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
     };
     let elapsed = started.elapsed();
     record_liveness(state, caller, call.tool.name, &result).await;
     record_tool_call(state, caller, &call, &result, elapsed).await;
     match result {
-        Ok(structured) => momo_mcp::tool_success(&call, structured),
-        Err(failure) => momo_mcp::tool_failure(&call, failure),
+        Ok(structured) => (momo_mcp::tool_success(&call, structured), None),
+        Err(failure) => (
+            momo_mcp::tool_failure(&call, failure),
+            failure.trace_reason(),
+        ),
     }
 }
 
@@ -365,6 +413,9 @@ async fn record_liveness(
         // opened it, a limit was reached): it says nothing about the CONNECTION, and recording
         // it would turn the connection `error` for a person reading the connection card.
         Err(_) if tool == momo_mcp::TOOL_ACTION_INITIATE => return,
+        // Same for the agent's own reaction (ADR-0162 증보 8): a refused message, emoji, limit or run is
+        // the door doing its job, not the connection failing.
+        Err(_) if momo_mcp::AGENT_REACTION_TOOLS.contains(&tool) => return,
         Err(failure @ (ToolFailure::Unavailable | ToolFailure::NotAuthorized)) => {
             let code = if *failure == ToolFailure::Unavailable {
                 "unavailable"
@@ -416,7 +467,9 @@ fn handle_argument(tool: &str) -> Option<&'static str> {
         momo_mcp::TOOL_ACTION_PROPOSE
         | momo_mcp::TOOL_ACTION_CLAIM_SECRET
         | momo_mcp::TOOL_EXPRESSION_ASSEMBLE
-        | momo_mcp::TOOL_CARD_SUGGEST => Some("handle"),
+        | momo_mcp::TOOL_CARD_SUGGEST
+        | momo_mcp::TOOL_REACTION_SET
+        | momo_mcp::TOOL_EXPRESSION_NAMES => Some("handle"),
         _ => None,
     }
 }
@@ -4544,6 +4597,213 @@ async fn card_suggest(
 
     let (message_id, seq, deduped) = outcome?;
     Ok(json!({"messageId": message_id, "seq": seq, "deduplicated": deduped}))
+}
+
+// ---------------------------------------------------------------------------
+// oort_reaction_set · oort_expression_names (ADR-0162 증보 8, #6068)
+// ---------------------------------------------------------------------------
+
+/// The run an agent reaction call speaks for (ADR-0162 증보 8 R3 · R4), proved inside the caller's own
+/// transaction exactly as `oort_card_suggest` proves its run:
+///
+/// 1. `scope` on both halves of the connection (R2: `messages:write` to react, `messages:read` to read
+///    the names — no new scope);
+/// 2. the sealed handle is this caller's and this connection's, for a channel still approved;
+/// 3. the effective setting is still 「자유롭게」 (R3 — the view was built from the same read a moment
+///    ago; lowered in between, the call is refused);
+/// 4. the run is locked (`FOR UPDATE` — held to the end of the transaction, which is what makes the
+///    per-run count exact), its lease is live and this caller's, and it is not parked or settled;
+/// 5. the run was started by a **person's** message (R4 — the same judgement as the card's requester: a
+///    run nobody called, a welcome, the agent's own suggestion, a work request without a calling
+///    message, has nobody to react for).
+///
+/// Writes nothing.
+async fn reaction_run_in_tx(
+    conn: &mut PgConnection,
+    caller: HostedCaller,
+    scope: &str,
+    raw_handle: &str,
+    secret: &str,
+) -> Result<Result<LeaseHandle, ToolFailure>, DbError> {
+    let identity = match authorize_in_tx(conn, caller, scope).await? {
+        Ok(identity) => identity,
+        Err(failure) => return Ok(Err(failure)),
+    };
+    let handle = match bound_handle(&identity, caller, raw_handle, secret) {
+        Ok(handle) => handle,
+        Err(failure) => return Ok(Err(failure)),
+    };
+    if momo_messaging::status_reaction::effective_mode_in_tx(
+        conn,
+        caller.workspace_id,
+        caller.agent_member_id,
+    )
+    .await?
+        != momo_settings::AgentReactionsMode::Free
+    {
+        return Ok(Err(ToolFailure::NotAuthorized));
+    }
+    let Some(run) =
+        momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id).await?
+    else {
+        return Ok(Err(ToolFailure::Unavailable));
+    };
+    let lease_snapshot = momo_outbox::lock_gateway_lease_in_tx(
+        conn,
+        caller.workspace_id,
+        handle.run_id,
+        run.agent_member_id,
+        GatewayLeaseBinding {
+            job_id: handle.job_id,
+            lease_id: handle.lease_id,
+        },
+    )
+    .await
+    .map_err(DbError::from)?;
+    if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false) {
+        return Ok(Err(ToolFailure::Conflict));
+    }
+    if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id {
+        return Ok(Err(ToolFailure::HandleRefused));
+    }
+    if run.status.is_approval_held() || run.status.is_terminal() {
+        return Ok(Err(ToolFailure::Conflict));
+    }
+    if momo_agent::suggestion_requester_in_tx(conn, caller.workspace_id, handle.run_id)
+        .await?
+        .is_none()
+    {
+        return Ok(Err(ToolFailure::Unavailable));
+    }
+    Ok(Ok(handle))
+}
+
+/// `oort_reaction_set` — the agent's own reaction on a person's message of the run's conversation
+/// (ADR-0162 증보 8 R1 · R4 ~ R8 · R11).
+///
+/// The emoji is judged before the transaction (R6: the picker's spelling, not a work-state emoji); the
+/// run is proved by [`reaction_run_in_tx`]; the message, the expression, the two limits, the row, the
+/// frame, the run count and the audit row are `momo_messaging::agent_reaction::set_agent_reaction_in_tx`.
+/// A refused message is one answer (`Unavailable`) whatever the cause (R5); a refused emoji or limit is
+/// the plain argument / conflict answer, and only the call trace learns which ([`ToolFailure::ReactionRefused`]).
+async fn reaction_set(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    use momo_mcp::ReactionRefusal;
+    use momo_messaging::agent_reaction::{
+        judge_agent_reaction, set_agent_reaction_in_tx, AgentReactionRefused, AgentReactionWrite,
+        ChoiceRefused,
+    };
+
+    let args = arguments(arguments_value)?;
+    let raw_handle = required_str(args, "handle", 512)?.to_string();
+    let message_id = required_uuid(args, "messageId")?;
+    let raw_emoji = required_str(args, "emoji", momo_mcp::MAX_REACTION_EMOJI_BYTES as usize)?;
+    let action = match required_str(args, "action", 16)? {
+        "add" => momo_messaging::ReactionAction::Added,
+        "remove" => momo_messaging::ReactionAction::Removed,
+        _ => return Err(ToolFailure::InvalidArguments),
+    };
+    let choice = judge_agent_reaction(raw_emoji).map_err(|refused| {
+        ToolFailure::ReactionRefused(match refused {
+            ChoiceRefused::NotEmoji => ReactionRefusal::NotEmoji,
+            ChoiceRefused::StatusEmoji => ReactionRefusal::StatusEmoji,
+        })
+    })?;
+    let secret = state.agent_port.envelope_secret().to_string();
+
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let handle = match reaction_run_in_tx(
+                conn,
+                caller,
+                momo_auth::SCOPE_MESSAGES_WRITE,
+                &raw_handle,
+                &secret,
+            )
+            .await?
+            {
+                Ok(handle) => handle,
+                Err(failure) => return Ok(Err(failure)),
+            };
+            let write = AgentReactionWrite {
+                workspace_id: caller.workspace_id,
+                run_id: handle.run_id,
+                run_channel_id: handle.channel_id,
+                agent_member_id: caller.agent_member_id,
+                token_id: caller.token_id,
+                message_id,
+                choice,
+                action,
+            };
+            Ok(match set_agent_reaction_in_tx(conn, &write).await? {
+                Ok(written) => Ok(written),
+                Err(AgentReactionRefused::Target) => Err(ToolFailure::Unavailable),
+                Err(AgentReactionRefused::ExpressionUnavailable) => Err(
+                    ToolFailure::ReactionRefused(ReactionRefusal::ExpressionUnavailable),
+                ),
+                Err(AgentReactionRefused::MessageLimit) => {
+                    Err(ToolFailure::ReactionRefused(ReactionRefusal::MessageLimit))
+                }
+                Err(AgentReactionRefused::RunLimit) => {
+                    Err(ToolFailure::ReactionRefused(ReactionRefusal::RunLimit))
+                }
+                Err(AgentReactionRefused::MessageFull) => Err(ToolFailure::Conflict),
+            })
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.reaction_set", error))?;
+
+    let written = outcome?;
+    Ok(json!({
+        "messageId": message_id,
+        "emoji": written.emoji,
+        "action": if action == momo_messaging::ReactionAction::Added { "add" } else { "remove" },
+        "changed": written.changed,
+    }))
+}
+
+/// `oort_expression_names` — the names, and only the names, of the expressions an agent may react
+/// with (ADR-0162 증보 8 R10), under the same run as [`reaction_set`] (R3 · R4).
+async fn expression_names(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    let args = arguments(arguments_value)?;
+    let raw_handle = required_str(args, "handle", 512)?.to_string();
+    let secret = state.agent_port.envelope_secret().to_string();
+
+    let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            if let Err(failure) = reaction_run_in_tx(
+                conn,
+                caller,
+                momo_auth::SCOPE_MESSAGES_READ,
+                &raw_handle,
+                &secret,
+            )
+            .await?
+            {
+                return Ok(Err(failure));
+            }
+            Ok(Ok(
+                momo_messaging::agent_reaction::agent_expression_names_in_tx(
+                    conn,
+                    caller.workspace_id,
+                )
+                .await?,
+            ))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.expression_names", error))?;
+
+    let (names, truncated) = outcome?;
+    Ok(json!({"names": names, "truncated": truncated}))
 }
 
 /// One reported token count.

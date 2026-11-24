@@ -871,6 +871,10 @@ fn both_eras_advertise_exactly_the_view_they_can_call() {
             "oort_run_complete",
             "oort_card_suggest",
             "oort_ping",
+            // #6068 (ADR-0162 증보 8): the protocol view carries both; the server drops them for an
+            // agent whose reaction setting is not 「자유롭게」 (`ToolView::without`).
+            "oort_reaction_set",
+            "oort_expression_names",
         ]
     );
     // Every advertised tool is callable, in both eras.
