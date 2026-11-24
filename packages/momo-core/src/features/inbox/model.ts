@@ -10,6 +10,8 @@ import type { Approval, AgentRun, Message } from "../../lib/api";
 import { uuidEq } from "../../lib/api";
 import type { SpawnExecutionPlan } from "../../lib/executionPlan";
 import type { FilterTabsSpec } from "../common/filterTabs";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import {
   agentRunReport,
   artifactSummary,
@@ -38,10 +40,18 @@ export const INBOX_FILTERS: InboxFilter[] = [
   "agents",
 ];
 
-export function filterLabel(filter: InboxFilter): string {
-  if (filter === "needs-action") return "결정 대기";
-  if (filter === "mentions") return "멘션";
-  return "에이전트";
+// 문구는 `i18n/catalogs/<언어>/inbox.json`에 있다. 이 파일은 어느 자리가 어느 키를 읽는지만 정한다. 값 둘 이상을 엮어 한 줄을
+// 짓는 함수(행 빌더 · 시각 · 승인 행동 이름)만 `formatMessage`를 첫 인자로 받고, 나머지는 키를 돌려준다.
+type FormatMessage = LocaleService["formatMessage"];
+
+const FILTER_KEYS = {
+  "needs-action": "inbox.filter.needsAction",
+  mentions: "inbox.filter.mentions",
+  agents: "inbox.filter.agents",
+} as const satisfies Record<InboxFilter, PlainMessageKey>;
+
+export function filterLabelKey(filter: InboxFilter): PlainMessageKey {
+  return FILTER_KEYS[filter];
 }
 
 /**
@@ -130,9 +140,9 @@ export function panelId(filter: InboxFilter): string {
  * 엘리먼트 id와 같은 문자열을 test id로 썼고, 게이트와 e2e가 그 문자열을 잡는다.
  */
 export const INBOX_FILTER_TABS: FilterTabsSpec<InboxFilter> = {
-  label: "인박스 필터",
+  label: { key: "inbox.filter.tabsLabel" },
   values: INBOX_FILTERS,
-  labelFor: filterLabel,
+  labelFor: (filter) => ({ key: filterLabelKey(filter) }),
   tabId,
   panelId,
   testId: tabId,
@@ -277,23 +287,31 @@ export function approvalOpensOnCard(
 // ---- time --------------------------------------------------------------
 
 /** Elapsed label: 방금 / 12분 전 / 3시간 전 / 2일 전. */
-export function relativeLabel(atMs: number, nowMs: number): string {
+export function relativeLabel(
+  formatMessage: FormatMessage,
+  atMs: number,
+  nowMs: number
+): string {
   const minutes = Math.max(0, Math.round((nowMs - atMs) / 60_000));
-  if (minutes < 1) return "방금";
-  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 1) return formatMessage("inbox.time.justNow");
+  if (minutes < 60) return formatMessage("inbox.time.minutesAgo", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.round(hours / 24)}일 전`;
+  if (hours < 24) return formatMessage("inbox.time.hoursAgo", { count: hours });
+  return formatMessage("inbox.time.daysAgo", { count: Math.round(hours / 24) });
 }
 
 /** Deadline label for a pending approval: 3분 후 만료 / 기한 지남. */
-export function deadlineLabel(expiresAtMs: number, nowMs: number): string {
+export function deadlineLabel(
+  formatMessage: FormatMessage,
+  expiresAtMs: number,
+  nowMs: number
+): string {
   const minutes = Math.round((expiresAtMs - nowMs) / 60_000);
-  if (minutes <= 0) return "기한 지남";
-  if (minutes < 60) return `${minutes}분 후 만료`;
+  if (minutes <= 0) return formatMessage("inbox.deadline.passed");
+  if (minutes < 60) return formatMessage("inbox.deadline.minutesLeft", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 후 만료`;
-  return `${Math.round(hours / 24)}일 후 만료`;
+  if (hours < 24) return formatMessage("inbox.deadline.hoursLeft", { count: hours });
+  return formatMessage("inbox.deadline.daysLeft", { count: Math.round(hours / 24) });
 }
 
 // ---- mentions ----------------------------------------------------------
@@ -352,6 +370,7 @@ export function resolveActorNames(
 }
 
 export function mentionItem(
+  formatMessage: FormatMessage,
   message: Message,
   actor: ActorNames,
   channelLabel: string,
@@ -364,17 +383,17 @@ export function mentionItem(
     tone: "accent",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
-    predicate: "나를 불렀어요",
+    predicate: formatMessage("inbox.feedMention.predicate"),
     detail: body.length > 0 ? body : undefined,
     outcome: null,
     outcomeTone: "muted",
     channelId: message.channelId,
     channelLabel,
     seq: message.seq,
-    timeLabel: relativeLabel(message.createdAtMs, nowMs),
+    timeLabel: relativeLabel(formatMessage, message.createdAtMs, nowMs),
     sortAtMs: message.createdAtMs,
     pending: false,
-    reason: "메시지에서 나를 불러 서버가 멘션으로 기록했어요.",
+    reason: formatMessage("inbox.reason.mention"),
     managedBy: actor.isAgent ? actor.ownerName : undefined,
   };
 }
@@ -382,6 +401,7 @@ export function mentionItem(
 // ---- approvals ---------------------------------------------------------
 
 export function approvalItem(
+  formatMessage: FormatMessage,
   approval: Approval,
   actor: ActorNames,
   channelLabel: string,
@@ -406,10 +426,10 @@ export function approvalItem(
   const timeLabel = pending
     ? approval.expiresAtMs === undefined
       ? ""
-      : deadlineLabel(approval.expiresAtMs, nowMs)
+      : deadlineLabel(formatMessage, approval.expiresAtMs, nowMs)
     : approval.decidedAtMs === undefined
       ? ""
-      : relativeLabel(approval.decidedAtMs, nowMs);
+      : relativeLabel(formatMessage, approval.decidedAtMs, nowMs);
   // fail-closed: 서버가 명시적으로 가역이라고 말한 것만 가역이다 (2R B1).
   const reversible = approval.isReversible === true;
   const deadlinePassed =
@@ -433,16 +453,19 @@ export function approvalItem(
     tone: pending ? "warn" : "muted",
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
-    predicate: `${approvalActionLabel(
-      approval.actionType,
-      approval.toolName,
-      approval.workspaceActionId
-    )} 허가를 요청했어요`,
+    predicate: formatMessage("inbox.feedApproval.predicate", {
+      action: approvalActionLabel(
+        formatMessage,
+        approval.actionType,
+        approval.toolName,
+        approval.workspaceActionId
+      ),
+    }),
     detail: approval.decisionReason ?? undefined,
     outcome: !known || state === "approval" ? null : face.word,
     outcomeTone:
       !known || state === "approval" || face.tone === "working" ? "muted" : face.tone,
-    note: reversible ? undefined : "되돌릴 수 없음",
+    note: reversible ? undefined : formatMessage("inbox.feedApproval.irreversible"),
     reversible,
     ...(deadlinePassed ? { deadlinePassed: true } : {}),
     channelId: approval.channelId,
@@ -453,28 +476,29 @@ export function approvalItem(
     timeLabel,
     sortAtMs: approval.decidedAtMs ?? approval.expiresAtMs ?? 0,
     pending,
-    reason: pending
-      ? "에이전트가 실행 전에 사람의 허가를 요청했고, 내가 이 채널의 멤버입니다."
-      : "승인 원장에 기록된 결정입니다.",
+    reason: formatMessage(
+      pending ? "inbox.reason.approvalPending" : "inbox.reason.approvalSettled"
+    ),
     managedBy: actor.ownerName,
   };
 }
 
 // ---- agent runs --------------------------------------------------------
 
+// `word`는 요청 낱말 표(`REQUEST_WORD`, 에이전트 칸이 아직 글로 들고 있다)에서 오는 것, `key`는 이 파일이 사전에서 읽는 것이다.
 const RUN_OUTCOME: Record<
   AgentRun["status"],
-  { label: string | null; tone: OutcomeTone }
+  { label: { key: PlainMessageKey } | { word: string } | null; tone: OutcomeTone }
 > = {
   queued: { label: null, tone: "muted" },
   running: { label: null, tone: "muted" },
-  awaiting_approval: { label: REQUEST_WORD.approval, tone: "warn" },
-  paused: { label: "멈춤", tone: "warn" },
-  succeeded: { label: "완료", tone: "ok" },
-  failed: { label: "실패", tone: "danger" },
-  cancelled: { label: REQUEST_WORD.cancelled, tone: "muted" },
+  awaiting_approval: { label: { word: REQUEST_WORD.approval }, tone: "warn" },
+  paused: { label: { key: "inbox.feedRun.outcomePaused" }, tone: "warn" },
+  succeeded: { label: { key: "inbox.feedRun.outcomeSucceeded" }, tone: "ok" },
+  failed: { label: { key: "inbox.feedRun.outcomeFailed" }, tone: "danger" },
+  cancelled: { label: { word: REQUEST_WORD.cancelled }, tone: "muted" },
   // Silence is stalled, never an error story we did not observe.
-  timed_out: { label: "응답 없음", tone: "warn" },
+  timed_out: { label: { key: "inbox.feedRun.outcomeTimedOut" }, tone: "warn" },
 };
 
 const RUN_LIVE: AgentRun["status"][] = [
@@ -497,6 +521,7 @@ export function runTitle(run: AgentRun): string | undefined {
 }
 
 export function runItem(
+  formatMessage: FormatMessage,
   run: AgentRun,
   actor: ActorNames,
   channelLabel: string,
@@ -512,9 +537,13 @@ export function runItem(
   const reported = hasRunReport(report);
   const lastStage = report.stages.length > 0 ? report.stages[report.stages.length - 1] : null;
   const summary = artifactSummary(report);
+  const stepsLine = formatMessage("inbox.feedRun.steps", {
+    step: run.stepCount,
+    max: run.maxSteps,
+  });
   const detail = reported
     ? [lastStage, summary].filter((part): part is string => part !== null).join(" · ")
-    : `${run.stepCount}/${run.maxSteps} 단계`;
+    : stepsLine;
   return {
     key: `run:${run.id}`,
     kind: "run",
@@ -522,16 +551,23 @@ export function runItem(
     actor: actorToken(actor),
     actorIsAgent: actor.isAgent,
     // The title is quoted BEFORE 작업 so the particle stays fixed (작업을).
-    predicate: title ? `"${title}" 작업을 실행했습니다` : "작업을 실행했습니다",
-    detail: detail === "" ? `${run.stepCount}/${run.maxSteps} 단계` : detail,
-    outcome: outcome.label,
+    predicate: title
+      ? formatMessage("inbox.feedRun.predicateTitled", { title })
+      : formatMessage("inbox.feedRun.predicateUntitled"),
+    detail: detail === "" ? stepsLine : detail,
+    outcome:
+      outcome.label === null
+        ? null
+        : "key" in outcome.label
+          ? formatMessage(outcome.label.key)
+          : outcome.label.word,
     outcomeTone: outcome.tone,
     channelId: run.channelId,
     channelLabel,
-    timeLabel: relativeLabel(atMs, nowMs),
+    timeLabel: relativeLabel(formatMessage, atMs, nowMs),
     sortAtMs: atMs,
     pending: live,
-    reason: "에이전트 작업 실행 기록입니다.",
+    reason: formatMessage("inbox.reason.run"),
     managedBy: actor.ownerName,
   };
 }
@@ -559,15 +595,21 @@ export function orderFeed(items: FeedItem[]): FeedItem[] {
 }
 
 /** 3R M4: 와이어 액션 타입을 사용자 문장 어휘로. 미지의 타입은 원문 유지(정직 폴백). */
-export function actionTypeLabel(actionType: string): string {
-  const known: Record<string, string> = {
-    "work.spawn": "작업 실행",
-    "work.exec": "명령 실행",
-    "workspace.file_write_and_reindex": "파일 쓰기와 재색인",
-    "message.send": "메시지 전송",
-  };
-  return known[actionType] ?? actionType;
+export function actionTypeLabel(
+  formatMessage: FormatMessage,
+  actionType: string
+): string {
+  return Object.prototype.hasOwnProperty.call(ACTION_TYPE_KEYS, actionType)
+    ? formatMessage(ACTION_TYPE_KEYS[actionType])
+    : actionType;
 }
+
+const ACTION_TYPE_KEYS: Record<string, PlainMessageKey> = {
+  "work.spawn": "inbox.actionType.workSpawn",
+  "work.exec": "inbox.actionType.workExec",
+  "workspace.file_write_and_reindex": "inbox.actionType.fileWriteReindex",
+  "message.send": "inbox.actionType.messageSend",
+};
 
 /** 워크스페이스 행동 승인의 `action_type` (ADR-0186 부록 A). */
 const WORKSPACE_ACTION_TYPE = "workspace_action";
@@ -580,35 +622,40 @@ const WORKSPACE_ACTION_TYPE = "workspace_action";
  * 갈래의 우리말(「워크스페이스 변경」)로 떨어진다: 서버가 내일 행동을 하나 더
  * 열어도 줄이 거짓을 말하지 않는다.
  */
-const WORKSPACE_ACTION_LABELS: Record<string, string> = {
-  "invite.create": "초대 링크 만들기",
-  "channel.create": "채널 만들기",
-  "channel.member.add": "채널에 멤버 추가",
-  "agent.rename": "에이전트 이름 바꾸기",
-  "hosted.channels.grant": "승인 채널 늘리기",
-  "workspace.settings.update": "워크스페이스 설정 바꾸기",
+const WORKSPACE_ACTION_KEYS: Record<string, PlainMessageKey> = {
+  "invite.create": "inbox.workspaceAction.inviteCreate",
+  "channel.create": "inbox.workspaceAction.channelCreate",
+  "channel.member.add": "inbox.workspaceAction.channelMemberAdd",
+  "agent.rename": "inbox.workspaceAction.agentRename",
+  "hosted.channels.grant": "inbox.workspaceAction.hostedChannelsGrant",
+  "workspace.settings.update": "inbox.workspaceAction.workspaceSettingsUpdate",
   // ADR-0186 증보 v4 (#4385·#4394): 서버 레지스트리 title 과 같은 말.
-  "member.avatar.set": "내 프로필 사진 바꾸기",
-  "member.display_name.set": "내 이름 바꾸기",
+  "member.avatar.set": "inbox.workspaceAction.memberAvatarSet",
+  "member.display_name.set": "inbox.workspaceAction.memberDisplayNameSet",
   // ADR-0201 증보 v2 H6-1: 도우미만 제안하는 설정 액션 셋.
-  "workspace.unfurl.update": "링크 미리보기 설정 바꾸기",
+  "workspace.unfurl.update": "inbox.workspaceAction.unfurlUpdate",
   // 인자가 `{enabled?: false, paused?: boolean}` 이라 같은 id 가 멈춤과 **재개**를 둘 다
   // 싣는다. 인박스 줄은 인자를 모르므로 방향을 말하지 않는다(재개 카드에 「멈추기」라고
   // 쓰면 승인하기 전에 보는 한마디가 실제 행동과 반대가 된다).
-  "workspace.memory.update": "팀 기억 설정 바꾸기",
-  "workspace.work_tier.update": "워크스페이스 기본 재개 정책 바꾸기",
+  "workspace.memory.update": "inbox.workspaceAction.memoryUpdate",
+  "workspace.work_tier.update": "inbox.workspaceAction.workTierUpdate",
   // H7: 계약만 있다. 설치 경로가 생기기 전까지 서버가 카드를 만들지 않는다(#3889).
-  "plugin.install": "앱 설치",
+  "plugin.install": "inbox.workspaceAction.pluginInstall",
   // ADR-0201 증보 v3 B3-T (#4964): 「파일 역할 꺼 줘」가 되는 카드. 방향(켬/끔)은 인자라서
   // 인박스 줄은 말하지 않는다 — 서버 레지스트리 title 과 같은 말.
-  "team_ai.roles.set": "도우미 역할 켜고 끄기",
+  "team_ai.roles.set": "inbox.workspaceAction.teamAiRolesSet",
 };
 
-export function workspaceActionLabel(actionId?: string): string {
-  if (actionId === undefined) return "워크스페이스 변경";
-  return Object.prototype.hasOwnProperty.call(WORKSPACE_ACTION_LABELS, actionId)
-    ? WORKSPACE_ACTION_LABELS[actionId]
-    : "워크스페이스 변경";
+export function workspaceActionLabel(
+  formatMessage: FormatMessage,
+  actionId?: string
+): string {
+  return formatMessage(
+    actionId !== undefined &&
+      Object.prototype.hasOwnProperty.call(WORKSPACE_ACTION_KEYS, actionId)
+      ? WORKSPACE_ACTION_KEYS[actionId]
+      : "inbox.workspaceAction.fallback"
+  );
 }
 
 /**
@@ -621,14 +668,20 @@ export function workspaceActionLabel(actionId?: string): string {
 const TOOL_CALL_ACTION = "tool_call";
 
 /** 이 서버가 실행할 수 있는 툴의 사람 이름 (`tools.rs`의 CATALOG와 1:1). */
-const TOOL_LABELS: Record<string, string> = {
-  "work.session.end": "작업 세션 종료",
+const TOOL_KEYS: Record<string, PlainMessageKey> = {
+  "work.session.end": "inbox.toolAction.sessionEnd",
   // #1114이 CATALOG의 두 번째 항목으로 올린 것. 「시작」이지 「스폰」이 아니다 —
   // spawn은 이 원장의 어휘이지 사람의 말이 아니다.
-  "work.session.spawn": "작업 세션 시작",
+  "work.session.spawn": "inbox.toolAction.sessionStart",
   // REST 컨트롤 원장이 쓰는 action_type. 같은 행위의 다른 입구라서 같은 말을 한다.
-  "work.spawn": "작업 세션 시작",
+  "work.spawn": "inbox.toolAction.sessionStart",
 };
+
+function toolLabel(formatMessage: FormatMessage, toolName: string): string {
+  return Object.prototype.hasOwnProperty.call(TOOL_KEYS, toolName)
+    ? formatMessage(TOOL_KEYS[toolName])
+    : toolName;
+}
 
 /**
  * 행 제목이 될 한 마디 (goal M-AP1 2R B2).
@@ -643,18 +696,19 @@ const TOOL_LABELS: Record<string, string> = {
  *      경우에도 `tool_call`이라는 원장 내부 식별자는 화면에 내보내지 않는다.
  */
 export function approvalActionLabel(
+  formatMessage: FormatMessage,
   actionType: string,
   toolName?: string,
   workspaceActionId?: string
 ): string {
   if (actionType === WORKSPACE_ACTION_TYPE) {
-    return workspaceActionLabel(workspaceActionId);
+    return workspaceActionLabel(formatMessage, workspaceActionId);
   }
   if (actionType === TOOL_CALL_ACTION) {
-    if (toolName === undefined) return "에이전트 도구 실행";
-    return TOOL_LABELS[toolName] ?? toolName;
+    if (toolName === undefined) return formatMessage("inbox.toolAction.fallback");
+    return toolLabel(formatMessage, toolName);
   }
   // 툴 이름이 실려 있으면 그것이 더 구체적인 진실이다.
-  if (toolName !== undefined) return TOOL_LABELS[toolName] ?? toolName;
-  return actionTypeLabel(actionType);
+  if (toolName !== undefined) return toolLabel(formatMessage, toolName);
+  return actionTypeLabel(formatMessage, actionType);
 }

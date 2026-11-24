@@ -28,6 +28,12 @@ import type { AppLocale } from "@/i18n/localeStore";
 import { koreanLocale } from "@/testing/koLocale";
 import { DevAccessSection } from "./DevAccessSection";
 import { devAccessPolicyQueryKey } from "./devAccessQuery";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // 설정 › 명령줄·AI 도구 (#4663, ADR-0216). 화면과 코어와 훅은 진짜로 돌리고 **서버 쪽(HTTP `fetch`)만**
 // 가짜로 둔다. 가짜의 답은 서버 문서(OpenAPI `DevAccessPolicyResponse` 등)의 실제 JSON 모양이고,
@@ -902,7 +908,7 @@ describe("명령줄·AI 도구: 연결 목록", () => {
     await screen.findByTestId("dev-credentials-list");
 
     const model = (wire: Record<string, unknown>) =>
-      devCredentialRow(parseDevCredential(wire), { now: Date.now() });
+      devCredentialRow(parseDevCredential(wire), { now: Date.now(), formatMessage: koCopy });
 
     // 카드 줄: 값을 지어내 채우지 않고 칸 자체가 없다. 종류도 보통(카드)이라 되풀이하지 않는다.
     for (const wire of [never, used]) {
@@ -939,7 +945,7 @@ describe("명령줄·AI 도구: 연결 목록", () => {
     expect(within(row).getByTestId("dev-credential-device").textContent).toBe("정하윤의 노트북");
     expect(within(row).queryByTestId("dev-credential-tool")).toBeNull();
     expect(within(row).getByTestId("dev-credential-kind").textContent).toBe(
-      devCredentialRow(parseDevCredential(session), { now: NOW }).kindLabel
+      devCredentialRow(parseDevCredential(session), { now: NOW, formatMessage: koCopy }).kindLabel
     );
   });
 

@@ -3,6 +3,8 @@ import { threadRollup, uuidEq } from "../../lib/api";
 import { effectiveUnreadStartSeq } from "../readState/model";
 import { attachmentPreviewLine } from "../attachments/model";
 import type { FilterTabsSpec } from "../common/filterTabs";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { InboxWireKind, ServerInboxItem } from "./serverInbox";
 import {
   mailboxSource,
@@ -72,18 +74,21 @@ export const MAILBOX_FILTERS: readonly MailboxFilter[] = [
   "task",
 ];
 
-const FILTER_LABEL: Record<MailboxFilter, string> = {
-  all: "전체",
-  unread: "안 읽음",
-  mention: "멘션",
-  reply: "답글",
-  dm: "DM",
-  thread: "스레드",
-  task: "처리할 일",
-};
+// 문구는 `i18n/catalogs/<언어>/inbox.json`에 있다. 값을 엮어 한 줄을 짓는 함수(항목 빌더 · 낭독문)만 `formatMessage`를 받는다.
+type FormatMessage = LocaleService["formatMessage"];
 
-export function mailboxFilterLabel(filter: MailboxFilter): string {
-  return FILTER_LABEL[filter];
+const FILTER_LABEL_KEYS = {
+  all: "inbox.mailbox.filterAll",
+  unread: "inbox.mailbox.filterUnread",
+  mention: "inbox.mailbox.filterMention",
+  reply: "inbox.mailbox.filterReply",
+  dm: "inbox.mailbox.filterDm",
+  thread: "inbox.mailbox.filterThread",
+  task: "inbox.mailbox.filterTask",
+} as const satisfies Record<MailboxFilter, PlainMessageKey>;
+
+export function mailboxFilterLabelKey(filter: MailboxFilter): PlainMessageKey {
+  return FILTER_LABEL_KEYS[filter];
 }
 
 export function parseMailboxFilter(raw: string | null): MailboxFilter {
@@ -101,9 +106,9 @@ export function mailboxPanelId(filter: MailboxFilter): string {
 }
 
 export const MAILBOX_FILTER_TABS: FilterTabsSpec<MailboxFilter> = {
-  label: "인박스 필터",
+  label: { key: "inbox.filter.tabsLabel" },
   values: MAILBOX_FILTERS,
-  labelFor: mailboxFilterLabel,
+  labelFor: (filter) => ({ key: mailboxFilterLabelKey(filter) }),
   tabId: mailboxTabId,
   panelId: mailboxPanelId,
   testId: mailboxTabId,
@@ -176,12 +181,15 @@ function unreadCountOf(readState: ReadState | undefined): number {
 
 // ---- 빌더 -------------------------------------------------------------
 
-function bodyLine(message: Message): string {
-  if (message.state === "deleted") return "삭제된 메시지예요.";
+function bodyLine(formatMessage: FormatMessage, message: Message): string {
+  if (message.state === "deleted") return formatMessage("inbox.preview.deleted");
   const body = (message.body ?? "").trim().replace(/\s+/g, " ");
   if (body.length > 0) return body;
   // 글 없이 사진·파일만 보낸 메시지(#4294): 「내용 없는 메시지」가 아니라 무엇이 왔는지 말한다.
-  return attachmentPreviewLine(message.attachments) ?? "내용 없는 메시지예요.";
+  return (
+    attachmentPreviewLine(message.attachments) ??
+    formatMessage("inbox.preview.empty")
+  );
 }
 
 function isConversational(message: Message): boolean {
@@ -195,6 +203,7 @@ function isConversational(message: Message): boolean {
  * 사라지지 않는다. 그때는 상대의 마지막 말이 아니라 내 말이므로 「나:」로 구분한다.
  */
 export function dmEntry(input: {
+  formatMessage: FormatMessage;
   channelId: string;
   channelLabel: string;
   /** 출처 줄의 장소(`mailboxPlace`). */
@@ -205,6 +214,7 @@ export function dmEntry(input: {
   actorFor: (memberId: string) => ActorNames;
   nowMs: number;
 }): MailboxEntry | null {
+  const { formatMessage } = input;
   const candidates = input.messages.filter(isConversational);
   if (candidates.length === 0) return null;
   const latest = candidates.reduce((a, b) => (b.seq > a.seq ? b : a));
@@ -218,27 +228,30 @@ export function dmEntry(input: {
     kind: "dm",
     channelId: input.channelId,
     channelLabel: input.channelLabel,
-    typeLabel: `DM · ${input.channelLabel}`,
+    typeLabel: formatMessage("inbox.mailboxType.dm", { channel: input.channelLabel }),
     // 대표는 대화형(루트) 메시지뿐이라 스레드 안의 글이 아니다.
     source: mailboxSource("dm", input.place, false),
-    actor: mine ? "나" : actorToken(actor),
+    actor: mine ? formatMessage("inbox.mailbox.actorMe") : actorToken(actor),
     actorMemberId: latest.authorMemberId,
     actorIsAgent: !mine && actor.isAgent,
-    preview: mine ? `나: ${bodyLine(latest)}` : bodyLine(latest),
+    preview: mine
+      ? formatMessage("inbox.mailbox.previewMine", {
+          text: bodyLine(formatMessage, latest),
+        })
+      : bodyLine(formatMessage, latest),
     atMs: latest.createdAtMs,
-    timeLabel: relativeLabel(latest.createdAtMs, input.nowMs),
+    timeLabel: relativeLabel(formatMessage, latest.createdAtMs, input.nowMs),
     unread,
     unreadCount: unread ? unreadCount : 0,
     seq: latest.seq,
     messageId: latest.id,
-    reason: mine
-      ? "내가 보낸 마지막 말이 있는 DM이에요."
-      : "DM으로 온 메시지예요.",
+    reason: formatMessage(mine ? "inbox.reason.dmMine" : "inbox.reason.dm"),
   };
 }
 
 /** 멘션 한 건. 서버가 기록한 멘션만 온다(`mention_member_ids`). 안 읽은 것뿐이다. */
 export function mentionEntry(
+  formatMessage: FormatMessage,
   message: Message,
   actor: ActorNames,
   channelLabel: string,
@@ -251,20 +264,20 @@ export function mentionEntry(
     kind: "mention",
     channelId: message.channelId,
     channelLabel,
-    typeLabel: `멘션 · ${channelLabel}`,
+    typeLabel: formatMessage("inbox.mailboxType.mention", { channel: channelLabel }),
     source: mailboxSource("mention", place, message.rootId !== undefined),
     actor: actorToken(actor),
     actorMemberId: message.authorMemberId,
     actorIsAgent: actor.isAgent,
-    preview: bodyLine(message),
+    preview: bodyLine(formatMessage, message),
     atMs: message.createdAtMs,
-    timeLabel: relativeLabel(message.createdAtMs, nowMs),
+    timeLabel: relativeLabel(formatMessage, message.createdAtMs, nowMs),
     unread: true,
     unreadCount: 0,
     seq: message.seq,
     messageId: message.id,
     ...(message.rootId === undefined ? {} : { rootId: message.rootId }),
-    reason: "메시지에서 나를 불러 서버가 멘션으로 기록했어요.",
+    reason: formatMessage("inbox.reason.mention"),
   };
 }
 
@@ -275,6 +288,7 @@ export function mentionEntry(
  * 그 한 줄을, 아니면 루트 본문을 보여 주고 「답글 N개」로 이유를 말한다.
  */
 export function threadEntry(input: {
+  formatMessage: FormatMessage;
   root: Message;
   channelLabel: string;
   /** 출처 줄의 장소(`mailboxPlace`). */
@@ -285,47 +299,57 @@ export function threadEntry(input: {
   actorFor: (memberId: string) => ActorNames;
   nowMs: number;
 }): MailboxEntry | null {
+  const { formatMessage } = input;
   const rollup = threadRollup(input.root);
   if (rollup === null) return null;
   if (!uuidEq(input.root.authorMemberId, input.selfMemberId)) return null;
   if (!isUnreadSeq(input.readState, rollup.lastReplySeq)) return null;
   const reply = input.lastReply;
   const replyAuthor = reply ? input.actorFor(reply.authorMemberId) : undefined;
-  const actor = replyAuthor ? actorToken(replyAuthor) : "스레드";
+  const actor = replyAuthor
+    ? actorToken(replyAuthor)
+    : formatMessage("inbox.mailbox.actorThread");
   return {
     key: `thread:${input.root.id}`,
     kind: "thread",
     channelId: input.root.channelId,
     channelLabel: input.channelLabel,
-    typeLabel: `스레드 · ${input.channelLabel}`,
+    typeLabel: formatMessage("inbox.mailboxType.thread", { channel: input.channelLabel }),
     source: mailboxSource("thread", input.place, true),
     actor,
     ...(reply ? { actorMemberId: reply.authorMemberId } : {}),
     actorIsAgent: replyAuthor?.isAgent ?? false,
     preview: reply
-      ? bodyLine(reply)
-      : `내 글에 답글 ${rollup.replyCount}개: ${bodyLine(input.root)}`,
+      ? bodyLine(formatMessage, reply)
+      : formatMessage("inbox.mailbox.threadPreview", {
+          count: rollup.replyCount,
+          text: bodyLine(formatMessage, input.root),
+        }),
     atMs: rollup.lastReplyAtMs,
-    timeLabel: relativeLabel(rollup.lastReplyAtMs, input.nowMs),
+    timeLabel: relativeLabel(formatMessage, rollup.lastReplyAtMs, input.nowMs),
     unread: true,
     unreadCount: 0,
     seq: rollup.lastReplySeq,
     messageId: input.root.id,
     rootId: input.root.id,
-    rootPreview: bodyLine(input.root),
-    reason: "내가 쓴 글에 새 답글이 달렸어요.",
+    rootPreview: bodyLine(formatMessage, input.root),
+    reason: formatMessage("inbox.reason.threadNewReply"),
   };
 }
 
 /** 처리할 일 한 건: 결정을 기다리는 승인. 결정할 수 있는 행(`approvalId`)만 온다. */
-export function taskEntry(item: FeedItem, nowMs: number): MailboxEntry | null {
+export function taskEntry(
+  formatMessage: FormatMessage,
+  item: FeedItem,
+  nowMs: number
+): MailboxEntry | null {
   if (item.approvalId === undefined || !item.pending) return null;
   return {
     key: item.key,
     kind: "task",
     channelId: item.channelId,
     channelLabel: item.channelLabel,
-    typeLabel: "처리할 일 · 승인 요청",
+    typeLabel: formatMessage("inbox.mailboxType.task"),
     source: mailboxSource("task", { kind: "channel", name: null }, false),
     actor: item.actor,
     actorIsAgent: item.actorIsAgent,
@@ -350,24 +374,28 @@ const SERVER_KIND: Record<InboxWireKind, Exclude<MailboxKind, "task">> = {
   dm: "dm",
 };
 
-const SERVER_TYPE_LABEL: Record<Exclude<MailboxKind, "task">, string> = {
-  reply: "답글",
-  mention: "멘션",
-  thread: "스레드",
-  dm: "DM",
-};
+const SERVER_TYPE_KEYS = {
+  reply: "inbox.mailboxType.reply",
+  mention: "inbox.mailboxType.mention",
+  thread: "inbox.mailboxType.thread",
+  dm: "inbox.mailboxType.dm",
+} as const;
 
-const SERVER_REASON: Record<Exclude<MailboxKind, "task">, string> = {
-  reply: "내 글에 답하거나 인용했어요.",
-  mention: "메시지에서 나를 불렀어요.",
-  thread: "내가 참여한 스레드에 새 답글이 달렸어요.",
-  dm: "DM으로 온 메시지예요.",
-};
+const SERVER_REASON_KEYS = {
+  reply: "inbox.reason.reply",
+  mention: "inbox.reason.mentionServer",
+  thread: "inbox.reason.threadParticipant",
+  dm: "inbox.reason.dm",
+} as const satisfies Record<Exclude<MailboxKind, "task">, PlainMessageKey>;
 
-function previewLine(preview: string, deleted: boolean): string {
-  if (deleted) return "삭제된 메시지예요.";
+function previewLine(
+  formatMessage: FormatMessage,
+  preview: string,
+  deleted: boolean
+): string {
+  if (deleted) return formatMessage("inbox.preview.deleted");
   const text = preview.trim().replace(/\s+/g, " ");
-  return text.length > 0 ? text : "내용 없는 메시지예요.";
+  return text.length > 0 ? text : formatMessage("inbox.preview.empty");
 }
 
 /** 서버 와이어 종류(`reply_to_me`…)를 화면 종류로. */
@@ -403,6 +431,7 @@ export function isServerItemUnread(
 export function serverEntry(
   item: ServerInboxItem,
   input: {
+    formatMessage: FormatMessage;
     channelLabel: string;
     /** 출처 줄의 장소(`mailboxPlace`, 서버 항목의 `channel`을 `wire`로 넘겨 짓는다). */
     place: MailboxPlace;
@@ -412,6 +441,7 @@ export function serverEntry(
     lastReadSeq?: number;
   }
 ): MailboxEntry {
+  const { formatMessage } = input;
   const kind = SERVER_KIND[item.kind];
   const quoted = item.quotedMessage;
   return {
@@ -421,7 +451,7 @@ export function serverEntry(
     reasons: item.reasons.map((reason) => SERVER_KIND[reason]),
     channelId: item.channel.id,
     channelLabel: input.channelLabel,
-    typeLabel: `${SERVER_TYPE_LABEL[kind]} · ${input.channelLabel}`,
+    typeLabel: formatMessage(SERVER_TYPE_KEYS[kind], { channel: input.channelLabel }),
     source: mailboxSource(
       kind,
       input.place,
@@ -430,9 +460,9 @@ export function serverEntry(
     actor: actorToken(input.actor),
     actorMemberId: item.actorMemberId,
     actorIsAgent: input.actor.isAgent,
-    preview: previewLine(item.message.preview, item.message.deleted),
+    preview: previewLine(formatMessage, item.message.preview, item.message.deleted),
     atMs: item.createdAtMs,
-    timeLabel: relativeLabel(item.createdAtMs, input.nowMs),
+    timeLabel: relativeLabel(formatMessage, item.createdAtMs, input.nowMs),
     unread: isServerItemUnread(item, input.lastReadSeq),
     unreadCount: 0,
     seq: item.message.seq,
@@ -441,10 +471,10 @@ export function serverEntry(
     ...(quoted === undefined
       ? {}
       : {
-          quotedPreview: previewLine(quoted.preview, quoted.deleted),
+          quotedPreview: previewLine(formatMessage, quoted.preview, quoted.deleted),
           quotedDeleted: quoted.deleted,
         }),
-    reason: SERVER_REASON[kind],
+    reason: formatMessage(SERVER_REASON_KEYS[kind]),
   };
 }
 
@@ -609,14 +639,20 @@ export function readTargetSeq(entry: MailboxEntry): number | null {
  * 출처 줄이 종류를 말하지 않으면(채널의 멘션·답글 「#채널」, DM 안의 스레드) 종류 낱말을 앞에 붙인다: 아바타가 있는
  * 줄은 종류 그림도 없어서, 이 낱말이 아니면 낭독에서 종류가 사라진다.
  */
-export function entryAriaLabel(entry: MailboxEntry, sourceLine: string): string {
-  const unread = entry.unread
-    ? entry.unreadCount > 1
-      ? `안 읽음 ${entry.unreadCount}개, `
-      : "안 읽음, "
-    : "";
-  const kind = sourceSaysKind(entry.kind, entry.source)
-    ? ""
-    : `${mailboxFilterLabel(entry.kind)}, `;
-  return `${unread}${kind}${sourceLine}, ${entry.actor}, ${entry.timeLabel}, ${entry.preview}`;
+export function entryAriaLabel(
+  formatMessage: FormatMessage,
+  entry: MailboxEntry,
+  sourceLine: string
+): string {
+  const showKind = !sourceSaysKind(entry.kind, entry.source);
+  return formatMessage("inbox.mailbox.ariaLabel", {
+    unread: entry.unread ? (entry.unreadCount > 1 ? "many" : "one") : "none",
+    count: entry.unreadCount,
+    showKind: showKind ? "yes" : "no",
+    kind: formatMessage(mailboxFilterLabelKey(entry.kind)),
+    source: sourceLine,
+    actor: entry.actor,
+    time: entry.timeLabel,
+    preview: entry.preview,
+  });
 }

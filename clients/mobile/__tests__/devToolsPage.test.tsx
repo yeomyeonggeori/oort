@@ -22,6 +22,12 @@ import {
 } from '../src/features/profile/DevToolsPage';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+
 
 // =============================================================================
 // #4663 설정 › 「명령줄·AI 도구」: 폰의 목록과 폐기.
@@ -210,7 +216,7 @@ const goOffline = () =>
 const goOnline = () => act(() => netInfo().__emit({isConnected: true, isInternetReachable: true}));
 
 /** 표본에서 코어 모델이 만든 한 줄(화면이 보여야 하는 값). */
-const rowOf = (wire: Wire) => devCredentialRow(parseDevCredential(wire), {now: Date.now()});
+const rowOf = (wire: Wire) => devCredentialRow(parseDevCredential(wire), {now: Date.now(), formatMessage: koCopy});
 const baseOf = (wire: Wire) => `dev-credential-${String(wire.id)}`;
 const revokeButton = (wire: Wire) => screen.getByTestId(`${baseOf(wire)}-revoke`);
 

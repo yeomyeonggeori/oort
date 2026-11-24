@@ -52,6 +52,7 @@ import {
 import { useWorkstream, useWorkstreamRuns } from "./useWorkstreams";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 작업 흐름 상세 (MOMO-677 / ADR-0143 이행 3).
 //
@@ -462,6 +463,7 @@ function ContinuationBlock({
 }
 
 export function WorkstreamDetailRoute() {
+  const formatMessage = useFormatMessage();
   const { session, workspaceId } = useSession();
   const offline = useOffline();
   const params = useParams();
@@ -619,7 +621,7 @@ export function WorkstreamDetailRoute() {
                   )}
                 </MetaRow>
                 <MetaRow label="마지막 갱신">
-                  {relativeLabel(workstream.updatedAtMs, nowMs)}
+                  {relativeLabel(formatMessage, workstream.updatedAtMs, nowMs)}
                 </MetaRow>
               </dl>
               <div className="mt-2 flex flex-wrap gap-2">

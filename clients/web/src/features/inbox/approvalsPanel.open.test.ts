@@ -7,6 +7,12 @@ import {
   decidableCount,
 } from "./approvalsPanel";
 import { needsMeFrom } from "./useNeedsMe";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // =============================================================================
 // 받은함은 어떤 승인에 승인·거부를 세우지 않는가 (#5462, planner 2026-11-07).
@@ -51,7 +57,7 @@ function approvalRow(
 }
 
 function row(id: string, workspaceActionId: string | undefined, decisionMode?: "inline" | "open", actionType?: string) {
-  return approvalItem(approvalRow(id, workspaceActionId, decisionMode, actionType), AGENT, "#emoji", NOW_MS);
+  return approvalItem(koCopy, approvalRow(id, workspaceActionId, decisionMode, actionType), AGENT, "#emoji", NOW_MS);
 }
 
 describe("approvalRowControl: 카드로 보내는 승인 (#5462)", () => {

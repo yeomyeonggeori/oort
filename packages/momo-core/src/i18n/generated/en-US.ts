@@ -7310,10 +7310,568 @@ export const catalog: MessageCatalog = {
       "value": "Waiting for participants"
     }
   ],
+  "inbox.actionType.fileWriteReindex": [
+    {
+      "type": 0,
+      "value": "Write files and reindex"
+    }
+  ],
+  "inbox.actionType.messageSend": [
+    {
+      "type": 0,
+      "value": "Send message"
+    }
+  ],
+  "inbox.actionType.workExec": [
+    {
+      "type": 0,
+      "value": "Run command"
+    }
+  ],
+  "inbox.actionType.workSpawn": [
+    {
+      "type": 0,
+      "value": "Run task"
+    }
+  ],
+  "inbox.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "inbox.activity.filterApprovals": [
+    {
+      "type": 0,
+      "value": "Approvals"
+    }
+  ],
+  "inbox.activity.filterDone": [
+    {
+      "type": 0,
+      "value": "Work finished"
+    }
+  ],
+  "inbox.activity.filterMine": [
+    {
+      "type": 0,
+      "value": "My agents"
+    }
+  ],
+  "inbox.activity.tabsLabel": [
+    {
+      "type": 0,
+      "value": "Activity filter"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
       "value": "Open"
+    }
+  ],
+  "inbox.deadline.daysLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Expires in "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Expires in "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "inbox.deadline.hoursLeft": [
+    {
+      "type": 0,
+      "value": "Expires in "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " hr"
+    }
+  ],
+  "inbox.deadline.minutesLeft": [
+    {
+      "type": 0,
+      "value": "Expires in "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "inbox.deadline.passed": [
+    {
+      "type": 0,
+      "value": "Past due"
+    }
+  ],
+  "inbox.feedApproval.irreversible": [
+    {
+      "type": 0,
+      "value": "Can't be undone"
+    }
+  ],
+  "inbox.feedApproval.predicate": [
+    {
+      "type": 0,
+      "value": "asked for permission: "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "inbox.feedMention.predicate": [
+    {
+      "type": 0,
+      "value": "mentioned you"
+    }
+  ],
+  "inbox.feedRun.outcomeFailed": [
+    {
+      "type": 0,
+      "value": "Failed"
+    }
+  ],
+  "inbox.feedRun.outcomePaused": [
+    {
+      "type": 0,
+      "value": "Paused"
+    }
+  ],
+  "inbox.feedRun.outcomeSucceeded": [
+    {
+      "type": 0,
+      "value": "Completed"
+    }
+  ],
+  "inbox.feedRun.outcomeTimedOut": [
+    {
+      "type": 0,
+      "value": "No response"
+    }
+  ],
+  "inbox.feedRun.predicateTitled": [
+    {
+      "type": 0,
+      "value": "ran the task \""
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "\""
+    }
+  ],
+  "inbox.feedRun.predicateUntitled": [
+    {
+      "type": 0,
+      "value": "ran a task"
+    }
+  ],
+  "inbox.feedRun.steps": [
+    {
+      "type": 0,
+      "value": "Step "
+    },
+    {
+      "type": 2,
+      "value": "step",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    }
+  ],
+  "inbox.filter.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "inbox.filter.mentions": [
+    {
+      "type": 0,
+      "value": "Mentions"
+    }
+  ],
+  "inbox.filter.needsAction": [
+    {
+      "type": 0,
+      "value": "Needs decision"
+    }
+  ],
+  "inbox.filter.tabsLabel": [
+    {
+      "type": 0,
+      "value": "Inbox filter"
+    }
+  ],
+  "inbox.filter.tabWithCount": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "inbox.mailbox.actorMe": [
+    {
+      "type": 0,
+      "value": "You"
+    }
+  ],
+  "inbox.mailbox.actorThread": [
+    {
+      "type": 0,
+      "value": "Thread"
+    }
+  ],
+  "inbox.mailbox.ariaLabel": [
+    {
+      "type": 5,
+      "value": "unread",
+      "options": {
+        "many": {
+          "value": [
+            {
+              "type": 2,
+              "value": "count",
+              "style": null
+            },
+            {
+              "type": 0,
+              "value": " unread, "
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Unread, "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "showKind",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "kind"
+            },
+            {
+              "type": 0,
+              "value": ", "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    }
+  ],
+  "inbox.mailbox.filterAll": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "inbox.mailbox.filterDm": [
+    {
+      "type": 0,
+      "value": "DMs"
+    }
+  ],
+  "inbox.mailbox.filterMention": [
+    {
+      "type": 0,
+      "value": "Mentions"
+    }
+  ],
+  "inbox.mailbox.filterReply": [
+    {
+      "type": 0,
+      "value": "Replies"
+    }
+  ],
+  "inbox.mailbox.filterTask": [
+    {
+      "type": 0,
+      "value": "To do"
+    }
+  ],
+  "inbox.mailbox.filterThread": [
+    {
+      "type": 0,
+      "value": "Threads"
+    }
+  ],
+  "inbox.mailbox.filterUnread": [
+    {
+      "type": 0,
+      "value": "Unread"
+    }
+  ],
+  "inbox.mailbox.previewMine": [
+    {
+      "type": 0,
+      "value": "You: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailbox.threadPreview": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " to your post: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailboxType.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.mention": [
+    {
+      "type": 0,
+      "value": "Mention · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.reply": [
+    {
+      "type": 0,
+      "value": "Reply · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.task": [
+    {
+      "type": 0,
+      "value": "To do · approval request"
+    }
+  ],
+  "inbox.mailboxType.thread": [
+    {
+      "type": 0,
+      "value": "Thread · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.preview.deleted": [
+    {
+      "type": 0,
+      "value": "This message was deleted."
+    }
+  ],
+  "inbox.preview.empty": [
+    {
+      "type": 0,
+      "value": "This message has no content."
+    }
+  ],
+  "inbox.reason.approvalPending": [
+    {
+      "type": 0,
+      "value": "An agent asked a person for permission before running, and you're a member of this channel."
+    }
+  ],
+  "inbox.reason.approvalSettled": [
+    {
+      "type": 0,
+      "value": "A decision recorded in the approval ledger."
+    }
+  ],
+  "inbox.reason.dm": [
+    {
+      "type": 0,
+      "value": "A message that came by DM."
+    }
+  ],
+  "inbox.reason.dmMine": [
+    {
+      "type": 0,
+      "value": "A DM where the last message is yours."
+    }
+  ],
+  "inbox.reason.mention": [
+    {
+      "type": 0,
+      "value": "You were mentioned in this message, and the server recorded it as a mention."
+    }
+  ],
+  "inbox.reason.mentionServer": [
+    {
+      "type": 0,
+      "value": "Someone mentioned you in a message."
+    }
+  ],
+  "inbox.reason.reply": [
+    {
+      "type": 0,
+      "value": "Someone replied to or quoted your post."
+    }
+  ],
+  "inbox.reason.run": [
+    {
+      "type": 0,
+      "value": "Record of an agent task run."
+    }
+  ],
+  "inbox.reason.threadNewReply": [
+    {
+      "type": 0,
+      "value": "Someone replied to your post."
+    }
+  ],
+  "inbox.reason.threadParticipant": [
+    {
+      "type": 0,
+      "value": "A new reply in a thread you are in."
     }
   ],
   "inbox.source.channelUnknown": [
@@ -7402,6 +7960,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Thread"
+    }
+  ],
+  "inbox.time.daysAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day ago"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days ago"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "inbox.time.hoursAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " hr ago"
+    }
+  ],
+  "inbox.time.justNow": [
+    {
+      "type": 0,
+      "value": "Just now"
+    }
+  ],
+  "inbox.time.minutesAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min ago"
+    }
+  ],
+  "inbox.toolAction.fallback": [
+    {
+      "type": 0,
+      "value": "Run agent tool"
+    }
+  ],
+  "inbox.toolAction.sessionEnd": [
+    {
+      "type": 0,
+      "value": "End work session"
+    }
+  ],
+  "inbox.toolAction.sessionStart": [
+    {
+      "type": 0,
+      "value": "Start work session"
+    }
+  ],
+  "inbox.workspaceAction.agentRename": [
+    {
+      "type": 0,
+      "value": "Rename agent"
+    }
+  ],
+  "inbox.workspaceAction.channelCreate": [
+    {
+      "type": 0,
+      "value": "Create channel"
+    }
+  ],
+  "inbox.workspaceAction.channelMemberAdd": [
+    {
+      "type": 0,
+      "value": "Add member to channel"
+    }
+  ],
+  "inbox.workspaceAction.fallback": [
+    {
+      "type": 0,
+      "value": "Workspace change"
+    }
+  ],
+  "inbox.workspaceAction.hostedChannelsGrant": [
+    {
+      "type": 0,
+      "value": "Allow more channels"
+    }
+  ],
+  "inbox.workspaceAction.inviteCreate": [
+    {
+      "type": 0,
+      "value": "Create invite link"
+    }
+  ],
+  "inbox.workspaceAction.memberAvatarSet": [
+    {
+      "type": 0,
+      "value": "Change my profile photo"
+    }
+  ],
+  "inbox.workspaceAction.memberDisplayNameSet": [
+    {
+      "type": 0,
+      "value": "Change my name"
+    }
+  ],
+  "inbox.workspaceAction.memoryUpdate": [
+    {
+      "type": 0,
+      "value": "Change team memory settings"
+    }
+  ],
+  "inbox.workspaceAction.pluginInstall": [
+    {
+      "type": 0,
+      "value": "Install app"
+    }
+  ],
+  "inbox.workspaceAction.teamAiRolesSet": [
+    {
+      "type": 0,
+      "value": "Turn assistant roles on or off"
+    }
+  ],
+  "inbox.workspaceAction.unfurlUpdate": [
+    {
+      "type": 0,
+      "value": "Change link preview settings"
+    }
+  ],
+  "inbox.workspaceAction.workspaceSettingsUpdate": [
+    {
+      "type": 0,
+      "value": "Change workspace settings"
+    }
+  ],
+  "inbox.workspaceAction.workTierUpdate": [
+    {
+      "type": 0,
+      "value": "Change workspace default resume policy"
     }
   ],
   "memberList.empty.detail": [

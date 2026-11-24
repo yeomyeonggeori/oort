@@ -31,6 +31,11 @@ import {
   APPROVED_RECEIPT,
   REJECTED_RECEIPT,
 } from "./approvalsPanel";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // 문장은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 예전과 같은 한국어를 단정한다.
 const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
@@ -78,7 +83,7 @@ function approval(status: ApprovalStatus, id = `approval-${status}`): Approval {
 }
 
 function pendingRow(id = "approval-pending") {
-  return approvalItem(approval("pending", id), AGENT, "배포", NOW_MS);
+  return approvalItem(koCopy, approval("pending", id), AGENT, "배포", NOW_MS);
 }
 
 // ---- ① 다섯 갈래 -----------------------------------------------------------
@@ -155,7 +160,7 @@ describe("approvalRowControl", () => {
   it.each<ApprovalStatus>(["approved", "rejected", "expired", "cancelled"])(
     "이미 %s된 승인에는 결정 컨트롤이 붙지 않는다 (되돌릴 수 없는 액션)",
     (status) => {
-      const item = approvalItem(approval(status), AGENT, "배포", NOW_MS);
+      const item = approvalItem(koCopy, approval(status), AGENT, "배포", NOW_MS);
       expect(item.approvalId).toBeUndefined();
       expect(approvalRowControl(item, { offline: false })).toEqual({
         kind: "none",
@@ -190,8 +195,8 @@ describe("approvalRowControl", () => {
     };
 
     for (const item of [
-      mentionItem(message, HUMAN, "배포", NOW_MS),
-      runItem(run, AGENT, "배포", NOW_MS),
+      mentionItem(koCopy, message, HUMAN, "배포", NOW_MS),
+      runItem(koCopy, run, AGENT, "배포", NOW_MS),
     ]) {
       expect(approvalRowControl(item, { offline: false })).toEqual({
         kind: "none",
@@ -206,7 +211,7 @@ describe("approvalRowControl", () => {
   });
 
   it("끊김은 자격을 만들지 못한다: 결정할 수 없는 행은 여전히 none", () => {
-    const settled = approvalItem(approval("approved"), AGENT, "배포", NOW_MS);
+    const settled = approvalItem(koCopy, approval("approved"), AGENT, "배포", NOW_MS);
     expect(approvalRowControl(settled, { offline: true })).toEqual({
       kind: "none",
     });
@@ -401,8 +406,8 @@ describe("decidableCount", () => {
     const items = [
       pendingRow("a"),
       pendingRow("b"),
-      approvalItem(approval("approved"), AGENT, "배포", NOW_MS),
-      approvalItem(approval("expired"), AGENT, "배포", NOW_MS),
+      approvalItem(koCopy, approval("approved"), AGENT, "배포", NOW_MS),
+      approvalItem(koCopy, approval("expired"), AGENT, "배포", NOW_MS),
     ];
     // 행은 넷, 해야 할 일은 둘.
     expect(items).toHaveLength(4);
@@ -413,7 +418,7 @@ describe("decidableCount", () => {
     // 같은 입력에 대해 배지의 수와 컨트롤이 붙는 행의 수가 어긋날 수 없다.
     const items = [
       pendingRow("a"),
-      approvalItem(approval("cancelled"), AGENT, "배포", NOW_MS),
+      approvalItem(koCopy, approval("cancelled"), AGENT, "배포", NOW_MS),
       pendingRow("c"),
     ];
     const withControls = items.filter(

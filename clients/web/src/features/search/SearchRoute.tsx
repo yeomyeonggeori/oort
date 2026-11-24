@@ -50,6 +50,7 @@ import {
 } from "@momo/core/features/search/searchModel";
 import { useMessageSearch } from "./useMessageSearch";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 메시지 검색 (goal B12 H5).
 //
@@ -88,6 +89,7 @@ function HitRow({
   isAgent: boolean;
   nowMs: number;
 }) {
+  const formatMessage = useFormatMessage();
   const segments = snippetSegments(hit.snippet, hit.matchOffset, query);
   return (
     <li>
@@ -115,7 +117,7 @@ function HitRow({
             {authorName}
           </span>
           <span className="text-timestamp text-ink-muted" data-numeric>
-            {relativeLabel(hit.createdAtMs, nowMs)}
+            {relativeLabel(formatMessage, hit.createdAtMs, nowMs)}
           </span>
         </span>
         <span className="break-words text-body text-ink">

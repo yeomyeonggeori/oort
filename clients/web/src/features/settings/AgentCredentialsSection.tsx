@@ -38,6 +38,7 @@ import {
 import { formatMoment } from "./oauthGrant";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 설정 › 연결 › 에이전트 자격 (#2204).
 //
@@ -127,6 +128,7 @@ function chipTone(tone: HostedChipTone): ChipTone {
 }
 
 function ActivityFacts({ updatedAtMs }: { updatedAtMs: number }) {
+  const formatMessage = useFormatMessage();
   const absolute = formatMoment(updatedAtMs);
   return (
     <dl className="min-w-0 shrink-0">
@@ -138,7 +140,7 @@ function ActivityFacts({ updatedAtMs }: { updatedAtMs: number }) {
           data-testid="agent-credentials-row-time"
           className="whitespace-nowrap"
         >
-          {relativeLabel(updatedAtMs, Date.now())}
+          {relativeLabel(formatMessage, updatedAtMs, Date.now())}
         </time>
       </dd>
     </dl>

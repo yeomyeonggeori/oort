@@ -6740,10 +6740,518 @@ export const catalog: MessageCatalog = {
       "value": "참가자 기다리는 중"
     }
   ],
+  "inbox.actionType.fileWriteReindex": [
+    {
+      "type": 0,
+      "value": "파일 쓰기와 재색인"
+    }
+  ],
+  "inbox.actionType.messageSend": [
+    {
+      "type": 0,
+      "value": "메시지 전송"
+    }
+  ],
+  "inbox.actionType.workExec": [
+    {
+      "type": 0,
+      "value": "명령 실행"
+    }
+  ],
+  "inbox.actionType.workSpawn": [
+    {
+      "type": 0,
+      "value": "작업 실행"
+    }
+  ],
+  "inbox.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "inbox.activity.filterApprovals": [
+    {
+      "type": 0,
+      "value": "승인"
+    }
+  ],
+  "inbox.activity.filterDone": [
+    {
+      "type": 0,
+      "value": "작업 끝남"
+    }
+  ],
+  "inbox.activity.filterMine": [
+    {
+      "type": 0,
+      "value": "내 에이전트"
+    }
+  ],
+  "inbox.activity.tabsLabel": [
+    {
+      "type": 0,
+      "value": "활동 필터"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
       "value": "열기"
+    }
+  ],
+  "inbox.deadline.daysLeft": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일 후 만료"
+    }
+  ],
+  "inbox.deadline.hoursLeft": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 후 만료"
+    }
+  ],
+  "inbox.deadline.minutesLeft": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 후 만료"
+    }
+  ],
+  "inbox.deadline.passed": [
+    {
+      "type": 0,
+      "value": "기한 지남"
+    }
+  ],
+  "inbox.feedApproval.irreversible": [
+    {
+      "type": 0,
+      "value": "되돌릴 수 없음"
+    }
+  ],
+  "inbox.feedApproval.predicate": [
+    {
+      "type": 1,
+      "value": "action"
+    },
+    {
+      "type": 0,
+      "value": " 허가를 요청했어요"
+    }
+  ],
+  "inbox.feedMention.predicate": [
+    {
+      "type": 0,
+      "value": "나를 불렀어요"
+    }
+  ],
+  "inbox.feedRun.outcomeFailed": [
+    {
+      "type": 0,
+      "value": "실패"
+    }
+  ],
+  "inbox.feedRun.outcomePaused": [
+    {
+      "type": 0,
+      "value": "멈춤"
+    }
+  ],
+  "inbox.feedRun.outcomeSucceeded": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "inbox.feedRun.outcomeTimedOut": [
+    {
+      "type": 0,
+      "value": "응답 없음"
+    }
+  ],
+  "inbox.feedRun.predicateTitled": [
+    {
+      "type": 0,
+      "value": "\""
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "\" 작업을 실행했습니다"
+    }
+  ],
+  "inbox.feedRun.predicateUntitled": [
+    {
+      "type": 0,
+      "value": "작업을 실행했습니다"
+    }
+  ],
+  "inbox.feedRun.steps": [
+    {
+      "type": 2,
+      "value": "step",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 단계"
+    }
+  ],
+  "inbox.filter.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "inbox.filter.mentions": [
+    {
+      "type": 0,
+      "value": "멘션"
+    }
+  ],
+  "inbox.filter.needsAction": [
+    {
+      "type": 0,
+      "value": "결정 대기"
+    }
+  ],
+  "inbox.filter.tabsLabel": [
+    {
+      "type": 0,
+      "value": "인박스 필터"
+    }
+  ],
+  "inbox.filter.tabWithCount": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "inbox.mailbox.actorMe": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "inbox.mailbox.actorThread": [
+    {
+      "type": 0,
+      "value": "스레드"
+    }
+  ],
+  "inbox.mailbox.ariaLabel": [
+    {
+      "type": 5,
+      "value": "unread",
+      "options": {
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "안 읽음 "
+            },
+            {
+              "type": 2,
+              "value": "count",
+              "style": null
+            },
+            {
+              "type": 0,
+              "value": "개, "
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "안 읽음, "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "showKind",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "kind"
+            },
+            {
+              "type": 0,
+              "value": ", "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    }
+  ],
+  "inbox.mailbox.filterAll": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "inbox.mailbox.filterDm": [
+    {
+      "type": 0,
+      "value": "DM"
+    }
+  ],
+  "inbox.mailbox.filterMention": [
+    {
+      "type": 0,
+      "value": "멘션"
+    }
+  ],
+  "inbox.mailbox.filterReply": [
+    {
+      "type": 0,
+      "value": "답글"
+    }
+  ],
+  "inbox.mailbox.filterTask": [
+    {
+      "type": 0,
+      "value": "처리할 일"
+    }
+  ],
+  "inbox.mailbox.filterThread": [
+    {
+      "type": 0,
+      "value": "스레드"
+    }
+  ],
+  "inbox.mailbox.filterUnread": [
+    {
+      "type": 0,
+      "value": "안 읽음"
+    }
+  ],
+  "inbox.mailbox.previewMine": [
+    {
+      "type": 0,
+      "value": "나: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailbox.threadPreview": [
+    {
+      "type": 0,
+      "value": "내 글에 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailboxType.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.mention": [
+    {
+      "type": 0,
+      "value": "멘션 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.reply": [
+    {
+      "type": 0,
+      "value": "답글 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.task": [
+    {
+      "type": 0,
+      "value": "처리할 일 · 승인 요청"
+    }
+  ],
+  "inbox.mailboxType.thread": [
+    {
+      "type": 0,
+      "value": "스레드 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.preview.deleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지예요."
+    }
+  ],
+  "inbox.preview.empty": [
+    {
+      "type": 0,
+      "value": "내용 없는 메시지예요."
+    }
+  ],
+  "inbox.reason.approvalPending": [
+    {
+      "type": 0,
+      "value": "에이전트가 실행 전에 사람의 허가를 요청했고, 내가 이 채널의 멤버입니다."
+    }
+  ],
+  "inbox.reason.approvalSettled": [
+    {
+      "type": 0,
+      "value": "승인 원장에 기록된 결정입니다."
+    }
+  ],
+  "inbox.reason.dm": [
+    {
+      "type": 0,
+      "value": "DM으로 온 메시지예요."
+    }
+  ],
+  "inbox.reason.dmMine": [
+    {
+      "type": 0,
+      "value": "내가 보낸 마지막 말이 있는 DM이에요."
+    }
+  ],
+  "inbox.reason.mention": [
+    {
+      "type": 0,
+      "value": "메시지에서 나를 불러 서버가 멘션으로 기록했어요."
+    }
+  ],
+  "inbox.reason.mentionServer": [
+    {
+      "type": 0,
+      "value": "메시지에서 나를 불렀어요."
+    }
+  ],
+  "inbox.reason.reply": [
+    {
+      "type": 0,
+      "value": "내 글에 답하거나 인용했어요."
+    }
+  ],
+  "inbox.reason.run": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 실행 기록입니다."
+    }
+  ],
+  "inbox.reason.threadNewReply": [
+    {
+      "type": 0,
+      "value": "내가 쓴 글에 새 답글이 달렸어요."
+    }
+  ],
+  "inbox.reason.threadParticipant": [
+    {
+      "type": 0,
+      "value": "내가 참여한 스레드에 새 답글이 달렸어요."
     }
   ],
   "inbox.source.channelUnknown": [
@@ -6811,6 +7319,147 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "스레드"
+    }
+  ],
+  "inbox.time.daysAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일 전"
+    }
+  ],
+  "inbox.time.hoursAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 전"
+    }
+  ],
+  "inbox.time.justNow": [
+    {
+      "type": 0,
+      "value": "방금"
+    }
+  ],
+  "inbox.time.minutesAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 전"
+    }
+  ],
+  "inbox.toolAction.fallback": [
+    {
+      "type": 0,
+      "value": "에이전트 도구 실행"
+    }
+  ],
+  "inbox.toolAction.sessionEnd": [
+    {
+      "type": 0,
+      "value": "작업 세션 종료"
+    }
+  ],
+  "inbox.toolAction.sessionStart": [
+    {
+      "type": 0,
+      "value": "작업 세션 시작"
+    }
+  ],
+  "inbox.workspaceAction.agentRename": [
+    {
+      "type": 0,
+      "value": "에이전트 이름 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.channelCreate": [
+    {
+      "type": 0,
+      "value": "채널 만들기"
+    }
+  ],
+  "inbox.workspaceAction.channelMemberAdd": [
+    {
+      "type": 0,
+      "value": "채널에 멤버 추가"
+    }
+  ],
+  "inbox.workspaceAction.fallback": [
+    {
+      "type": 0,
+      "value": "워크스페이스 변경"
+    }
+  ],
+  "inbox.workspaceAction.hostedChannelsGrant": [
+    {
+      "type": 0,
+      "value": "승인 채널 늘리기"
+    }
+  ],
+  "inbox.workspaceAction.inviteCreate": [
+    {
+      "type": 0,
+      "value": "초대 링크 만들기"
+    }
+  ],
+  "inbox.workspaceAction.memberAvatarSet": [
+    {
+      "type": 0,
+      "value": "내 프로필 사진 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.memberDisplayNameSet": [
+    {
+      "type": 0,
+      "value": "내 이름 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.memoryUpdate": [
+    {
+      "type": 0,
+      "value": "팀 기억 설정 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.pluginInstall": [
+    {
+      "type": 0,
+      "value": "앱 설치"
+    }
+  ],
+  "inbox.workspaceAction.teamAiRolesSet": [
+    {
+      "type": 0,
+      "value": "도우미 역할 켜고 끄기"
+    }
+  ],
+  "inbox.workspaceAction.unfurlUpdate": [
+    {
+      "type": 0,
+      "value": "링크 미리보기 설정 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.workspaceSettingsUpdate": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.workTierUpdate": [
+    {
+      "type": 0,
+      "value": "워크스페이스 기본 재개 정책 바꾸기"
     }
   ],
   "memberList.empty.detail": [

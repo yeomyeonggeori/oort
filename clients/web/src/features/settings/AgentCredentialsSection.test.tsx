@@ -17,6 +17,9 @@ import {
   regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { SETTINGS_SECTIONS, resolveSettingsSection } from "./settingsNav";
 import {
   AgentCredentialsSection,
@@ -222,7 +225,10 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+let koLocale: AppLocale;
+
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -271,7 +277,7 @@ afterEach(() => {
   mountedHost = null;
 });
 
-function mountSection(offline = false): HTMLElement {
+function mountSection(offline = false, korean = false): HTMLElement {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -287,7 +293,7 @@ function mountSection(offline = false): HTMLElement {
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  const tree: ReactElement = createElement(
+  const page: ReactElement = createElement(
     QueryClientProvider,
     { client },
     createElement(
@@ -300,6 +306,8 @@ function mountSection(offline = false): HTMLElement {
       )
     )
   );
+  // 한국어 문구를 단정하는 시험만 한국어 언어 객체로 감싼다. 감싸지 않으면 번들된 영어로 그려진다.
+  const tree = korean ? createElement(LocaleProvider, { locale: koLocale }, page) : page;
   act(() => mountedRoot?.render(tree));
   return host;
 }
@@ -515,7 +523,7 @@ describe("목록 네 상태", () => {
         }),
       ],
     });
-    const host = mountSection();
+    const host = mountSection(false, true);
     await waitFor(
       () => host.querySelector('[data-testid="agent-credentials-list"]') !== null,
       "list"
@@ -553,7 +561,7 @@ describe("목록 네 상태", () => {
         }),
       ],
     });
-    const host = mountSection();
+    const host = mountSection(false, true);
     await waitFor(
       () => host.querySelector('[data-testid="agent-credentials-list"]') !== null,
       "list"

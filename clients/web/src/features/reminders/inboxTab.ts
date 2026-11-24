@@ -1,11 +1,11 @@
 import {
-  filterLabel,
+  filterLabelKey,
   panelId,
   parseFilter,
   tabId,
   type InboxFilter,
 } from "@momo/core/features/inbox/model";
-import type { FilterTabsSpec } from "@momo/core/features/common/filterTabs";
+import type { FilterTabsSpec, FilterTabText } from "@momo/core/features/common/filterTabs";
 import { REMINDER_TAB_LABEL } from "@momo/core/features/reminders/model";
 
 /**
@@ -26,8 +26,10 @@ export function parseWebInboxFilter(
   return parseFilter(raw, available);
 }
 
-export function webInboxFilterLabel(filter: WebInboxFilter): string {
-  return filter === "reminders" ? REMINDER_TAB_LABEL : filterLabel(filter);
+export function webInboxFilterLabel(filter: WebInboxFilter): FilterTabText {
+  return filter === "reminders"
+    ? REMINDER_TAB_LABEL
+    : { key: filterLabelKey(filter) };
 }
 
 export function webInboxTabId(filter: WebInboxFilter): string {
@@ -42,7 +44,7 @@ export function webInboxFilterTabs(
   values: WebInboxFilter[]
 ): FilterTabsSpec<WebInboxFilter> {
   return {
-    label: "인박스 필터",
+    label: { key: "inbox.filter.tabsLabel" },
     values,
     labelFor: webInboxFilterLabel,
     tabId: webInboxTabId,

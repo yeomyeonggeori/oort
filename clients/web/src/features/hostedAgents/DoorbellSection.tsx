@@ -70,6 +70,7 @@ import {
   invalidateHostedConnection,
 } from "./hostedDisconnectScope";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 호스티드 연결의 도어벨 등록 (ADR-0171 / WD-2 / #1735).
 //
@@ -103,6 +104,7 @@ export function DoorbellSection({
   /** 이 화면 밖의 쓰기(해제 시작 등). 도어벨 자신의 진행은 여기 들지 않는다. */
   writesLocked: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const urlFieldId = useId();
   const secretFieldId = useId();
@@ -333,7 +335,7 @@ export function DoorbellSection({
                     value:
                       projection.lastFiredAtMs === undefined
                         ? DOORBELL_NEVER_FIRED
-                        : relativeLabel(projection.lastFiredAtMs, nowMs),
+                        : relativeLabel(formatMessage, projection.lastFiredAtMs, nowMs),
                     prose: projection.lastFiredAtMs === undefined,
                   },
                 ]}

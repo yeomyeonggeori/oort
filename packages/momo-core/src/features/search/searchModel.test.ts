@@ -314,7 +314,7 @@ describe("검색 범위", () => {
     for (const scope of spec.values) {
       expect(spec.tabId(scope)).toMatch(/^search-scope-tab-/);
       expect(spec.testId(scope)).toBe(`search-scope-${scope}`);
-      expect(spec.labelFor(scope).length).toBeGreaterThan(0);
+      expect(String(spec.labelFor(scope)).length).toBeGreaterThan(0);
     }
     // 결과 패널은 하나다: 범위를 바꿔도 목록은 같은 자리에서 갈린다.
     expect(spec.panelId("channel")).toBe(spec.panelId("workspace"));

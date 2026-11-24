@@ -10,6 +10,12 @@ import {
   parseAvatarImagePreview,
 } from "./avatarPreview";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 // 서버가 카드 props 에 싣는 모양 그대로(`agent_port_tools.rs` 의 `avatar_preview`, #4385).
 // 이름·핸들은 가상이다.
 const SHA = "ab".repeat(32);
@@ -116,8 +122,8 @@ describe("member.avatar.set 카드의 action.preview (#4394)", () => {
   });
 
   it("인박스 줄이 내부 낱말 대신 행동 이름을 말한다", () => {
-    expect(workspaceActionLabel("member.avatar.set")).toBe("내 프로필 사진 바꾸기");
-    expect(workspaceActionLabel("member.unknown")).toBe("워크스페이스 변경");
+    expect(workspaceActionLabel(ko, "member.avatar.set")).toBe("내 프로필 사진 바꾸기");
+    expect(workspaceActionLabel(ko, "member.unknown")).toBe("워크스페이스 변경");
   });
 });
 
@@ -179,6 +185,6 @@ describe("프로필 전후 미리보기 (#4791)", () => {
     }
   });
   it("새 이름 행동이 인박스에 사람 말로 나온다", () => {
-    expect(workspaceActionLabel('member.display_name.set')).toBe('내 이름 바꾸기');
+    expect(workspaceActionLabel(ko, 'member.display_name.set')).toBe('내 이름 바꾸기');
   });
 });

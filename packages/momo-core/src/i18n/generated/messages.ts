@@ -975,7 +975,64 @@ export const messageKeys = [
   "huddles.participants.one",
   "huddles.participants.two",
   "huddles.participants.waiting",
+  "inbox.actionType.fileWriteReindex",
+  "inbox.actionType.messageSend",
+  "inbox.actionType.workExec",
+  "inbox.actionType.workSpawn",
+  "inbox.activity.filterAll",
+  "inbox.activity.filterApprovals",
+  "inbox.activity.filterDone",
+  "inbox.activity.filterMine",
+  "inbox.activity.tabsLabel",
   "inbox.approval.open",
+  "inbox.deadline.daysLeft",
+  "inbox.deadline.hoursLeft",
+  "inbox.deadline.minutesLeft",
+  "inbox.deadline.passed",
+  "inbox.feedApproval.irreversible",
+  "inbox.feedApproval.predicate",
+  "inbox.feedMention.predicate",
+  "inbox.feedRun.outcomeFailed",
+  "inbox.feedRun.outcomePaused",
+  "inbox.feedRun.outcomeSucceeded",
+  "inbox.feedRun.outcomeTimedOut",
+  "inbox.feedRun.predicateTitled",
+  "inbox.feedRun.predicateUntitled",
+  "inbox.feedRun.steps",
+  "inbox.filter.agents",
+  "inbox.filter.mentions",
+  "inbox.filter.needsAction",
+  "inbox.filter.tabsLabel",
+  "inbox.filter.tabWithCount",
+  "inbox.mailbox.actorMe",
+  "inbox.mailbox.actorThread",
+  "inbox.mailbox.ariaLabel",
+  "inbox.mailbox.filterAll",
+  "inbox.mailbox.filterDm",
+  "inbox.mailbox.filterMention",
+  "inbox.mailbox.filterReply",
+  "inbox.mailbox.filterTask",
+  "inbox.mailbox.filterThread",
+  "inbox.mailbox.filterUnread",
+  "inbox.mailbox.previewMine",
+  "inbox.mailbox.threadPreview",
+  "inbox.mailboxType.dm",
+  "inbox.mailboxType.mention",
+  "inbox.mailboxType.reply",
+  "inbox.mailboxType.task",
+  "inbox.mailboxType.thread",
+  "inbox.preview.deleted",
+  "inbox.preview.empty",
+  "inbox.reason.approvalPending",
+  "inbox.reason.approvalSettled",
+  "inbox.reason.dm",
+  "inbox.reason.dmMine",
+  "inbox.reason.mention",
+  "inbox.reason.mentionServer",
+  "inbox.reason.reply",
+  "inbox.reason.run",
+  "inbox.reason.threadNewReply",
+  "inbox.reason.threadParticipant",
   "inbox.source.channelUnknown",
   "inbox.source.dm",
   "inbox.source.dmGroup",
@@ -983,6 +1040,27 @@ export const messageKeys = [
   "inbox.source.task",
   "inbox.source.thread",
   "inbox.source.threadUnknown",
+  "inbox.time.daysAgo",
+  "inbox.time.hoursAgo",
+  "inbox.time.justNow",
+  "inbox.time.minutesAgo",
+  "inbox.toolAction.fallback",
+  "inbox.toolAction.sessionEnd",
+  "inbox.toolAction.sessionStart",
+  "inbox.workspaceAction.agentRename",
+  "inbox.workspaceAction.channelCreate",
+  "inbox.workspaceAction.channelMemberAdd",
+  "inbox.workspaceAction.fallback",
+  "inbox.workspaceAction.hostedChannelsGrant",
+  "inbox.workspaceAction.inviteCreate",
+  "inbox.workspaceAction.memberAvatarSet",
+  "inbox.workspaceAction.memberDisplayNameSet",
+  "inbox.workspaceAction.memoryUpdate",
+  "inbox.workspaceAction.pluginInstall",
+  "inbox.workspaceAction.teamAiRolesSet",
+  "inbox.workspaceAction.unfurlUpdate",
+  "inbox.workspaceAction.workspaceSettingsUpdate",
+  "inbox.workspaceAction.workTierUpdate",
   "memberList.empty.detail",
   "memberList.empty.headline",
   "memberList.empty.invite",
@@ -3679,7 +3757,102 @@ export const argumentSpecs = {
     "second": "string"
   },
   "huddles.participants.waiting": {},
+  "inbox.actionType.fileWriteReindex": {},
+  "inbox.actionType.messageSend": {},
+  "inbox.actionType.workExec": {},
+  "inbox.actionType.workSpawn": {},
+  "inbox.activity.filterAll": {},
+  "inbox.activity.filterApprovals": {},
+  "inbox.activity.filterDone": {},
+  "inbox.activity.filterMine": {},
+  "inbox.activity.tabsLabel": {},
   "inbox.approval.open": {},
+  "inbox.deadline.daysLeft": {
+    "count": "number"
+  },
+  "inbox.deadline.hoursLeft": {
+    "count": "number"
+  },
+  "inbox.deadline.minutesLeft": {
+    "count": "number"
+  },
+  "inbox.deadline.passed": {},
+  "inbox.feedApproval.irreversible": {},
+  "inbox.feedApproval.predicate": {
+    "action": "string"
+  },
+  "inbox.feedMention.predicate": {},
+  "inbox.feedRun.outcomeFailed": {},
+  "inbox.feedRun.outcomePaused": {},
+  "inbox.feedRun.outcomeSucceeded": {},
+  "inbox.feedRun.outcomeTimedOut": {},
+  "inbox.feedRun.predicateTitled": {
+    "title": "string"
+  },
+  "inbox.feedRun.predicateUntitled": {},
+  "inbox.feedRun.steps": {
+    "max": "number",
+    "step": "number"
+  },
+  "inbox.filter.agents": {},
+  "inbox.filter.mentions": {},
+  "inbox.filter.needsAction": {},
+  "inbox.filter.tabsLabel": {},
+  "inbox.filter.tabWithCount": {
+    "count": "number",
+    "label": "string"
+  },
+  "inbox.mailbox.actorMe": {},
+  "inbox.mailbox.actorThread": {},
+  "inbox.mailbox.ariaLabel": {
+    "actor": "string",
+    "count": "number",
+    "kind": "string",
+    "preview": "string",
+    "showKind": "string",
+    "source": "string",
+    "time": "string",
+    "unread": "string"
+  },
+  "inbox.mailbox.filterAll": {},
+  "inbox.mailbox.filterDm": {},
+  "inbox.mailbox.filterMention": {},
+  "inbox.mailbox.filterReply": {},
+  "inbox.mailbox.filterTask": {},
+  "inbox.mailbox.filterThread": {},
+  "inbox.mailbox.filterUnread": {},
+  "inbox.mailbox.previewMine": {
+    "text": "string"
+  },
+  "inbox.mailbox.threadPreview": {
+    "count": "number",
+    "text": "string"
+  },
+  "inbox.mailboxType.dm": {
+    "channel": "string"
+  },
+  "inbox.mailboxType.mention": {
+    "channel": "string"
+  },
+  "inbox.mailboxType.reply": {
+    "channel": "string"
+  },
+  "inbox.mailboxType.task": {},
+  "inbox.mailboxType.thread": {
+    "channel": "string"
+  },
+  "inbox.preview.deleted": {},
+  "inbox.preview.empty": {},
+  "inbox.reason.approvalPending": {},
+  "inbox.reason.approvalSettled": {},
+  "inbox.reason.dm": {},
+  "inbox.reason.dmMine": {},
+  "inbox.reason.mention": {},
+  "inbox.reason.mentionServer": {},
+  "inbox.reason.reply": {},
+  "inbox.reason.run": {},
+  "inbox.reason.threadNewReply": {},
+  "inbox.reason.threadParticipant": {},
   "inbox.source.channelUnknown": {},
   "inbox.source.dm": {
     "name": "string"
@@ -3694,6 +3867,33 @@ export const argumentSpecs = {
     "channel": "string"
   },
   "inbox.source.threadUnknown": {},
+  "inbox.time.daysAgo": {
+    "count": "number"
+  },
+  "inbox.time.hoursAgo": {
+    "count": "number"
+  },
+  "inbox.time.justNow": {},
+  "inbox.time.minutesAgo": {
+    "count": "number"
+  },
+  "inbox.toolAction.fallback": {},
+  "inbox.toolAction.sessionEnd": {},
+  "inbox.toolAction.sessionStart": {},
+  "inbox.workspaceAction.agentRename": {},
+  "inbox.workspaceAction.channelCreate": {},
+  "inbox.workspaceAction.channelMemberAdd": {},
+  "inbox.workspaceAction.fallback": {},
+  "inbox.workspaceAction.hostedChannelsGrant": {},
+  "inbox.workspaceAction.inviteCreate": {},
+  "inbox.workspaceAction.memberAvatarSet": {},
+  "inbox.workspaceAction.memberDisplayNameSet": {},
+  "inbox.workspaceAction.memoryUpdate": {},
+  "inbox.workspaceAction.pluginInstall": {},
+  "inbox.workspaceAction.teamAiRolesSet": {},
+  "inbox.workspaceAction.unfurlUpdate": {},
+  "inbox.workspaceAction.workspaceSettingsUpdate": {},
+  "inbox.workspaceAction.workTierUpdate": {},
   "memberList.empty.detail": {},
   "memberList.empty.headline": {},
   "memberList.empty.invite": {},
@@ -6699,7 +6899,64 @@ export interface MessageArgs {
   "huddles.participants.one": { first: string };
   "huddles.participants.two": { first: string; second: string };
   "huddles.participants.waiting": Record<string, never>;
+  "inbox.actionType.fileWriteReindex": Record<string, never>;
+  "inbox.actionType.messageSend": Record<string, never>;
+  "inbox.actionType.workExec": Record<string, never>;
+  "inbox.actionType.workSpawn": Record<string, never>;
+  "inbox.activity.filterAll": Record<string, never>;
+  "inbox.activity.filterApprovals": Record<string, never>;
+  "inbox.activity.filterDone": Record<string, never>;
+  "inbox.activity.filterMine": Record<string, never>;
+  "inbox.activity.tabsLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
+  "inbox.deadline.daysLeft": { count: number };
+  "inbox.deadline.hoursLeft": { count: number };
+  "inbox.deadline.minutesLeft": { count: number };
+  "inbox.deadline.passed": Record<string, never>;
+  "inbox.feedApproval.irreversible": Record<string, never>;
+  "inbox.feedApproval.predicate": { action: string };
+  "inbox.feedMention.predicate": Record<string, never>;
+  "inbox.feedRun.outcomeFailed": Record<string, never>;
+  "inbox.feedRun.outcomePaused": Record<string, never>;
+  "inbox.feedRun.outcomeSucceeded": Record<string, never>;
+  "inbox.feedRun.outcomeTimedOut": Record<string, never>;
+  "inbox.feedRun.predicateTitled": { title: string };
+  "inbox.feedRun.predicateUntitled": Record<string, never>;
+  "inbox.feedRun.steps": { max: number; step: number };
+  "inbox.filter.agents": Record<string, never>;
+  "inbox.filter.mentions": Record<string, never>;
+  "inbox.filter.needsAction": Record<string, never>;
+  "inbox.filter.tabsLabel": Record<string, never>;
+  "inbox.filter.tabWithCount": { count: number; label: string };
+  "inbox.mailbox.actorMe": Record<string, never>;
+  "inbox.mailbox.actorThread": Record<string, never>;
+  "inbox.mailbox.ariaLabel": { actor: string; count: number; kind: string; preview: string; showKind: string; source: string; time: string; unread: string };
+  "inbox.mailbox.filterAll": Record<string, never>;
+  "inbox.mailbox.filterDm": Record<string, never>;
+  "inbox.mailbox.filterMention": Record<string, never>;
+  "inbox.mailbox.filterReply": Record<string, never>;
+  "inbox.mailbox.filterTask": Record<string, never>;
+  "inbox.mailbox.filterThread": Record<string, never>;
+  "inbox.mailbox.filterUnread": Record<string, never>;
+  "inbox.mailbox.previewMine": { text: string };
+  "inbox.mailbox.threadPreview": { count: number; text: string };
+  "inbox.mailboxType.dm": { channel: string };
+  "inbox.mailboxType.mention": { channel: string };
+  "inbox.mailboxType.reply": { channel: string };
+  "inbox.mailboxType.task": Record<string, never>;
+  "inbox.mailboxType.thread": { channel: string };
+  "inbox.preview.deleted": Record<string, never>;
+  "inbox.preview.empty": Record<string, never>;
+  "inbox.reason.approvalPending": Record<string, never>;
+  "inbox.reason.approvalSettled": Record<string, never>;
+  "inbox.reason.dm": Record<string, never>;
+  "inbox.reason.dmMine": Record<string, never>;
+  "inbox.reason.mention": Record<string, never>;
+  "inbox.reason.mentionServer": Record<string, never>;
+  "inbox.reason.reply": Record<string, never>;
+  "inbox.reason.run": Record<string, never>;
+  "inbox.reason.threadNewReply": Record<string, never>;
+  "inbox.reason.threadParticipant": Record<string, never>;
   "inbox.source.channelUnknown": Record<string, never>;
   "inbox.source.dm": { name: string };
   "inbox.source.dmGroup": { count: number; names: string };
@@ -6707,6 +6964,27 @@ export interface MessageArgs {
   "inbox.source.task": Record<string, never>;
   "inbox.source.thread": { channel: string };
   "inbox.source.threadUnknown": Record<string, never>;
+  "inbox.time.daysAgo": { count: number };
+  "inbox.time.hoursAgo": { count: number };
+  "inbox.time.justNow": Record<string, never>;
+  "inbox.time.minutesAgo": { count: number };
+  "inbox.toolAction.fallback": Record<string, never>;
+  "inbox.toolAction.sessionEnd": Record<string, never>;
+  "inbox.toolAction.sessionStart": Record<string, never>;
+  "inbox.workspaceAction.agentRename": Record<string, never>;
+  "inbox.workspaceAction.channelCreate": Record<string, never>;
+  "inbox.workspaceAction.channelMemberAdd": Record<string, never>;
+  "inbox.workspaceAction.fallback": Record<string, never>;
+  "inbox.workspaceAction.hostedChannelsGrant": Record<string, never>;
+  "inbox.workspaceAction.inviteCreate": Record<string, never>;
+  "inbox.workspaceAction.memberAvatarSet": Record<string, never>;
+  "inbox.workspaceAction.memberDisplayNameSet": Record<string, never>;
+  "inbox.workspaceAction.memoryUpdate": Record<string, never>;
+  "inbox.workspaceAction.pluginInstall": Record<string, never>;
+  "inbox.workspaceAction.teamAiRolesSet": Record<string, never>;
+  "inbox.workspaceAction.unfurlUpdate": Record<string, never>;
+  "inbox.workspaceAction.workspaceSettingsUpdate": Record<string, never>;
+  "inbox.workspaceAction.workTierUpdate": Record<string, never>;
   "memberList.empty.detail": Record<string, never>;
   "memberList.empty.headline": Record<string, never>;
   "memberList.empty.invite": Record<string, never>;
