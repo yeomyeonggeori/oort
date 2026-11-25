@@ -30,19 +30,20 @@ import {
 } from "@/features/workspace/useWorkspace";
 import {
   reminderDueLabel,
-  reminderFailureMessage,
+  reminderFailureKey,
   reminderIsOverdue,
-  reminderLoadFailureMessage,
+  REMINDER_LOAD_FAILURE_KEY,
   reminderPreviewText,
-  REMINDER_COMPLETE_CONFIRM_DETAIL,
-  REMINDER_COMPLETE_CONFIRM_TITLE,
-  REMINDER_COMPLETE_LABEL,
-  REMINDER_CUSTOM_LABEL,
-  REMINDER_DELETE_LABEL,
-  REMINDER_EMPTY_DETAIL,
-  REMINDER_EMPTY_HEADLINE,
-  REMINDER_SNOOZE_LABEL,
-  REMINDER_UNKNOWN_CHANNEL_LABEL,
+  REMINDER_COMPLETE_CONFIRM_DETAIL_KEY,
+  REMINDER_COMPLETE_CONFIRM_TITLE_KEY,
+  REMINDER_COMPLETE_KEY,
+  REMINDER_CUSTOM_KEY,
+  REMINDER_DELETE_KEY,
+  REMINDER_EMPTY_DETAIL_KEY,
+  REMINDER_EMPTY_HEADLINE_KEY,
+  REMINDER_SNOOZE_KEY,
+  REMINDER_UNKNOWN_CHANNEL_KEY,
+  type ReminderPlainKey,
   type MessageReminder,
   type ReminderFailureVerb,
 } from "@momo/core/features/reminders/model";
@@ -54,6 +55,7 @@ import {
 import { RemindDialog } from "./RemindDialog";
 import { useReminderMutations, useReminders } from "./useReminders";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: inbox docked reminder list for internal team users on
 // web+Tauri, density 7/10, motion 2/10. A5 draft-row grammar: flat rows,
@@ -82,7 +84,10 @@ export function RemindersPanel() {
   const [completeTarget, setCompleteTarget] = useState<MessageReminder | null>(
     null
   );
-  const [actionError, setActionError] = useState<string | null>(null);
+  const formatMessage = useFormatMessage();
+  // 실패는 키로 쥔다: 띄워 둔 줄이 언어를 바꾸면 따라 바뀐다.
+  const [actionErrorKey, setActionErrorKey] = useState<ReminderPlainKey | null>(null);
+  const actionError = actionErrorKey === null ? null : formatMessage(actionErrorKey);
   const nowMs = Date.now();
 
   const channels = useMemo(
@@ -91,7 +96,7 @@ export function RemindersPanel() {
   );
   const labelFor = (channelId: string) => {
     const channel = channels.find((item) => uuidEq(item.id, channelId));
-    if (!channel) return REMINDER_UNKNOWN_CHANNEL_LABEL;
+    if (!channel) return formatMessage(REMINDER_UNKNOWN_CHANNEL_KEY);
     return channelLabel(channel, directory, session.member.id);
   };
 
@@ -102,12 +107,12 @@ export function RemindersPanel() {
     work: () => Promise<unknown>,
     verb: ReminderFailureVerb
   ): Promise<boolean> => {
-    setActionError(null);
+    setActionErrorKey(null);
     try {
       await work();
       return true;
     } catch (error: unknown) {
-      setActionError(reminderFailureMessage(error, verb));
+      setActionErrorKey(reminderFailureKey(error, verb));
       return false;
     }
   };
@@ -127,7 +132,7 @@ export function RemindersPanel() {
   if (query.isError) {
     return (
       <InlineBanner
-        message={reminderLoadFailureMessage()}
+        message={formatMessage(REMINDER_LOAD_FAILURE_KEY)}
         actionLabel="다시 시도"
         onAction={() => void query.refetch()}
         testId="reminders-error"
@@ -139,8 +144,8 @@ export function RemindersPanel() {
   if (!query.isLoading && reminders.length === 0) {
     return (
       <EmptyInvite
-        headline={REMINDER_EMPTY_HEADLINE}
-        detail={REMINDER_EMPTY_DETAIL}
+        headline={formatMessage(REMINDER_EMPTY_HEADLINE_KEY)}
+        detail={formatMessage(REMINDER_EMPTY_DETAIL_KEY)}
         testId="reminders-empty"
       />
     );
@@ -154,7 +159,7 @@ export function RemindersPanel() {
             <InlineBanner
               message={actionError}
               actionLabel="닫기"
-              onAction={() => setActionError(null)}
+              onAction={() => setActionErrorKey(null)}
               testId="reminders-action-error"
             />
           )}
@@ -172,16 +177,16 @@ export function RemindersPanel() {
                   mutations.remove.isPending
                 }
                 onComplete={() => {
-                  setActionError(null);
+                  setActionErrorKey(null);
                   setCompleteTarget(reminder);
                 }}
                 onSnoozePreset={(id) => snoozePreset(reminder, id)}
                 onSnoozeCustom={() => {
-                  setActionError(null);
+                  setActionErrorKey(null);
                   setSnoozeTarget(reminder);
                 }}
                 onDelete={() => {
-                  setActionError(null);
+                  setActionErrorKey(null);
                   setDeleteTarget(reminder);
                 }}
               />
@@ -192,11 +197,11 @@ export function RemindersPanel() {
             onOpenChange={(open) => {
               if (!open) {
                 setSnoozeTarget(null);
-                setActionError(null);
+                setActionErrorKey(null);
               }
             }}
             mode="snooze"
-            preview={snoozeTarget ? reminderPreviewText(snoozeTarget) : undefined}
+            preview={snoozeTarget ? reminderPreviewText(formatMessage, snoozeTarget) : undefined}
             pending={mutations.snooze.isPending}
             error={actionError}
             onCommit={(dueAtMs) => {
@@ -215,7 +220,7 @@ export function RemindersPanel() {
             onOpenChange={(open) => {
               if (!open) {
                 setDeleteTarget(null);
-                setActionError(null);
+                setActionErrorKey(null);
               }
             }}
           >
@@ -233,7 +238,7 @@ export function RemindersPanel() {
                   data-testid="reminder-delete-cancel"
                   onClick={() => {
                     setDeleteTarget(null);
-                    setActionError(null);
+                    setActionErrorKey(null);
                   }}
                 >
                   취소
@@ -252,7 +257,7 @@ export function RemindersPanel() {
                     );
                   }}
                 >
-                  {mutations.remove.isPending ? "지우는 중…" : REMINDER_DELETE_LABEL}
+                  {mutations.remove.isPending ? "지우는 중…" : formatMessage(REMINDER_DELETE_KEY)}
                 </Button>
               </div>
             </DialogContent>
@@ -262,7 +267,7 @@ export function RemindersPanel() {
             onOpenChange={(open) => {
               if (!open) {
                 setCompleteTarget(null);
-                setActionError(null);
+                setActionErrorKey(null);
               }
             }}
           >
@@ -270,8 +275,8 @@ export function RemindersPanel() {
               data-testid="reminder-complete-dialog"
               className="gap-3 p-4"
             >
-              <DialogTitle>{REMINDER_COMPLETE_CONFIRM_TITLE}</DialogTitle>
-              <DialogDescription>{REMINDER_COMPLETE_CONFIRM_DETAIL}</DialogDescription>
+              <DialogTitle>{formatMessage(REMINDER_COMPLETE_CONFIRM_TITLE_KEY)}</DialogTitle>
+              <DialogDescription>{formatMessage(REMINDER_COMPLETE_CONFIRM_DETAIL_KEY)}</DialogDescription>
               {actionError && (
                 <InlineBanner
                   message={actionError}
@@ -284,7 +289,7 @@ export function RemindersPanel() {
                   data-testid="reminder-complete-cancel"
                   onClick={() => {
                     setCompleteTarget(null);
-                    setActionError(null);
+                    setActionErrorKey(null);
                   }}
                 >
                   취소
@@ -303,7 +308,7 @@ export function RemindersPanel() {
                     });
                   }}
                 >
-                  {mutations.complete.isPending ? "완료 중…" : REMINDER_COMPLETE_LABEL}
+                  {mutations.complete.isPending ? "완료 중…" : formatMessage(REMINDER_COMPLETE_KEY)}
                 </Button>
               </div>
             </DialogContent>
@@ -340,6 +345,7 @@ function ReminderRow({
   onSnoozeCustom: () => void;
   onDelete: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const hoverNone = useHoverNone();
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
@@ -398,7 +404,7 @@ function ReminderRow({
                 className="min-w-0 truncate text-body font-semibold text-ink"
                 data-testid="reminder-row-preview"
               >
-                {reminderPreviewText(reminder)}
+                {reminderPreviewText(formatMessage, reminder)}
               </span>
               <span
                 className="min-w-0 truncate text-meta text-ink-muted"
@@ -424,7 +430,7 @@ function ReminderRow({
             data-numeric
             data-testid="reminder-row-due"
           >
-            {reminderDueLabel(reminder.dueAtMs, nowMs)}
+            {reminderDueLabel(formatMessage, reminder.dueAtMs, nowMs)}
           </span>
           <div
             className="flex w-overflow-bowl shrink-0 justify-end"
@@ -461,7 +467,7 @@ function ReminderRow({
                       onSelect={onDelete}
                     >
                       <Trash2 className="size-4" aria-hidden="true" />
-                      {REMINDER_DELETE_LABEL}
+                      {formatMessage(REMINDER_DELETE_KEY)}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -479,7 +485,7 @@ function ReminderRow({
           onClick={onComplete}
           data-testid="reminder-complete"
         >
-          {REMINDER_COMPLETE_LABEL}
+          {formatMessage(REMINDER_COMPLETE_KEY)}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -490,7 +496,7 @@ function ReminderRow({
               disabled={offline || pending}
               data-testid="reminder-snooze"
             >
-              {REMINDER_SNOOZE_LABEL}
+              {formatMessage(REMINDER_SNOOZE_KEY)}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" data-testid="reminder-snooze-menu">
@@ -500,7 +506,7 @@ function ReminderRow({
                 data-testid={`reminder-snooze-${preset.id}`}
                 onSelect={() => onSnoozePreset(preset.id)}
               >
-                {preset.label}
+                {formatMessage(preset.labelKey)}
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
@@ -508,7 +514,7 @@ function ReminderRow({
               data-testid="reminder-snooze-custom"
               onSelect={onSnoozeCustom}
             >
-              {REMINDER_CUSTOM_LABEL}
+              {formatMessage(REMINDER_CUSTOM_KEY)}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

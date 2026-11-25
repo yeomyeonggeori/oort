@@ -1,9 +1,9 @@
 import {measureComposerText} from './fixtures/composerMeasurement';
 import {
-  composerFieldLabel,
-  composerPlaceholder,
-  composerPlaceholderClauses,
-  MENTION_AFFORDANCE,
+  composerFieldLabel as composerFieldLabelWith,
+  composerPlaceholder as composerPlaceholderWith,
+  composerPlaceholderClauses as composerPlaceholderClausesWith,
+  MENTION_AFFORDANCE_KEY,
 } from '@momo/core/features/chat/composerCopy';
 import type {RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -24,7 +24,7 @@ import {
   composerCollapsedHeight,
   COMPOSER_MAX_ROWS,
   PILL_CHROME,
-  COMPOSER_OFFLINE_COPY,
+  COMPOSER_OFFLINE_KEY,
   INPUT_CHROME,
   INPUT_CHROME_X,
   mentionRowHeight,
@@ -50,6 +50,21 @@ import {
   threadDraftKey,
 } from '../src/features/conversation/drafts';
 import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
+
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 컴포저 문장은 사전(`chat.json`)에 있다(#6058). 폰은 공급자 밖에서 한국어로 물러나므로 이 시험은 제품과 같은 한국어 생성물로 풀어
+// 예전 한국어 문장을 그대로 단정한다.
+const {formatMessage: koFormat} = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
+const koCopy = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+const COMPOSER_OFFLINE_COPY = koCopy(COMPOSER_OFFLINE_KEY);
+const MENTION_AFFORDANCE = koCopy(MENTION_AFFORDANCE_KEY);
+const composerPlaceholder = (...args: Tail<Parameters<typeof composerPlaceholderWith>>) => composerPlaceholderWith(koFormat, ...args);
+const composerPlaceholderClauses = (...args: Tail<Parameters<typeof composerPlaceholderClausesWith>>) => composerPlaceholderClausesWith(koFormat, ...args);
+const composerFieldLabel = (...args: Tail<Parameters<typeof composerFieldLabelWith>>) => composerFieldLabelWith(koFormat, ...args);
 
 // =============================================================================
 // U4-f 폰 — 쓰던 글은 사라지지 않고, 못 보낼 때는 못 보낸다고 말한다 (감사 H-10)
@@ -1417,8 +1432,8 @@ describe('컴포저 카피가 한 벌이다 (#1384)', () => {
     // 문장이 아니라 **절**을 받는다 (#1479). 이 클라가 절 예산을 부르면서 소비
     // 지점이 `composerPlaceholder` 에서 `composerPlaceholderClauses` 로 내려갔고,
     // 그것이 여전히 코어의 이름인 것이 이 단정이 지키는 전부다.
-    expect(code).toContain('composerPlaceholderClauses(channelLabel, recipient)');
-    expect(code).toContain('composerFieldLabel(channelLabel, recipient)');
+    expect(code).toContain('composerPlaceholderClauses(formatMessage, channelLabel, recipient)');
+    expect(code).toContain('composerFieldLabel(formatMessage, channelLabel, recipient)');
     // 이음쇠도 코어의 것이다 — 절을 이어 붙이는 것은 `fitComposerPlaceholder`
     // 이고, 이 파일이 이음쇠를 적으면 그것이 두 번째 정본이다.
     expect(code).toContain('fitComposerPlaceholder(');

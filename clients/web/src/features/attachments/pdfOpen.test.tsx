@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // PDF 열기 (#2701).
 //
@@ -187,7 +196,7 @@ describe("openPdfAttachment", () => {
 describe("timeline PDF card", () => {
   function render(attachments: (typeof PDF)[]) {
     act(() => {
-      root.render(<AttachmentList channelId="ch" attachments={attachments} />);
+      root.render(withKo(<AttachmentList channelId="ch" attachments={attachments} />));
     });
     // 행동 버튼은 호버에서 선다 (#3820): 카드마다 포인터를 올려 둔다.
     act(() => {

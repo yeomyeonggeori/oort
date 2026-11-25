@@ -3358,6 +3358,7 @@ function MessageRowInner({
       accessible={!((startsGroup && requestChip) || (runStatus !== undefined && runStatus.some(mayHaveException)) || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
       accessibilityLabel={[
         rowAccessibilityLabel({
+        formatMessage,
         message: {...message, body: spokenExpression(message.body ?? '')},
         authorLabel,
         authorIsAgent: memberFor(directory, message.authorMemberId)?.kind === 'agent',
@@ -4225,6 +4226,7 @@ export function rowPressedBackground(color: Palette): string {
 }
 
 export function rowAccessibilityLabel({
+  formatMessage,
   message,
   authorLabel,
   authorIsAgent = false,
@@ -4235,6 +4237,8 @@ export function rowAccessibilityLabel({
   replyTo,
   quoted,
 }: {
+  /** 첨부 한 줄(`attachmentMetaLine`)을 지금 언어로 말하는 서비스(#6058). */
+  formatMessage: LocaleService['formatMessage'];
   message: Message;
   authorLabel: string;
   /**
@@ -4278,7 +4282,8 @@ export function rowAccessibilityLabel({
     deleted ? (tombstoneText ?? '삭제된 메시지') : (message.body ?? '').trim(),
     ...(!deleted
       ? (message.attachments ?? []).map(
-          attachment => `첨부 ${attachment.name}, ${attachmentMetaLine(attachment)}`,
+          attachment =>
+            `첨부 ${attachment.name}, ${attachmentMetaLine(formatMessage, attachment)}`,
         )
       : []),
     ...tail,

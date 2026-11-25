@@ -1,13 +1,13 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
-import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
+import { SCHEDULED_COPY, type ScheduledPlainKey, type ScheduledRef } from "@momo/core/features/scheduled/copy";
 import type { ScheduledErrorLine } from "@momo/core/features/scheduled/errors";
 import {
   formatScheduledAt,
   scheduledZoneLine,
   sendAtFromInputs,
   sendAtInputs,
-  sendAtProblemSentence,
+  sendAtProblemRef,
   validateSendAt,
 } from "@momo/core/features/scheduled/presets";
 import { SCHEDULED_MAX_LEAD_MS } from "@momo/core/features/scheduled/types";
@@ -20,6 +20,7 @@ import {
   type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: confirm dialog for a scheduled send time, opened from the composer's send
 // menu and from the scheduled list, internal team users on web+Tauri, density 7/10, motion 2/10.
@@ -84,7 +85,7 @@ export interface ScheduleDialogProps {
   nowMs?: number;
 }
 
-const TITLES: Record<ScheduleDialogMode, string> = {
+const TITLES: Record<ScheduleDialogMode, ScheduledPlainKey> = {
   create: SCHEDULED_COPY.dialog.title,
   change: SCHEDULED_COPY.dialog.titleChange,
   rearm: SCHEDULED_COPY.dialog.titleRearm,
@@ -108,11 +109,12 @@ export function ScheduleDialog({
   onCloseAutoFocus,
   nowMs,
 }: ScheduleDialogProps) {
+  const formatMessage = useFormatMessage();
   const dateId = useId();
   const timeId = useId();
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<ScheduledRef | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -124,18 +126,25 @@ export function ScheduleDialog({
 
   const now = nowMs ?? Date.now();
   const atMs = sendAtFromInputs(date, time);
-  const sentence = atMs === null ? "" : SCHEDULED_COPY.dialog.preview(formatScheduledAt(atMs, now).full);
-  const zone = scheduledZoneLine(atMs ?? initialAtMs);
+  const sentence =
+    atMs === null
+      ? ""
+      : formatMessage(SCHEDULED_COPY.dialog.preview, { when: formatScheduledAt(atMs, now).full });
+  const zoneRef = scheduledZoneLine(atMs ?? initialAtMs);
+  const zone = formatMessage(zoneRef.key, zoneRef.values as never);
   const locked = lock !== "open";
   const busy = pending || offline || locked || unavailable;
 
   // 오류 줄 자리는 하나다: 잠금 > 오프라인 > 예약을 끈 서버 > 호출부의 오류 > 확인 전 검증.
   const shown: ScheduledErrorLine | null = locked
-    ? { text: lock === "tooLate" ? SCHEDULED_COPY.error.tooLate : SCHEDULED_COPY.errors.alreadySent }
+    ? { text: { key: lock === "tooLate" ? SCHEDULED_COPY.error.tooLate : SCHEDULED_COPY.errors.alreadySent } }
     : offline
-      ? { text: SCHEDULED_COPY.dialog.offline }
+      ? { text: { key: SCHEDULED_COPY.dialog.offline } }
       : unavailable
-        ? { text: SCHEDULED_COPY.disabled.unavailable.reason, next: SCHEDULED_COPY.disabled.unavailable.next }
+        ? {
+            text: { key: SCHEDULED_COPY.disabled.unavailable.reason },
+            next: { key: SCHEDULED_COPY.disabled.unavailable.next },
+          }
         : (error ?? (localError === null ? null : { text: localError }));
 
   const commit = (event?: FormEvent) => {
@@ -144,15 +153,17 @@ export function ScheduleDialog({
     const chosen = sendAtFromInputs(date, time);
     const problem = validateSendAt(chosen, nowMs ?? Date.now());
     if (problem !== null || chosen === null) {
-      setLocalError(sendAtProblemSentence(problem ?? "invalid"));
+      setLocalError(sendAtProblemRef(problem ?? "invalid"));
       return;
     }
     setLocalError(null);
     onCommit(chosen);
   };
 
-  const commitLabel = mode === "change" ? SCHEDULED_COPY.dialog.commitChange : SCHEDULED_COPY.dialog.commit;
-  const savingLabel = mode === "change" ? SCHEDULED_COPY.edit.saving : SCHEDULED_COPY.dialog.saving;
+  const commitLabel = formatMessage(
+    mode === "change" ? SCHEDULED_COPY.dialog.commitChange : SCHEDULED_COPY.dialog.commit
+  );
+  const savingLabel = formatMessage(mode === "change" ? SCHEDULED_COPY.edit.saving : SCHEDULED_COPY.dialog.saving);
 
   return (
     <Dialog
@@ -169,8 +180,8 @@ export function ScheduleDialog({
         className="gap-3 p-4"
         {...(onCloseAutoFocus === undefined ? {} : { onCloseAutoFocus })}
       >
-        <DialogTitle>{TITLES[mode]}</DialogTitle>
-        <DialogDescription className="break-keep">{SCHEDULED_COPY.dialog.description}</DialogDescription>
+        <DialogTitle>{formatMessage(TITLES[mode])}</DialogTitle>
+        <DialogDescription className="break-keep">{formatMessage(SCHEDULED_COPY.dialog.description)}</DialogDescription>
 
         <div className="flex min-w-0 flex-col gap-1">
           <p className="min-w-0 truncate text-meta font-semibold text-ink" data-testid="schedule-dialog-place">
@@ -187,7 +198,7 @@ export function ScheduleDialog({
           <div className="flex flex-wrap gap-2">
             <div className="flex min-w-0 flex-col gap-1">
               <label htmlFor={dateId} className="text-meta text-ink-muted">
-                {SCHEDULED_COPY.dialog.date}
+                {formatMessage(SCHEDULED_COPY.dialog.date)}
               </label>
               <Input
                 id={dateId}
@@ -204,7 +215,7 @@ export function ScheduleDialog({
             </div>
             <div className="flex min-w-0 flex-col gap-1">
               <label htmlFor={timeId} className="text-meta text-ink-muted">
-                {SCHEDULED_COPY.dialog.time}
+                {formatMessage(SCHEDULED_COPY.dialog.time)}
               </label>
               <Input
                 id={timeId}
@@ -234,14 +245,16 @@ export function ScheduleDialog({
             </p>
             {routingNote && (
               <p className="break-keep text-meta text-ink-muted" data-testid="schedule-dialog-routing-note">
-                {SCHEDULED_COPY.menu.routingNote}
+                {formatMessage(SCHEDULED_COPY.menu.routingNote)}
               </p>
             )}
             {shown !== null && (
               <div className="flex flex-col gap-1" role="alert" data-testid="schedule-dialog-error">
-                <p className="break-keep text-meta text-danger">{shown.text}</p>
+                <p className="break-keep text-meta text-danger">{formatMessage(shown.text.key, shown.text.values as never)}</p>
                 {shown.next !== undefined && (
-                  <p className="break-keep text-meta text-ink-muted">{shown.next}</p>
+                  <p className="break-keep text-meta text-ink-muted">
+                    {formatMessage(shown.next.key, shown.next.values as never)}
+                  </p>
                 )}
               </div>
             )}
@@ -255,7 +268,7 @@ export function ScheduleDialog({
               disabled={pending}
               onClick={() => onOpenChange(false)}
             >
-              {SCHEDULED_COPY.dialog.cancel}
+              {formatMessage(SCHEDULED_COPY.dialog.cancel)}
             </Button>
             <Button
               type="submit"

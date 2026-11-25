@@ -12,6 +12,7 @@ import { isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { scheduledNavEntry } from "@momo/core/features/scheduled/model";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useScheduled } from "@/features/scheduled/useScheduled";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { AGENTS_NAV, AI_HUB_NAV } from "./workspaceNav";
@@ -67,6 +68,7 @@ export function SidebarDestinations({
   // 아직 안 본 끝남(「끝남」은 칸을 보면 내려간다, `paneAttention`). 웹에는 칸이 없어 비어 있다.
   const donePanes = paneEntries.filter((e) => e.status === "done");
   // 「예약됨」 줄(ADR-0208): 보낼 예정 또는 보내지 못함이 있을 때만 선다. 알약은 보내지 못한 예약의 수다.
+  const formatMessage = useFormatMessage();
   const scheduled = useScheduled();
   const scheduledNav = scheduledNavEntry(scheduled.surface === "absent" ? [] : scheduled.rows);
   const failedUnseen = donePanes.some((e) => isFailedMark(e.mark));
@@ -98,10 +100,14 @@ export function SidebarDestinations({
             <SidebarRow
               to="/scheduled"
               icon={<Clock className="size-4" />}
-              label={SCHEDULED_COPY.nav.label}
+              label={formatMessage(SCHEDULED_COPY.nav.label)}
               testId="nav-scheduled"
               mentionCount={marks.scheduled.pill?.count ?? 0}
-              badgeLabel={scheduledNav.badgeLabel ?? undefined}
+              badgeLabel={
+                scheduledNav.badgeLabel === null
+                  ? undefined
+                  : formatMessage(scheduledNav.badgeLabel.key, scheduledNav.badgeLabel.values as never)
+              }
             />
           )}
         </ul>

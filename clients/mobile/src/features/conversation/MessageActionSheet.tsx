@@ -204,7 +204,10 @@ function SheetBody({
   // 글 없이 사진·파일만 보낸 메시지는 「내용 없는 메시지」가 아니라 개수로 말한다 (#4294).
   const preview =
     (message.body ?? '').trim() ||
-    (attachmentPreviewLine(message.attachments) ?? '');
+    (attachmentPreviewLine(
+      (key, values) => locale.formatMessage(key, values as never),
+      message.attachments,
+    ) ?? '');
 
   // 두 항목이 나란히 선다. 같은 「답」이지만 가는 곳이 다르다: 「답글 달기」는 그 메시지의 **스레드**에 단다 —
   // 같은 화면의 입력칸이 답글 머리말과 함께 열리고(#4869, 오른쪽→왼쪽 밀기와 같은 길 — VoiceOver 가 이 항목으로 간다),

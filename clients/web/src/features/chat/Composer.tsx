@@ -31,7 +31,7 @@ import {
 } from "@momo/core/features/chat/composerKeys";
 import type { RecipientKind } from "@momo/core/lib/koreanParticle";
 import {
-  COMPOSER_KEYS_HINT,
+  COMPOSER_KEYS_HINT_KEY,
   HINT_SEPARATOR,
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
@@ -83,7 +83,7 @@ import {
   useAttachmentSurface,
 } from "@/features/attachments/draftStore";
 import {
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
@@ -130,6 +130,7 @@ import {
   composerFormatHasPendingLink,
 } from "@/features/chat/composerFormat";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -187,6 +188,7 @@ function ComposerHint({
   pendingLink: boolean;
   sharedRow: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const lead = pendingLink || dmHint !== null;
   return (
     <p
@@ -216,7 +218,7 @@ function ComposerHint({
       {keysHintNeeded && (
         <span className="wide-only @max-md:hidden" data-testid="composer-keys-hint">
           {lead ? HINT_SEPARATOR : ""}
-          {COMPOSER_KEYS_HINT}
+          {formatMessage(COMPOSER_KEYS_HINT_KEY)}
         </span>
       )}
     </p>
@@ -328,6 +330,7 @@ export function Composer({
   const secretBlocked = secretBlocks > 0;
   // 키 차단 줄의 첫 문장은 막은 길이 정한다: 보내기는 「보내지 않았어요」, 예약은 「예약하지 않았어요」(예약 UI 명세 0.4).
   const [secretVia, setSecretVia] = useState<"send" | "schedule">("send");
+  const formatMessage = useFormatMessage();
   const cardAvailable = hasLocalCardHost(channelId);
   const { session, connStatus } = useSession();
   const autocomplete = useComposerAutocomplete({
@@ -445,7 +448,8 @@ export function Composer({
   const attachBlock = sendBlockReason(tray.drafts);
   // 발치의 문장과 버튼의 툴팁이 **한 곳**에서 난다. 갈라 두면 하나만 고쳐지고,
   // 리뷰 M-1 이 잡은 "없는 버튼을 가리키는 안내"가 툴팁에만 남는다.
-  const attachBlockCopy = sendBlockCopy(tray.drafts);
+  const attachBlockKey = sendBlockKey(tray.drafts);
+  const attachBlockCopy = attachBlockKey === null ? null : formatMessage(attachBlockKey);
 
   // ── 「작성 중」 (ADR-0149) ────────────────────────────────────────────────
   //
@@ -1058,7 +1062,7 @@ export function Composer({
             id="composer-secret-block"
             testId="composer-secret-block"
             cardAvailable={cardAvailable}
-            {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
+            {...(secretVia === "schedule" ? { lead: formatMessage(SCHEDULED_COPY.secretKey.lead) } : {})}
           />
         )}
         <ComposerAutocompleteList
@@ -1178,7 +1182,7 @@ export function Composer({
             returnFocus={() => inputRef.current?.focus()}
           />
           <label className="sr-only" htmlFor="composer-input">
-            {composerFieldLabel(channelLabel, recipient)}
+            {composerFieldLabel(formatMessage, channelLabel, recipient)}
           </label>
           <textarea
             id="composer-input"

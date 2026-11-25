@@ -1,22 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
-  COMPOSER_KEYS_HINT,
-  COMPOSER_OFFLINE_COPY,
+  COMPOSER_KEYS_HINT_KEY,
+  COMPOSER_OFFLINE_KEY,
   COMPOSER_PLACEHOLDER_JOINER,
   HINT_SEPARATOR,
-  MENTION_AFFORDANCE,
-  MESSAGE_EDITOR_KEYS_HINT,
-  THREAD_COMPOSER_PLACEHOLDER,
-  composerFieldLabel,
-  composerPlaceholder,
-  composerPlaceholderClauses,
+  MENTION_AFFORDANCE_KEY,
+  MESSAGE_EDITOR_KEYS_HINT_KEY,
+  THREAD_COMPOSER_PLACEHOLDER_KEY,
+  composerFieldLabel as composerFieldLabelWith,
+  composerPlaceholder as composerPlaceholderWith,
+  composerPlaceholderClauses as composerPlaceholderClausesWith,
   fitComposerPlaceholder,
 } from "./composerCopy";
 import { APPROVAL_OFFLINE_KEY } from "../timeline/approvalNote";
 import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
 import { createMessageCopy } from "../../testkit";
 
-const APPROVAL_OFFLINE_COPY = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog })(APPROVAL_OFFLINE_KEY);
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+const APPROVAL_OFFLINE_COPY = ko(APPROVAL_OFFLINE_KEY);
+
+// 컴포저 문장은 사전(`chat.json`)에 있고 코어는 키를 돌려주거나 말하는 함수가 언어 서비스를 받는다(#6058). 이 시험은 제품과 같은
+// 한국어 생성물로 풀어서 예전 한국어 문장을 그대로 단정한다.
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+const COMPOSER_OFFLINE_COPY = ko(COMPOSER_OFFLINE_KEY);
+const MENTION_AFFORDANCE = ko(MENTION_AFFORDANCE_KEY);
+const THREAD_COMPOSER_PLACEHOLDER = ko(THREAD_COMPOSER_PLACEHOLDER_KEY);
+const COMPOSER_KEYS_HINT = ko(COMPOSER_KEYS_HINT_KEY);
+const MESSAGE_EDITOR_KEYS_HINT = ko(MESSAGE_EDITOR_KEYS_HINT_KEY);
+const composerPlaceholder = (...args: Tail<Parameters<typeof composerPlaceholderWith>>) => composerPlaceholderWith(formatMessage, ...args);
+const composerPlaceholderClauses = (...args: Tail<Parameters<typeof composerPlaceholderClausesWith>>) => composerPlaceholderClausesWith(formatMessage, ...args);
+const composerFieldLabel = (...args: Tail<Parameters<typeof composerFieldLabelWith>>) => composerFieldLabelWith(formatMessage, ...args);
 
 // =============================================================================
 // U4-6 리뷰 H-1 — 두 클라가 같은 상황에서 같은 말을 하는가.

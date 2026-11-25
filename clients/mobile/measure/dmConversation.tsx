@@ -3,7 +3,12 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Settings, TextInput} from 'react-native';
 import {Screen} from '../src/design/atoms';
-import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
+import {THREAD_COMPOSER_PLACEHOLDER_KEY} from '@momo/core/features/chat/composerCopy';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n';
+
+// 계측 하네스는 한국어 문장으로 잰다(문장은 사전에 있다, #6058).
+const THREAD_COMPOSER_PLACEHOLDER = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY);
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';

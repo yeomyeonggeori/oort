@@ -1,3 +1,5 @@
+import type { PlainMessageKey } from "../../i18n/keys";
+
 export const EMOJI_CATEGORY_IDS = [
   "people",
   "nature",
@@ -81,16 +83,16 @@ export function displayGlyph(entry: CatalogEmoji, tone: SkinTone): string {
 
 /** Labels are shared; platform icons belong to each client. */
 export const EMOJI_CATEGORIES = [
-  { id: "frequent", label: "자주 씀" },
-  { id: "people", label: "사람" },
-  { id: "nature", label: "자연" },
-  { id: "foods", label: "음식" },
-  { id: "activity", label: "활동" },
-  { id: "places", label: "장소" },
-  { id: "objects", label: "물건" },
-  { id: "symbols", label: "기호" },
-  { id: "flags", label: "깃발" },
-] as const;
+  { id: "frequent", labelKey: "emoji.category.frequent" },
+  { id: "people", labelKey: "emoji.category.people" },
+  { id: "nature", labelKey: "emoji.category.nature" },
+  { id: "foods", labelKey: "emoji.category.foods" },
+  { id: "activity", labelKey: "emoji.category.activity" },
+  { id: "places", labelKey: "emoji.category.places" },
+  { id: "objects", labelKey: "emoji.category.objects" },
+  { id: "symbols", labelKey: "emoji.category.symbols" },
+  { id: "flags", labelKey: "emoji.category.flags" },
+] as const satisfies ReadonlyArray<{ id: string; labelKey: PlainMessageKey }>;
 
 /** Only offer glyphs the host can draw. Unknown versions fail closed. */
 export function supportedEmojis(

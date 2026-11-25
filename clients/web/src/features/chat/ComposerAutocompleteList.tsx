@@ -4,6 +4,7 @@ import { Keycaps } from "@/app/ShortcutHelpDialog";
 import { cn } from "@/design/lib/cn";
 import { MemberAvatar } from "@/features/common/MemberAvatar";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   composerTriggerSpec,
   type ComposerCandidate,
@@ -74,6 +75,7 @@ export function ComposerAutocompleteList({
   offline?: boolean;
   onRetry?: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   if (kind === null) return null;
   if (kind === "command") {
     return (
@@ -117,8 +119,8 @@ export function ComposerAutocompleteList({
           <Skeleton ready={false} rows={3} className="p-0" />
         ) : status === "error" ? (
           <InlineBanner
-            message={offline ? copy.offline : copy.error}
-            actionLabel={copy.retry}
+            message={formatMessage(offline ? copy.offline : copy.error)}
+            actionLabel={formatMessage(copy.retry)}
             onAction={onRetry}
             separator={false}
             // 배너의 기본 `px-4` 는 자기 상자에 혼자 설 때의 자다. 여기서는 후보
@@ -128,8 +130,8 @@ export function ComposerAutocompleteList({
           />
         ) : (
           <EmptyInvite
-            headline={copy.emptyHeadline}
-            detail={copy.emptyDetail}
+            headline={formatMessage(copy.emptyHeadline)}
+            detail={formatMessage(copy.emptyDetail)}
             className="px-2 py-3"
             testId={`${testId}-empty`}
           />

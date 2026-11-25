@@ -127,11 +127,20 @@ function mentionAffordance() {
     resolve(webRoot, "../../packages/momo-core/src/features/chat/composerCopy.ts"),
     "utf8"
   );
-  const match = source.match(/export const MENTION_AFFORDANCE\s*=\s*"([^"]+)"/);
+  const match = source.match(/export const MENTION_AFFORDANCE_KEY\s*=\s*"([^"]+)"/);
   if (match === null) {
-    throw new Error("코어의 MENTION_AFFORDANCE를 읽지 못했다");
+    throw new Error("코어의 MENTION_AFFORDANCE_KEY를 읽지 못했다");
   }
-  return match[1];
+  // 문장은 사전에 있다(#6058): 키의 한국어 값을 읽는다. 게이트의 브라우저는 `locale: "ko-KR"`로 열려 그 한국어를 그린다.
+  const catalog = JSON.parse(
+    readFileSync(
+      resolve(webRoot, "../../packages/momo-core/src/i18n/catalogs/ko-KR/chat.json"),
+      "utf8"
+    )
+  );
+  const text = catalog[match[1]];
+  if (typeof text !== "string") throw new Error(`사전에 ${match[1]}가 없다`);
+  return text;
 }
 
 /** 절과 절을 잇는 것. 같은 파일에서 같은 방식으로 읽는다. */
@@ -567,6 +576,7 @@ async function openPanelFromComposer(page) {
 
 async function exerciseScenario(browser, scenario) {
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
   });
@@ -835,6 +845,7 @@ async function captureShots(browser) {
   mkdirSync(outDir, { recursive: true });
   for (const scheme of ["light", "dark"]) {
     const context = await browser.newContext({
+      locale: "ko-KR",
       viewport: { width: 1280, height: 800 },
       reducedMotion: "reduce",
       colorScheme: scheme,
@@ -886,6 +897,7 @@ async function captureWorkPaneShots(browser) {
   for (const width of [900, 1280]) {
     for (const scheme of ["light", "dark"]) {
       const context = await browser.newContext({
+        locale: "ko-KR",
         viewport: { width, height: 800 },
         reducedMotion: "reduce",
         colorScheme: scheme,
@@ -918,6 +930,7 @@ async function captureWorkPaneShots(browser) {
 async function exerciseCoOpen(browser) {
   const scenario = CO_OPEN_SCENARIO;
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 900, height: 800 },
     reducedMotion: "reduce",
   });
@@ -1029,6 +1042,7 @@ function settlePlaceholder(page) {
 
 async function exerciseWorkPaneCoOpen(browser, width, scenario = CO_OPEN_SCENARIO) {
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width, height: 800 },
     reducedMotion: "reduce",
   });
@@ -1284,6 +1298,7 @@ async function exerciseWorkPaneCoOpen(browser, width, scenario = CO_OPEN_SCENARI
 async function exerciseThreadPaneNarrow(browser, width) {
   const scenario = CO_OPEN_SCENARIO;
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width, height: 800 },
     reducedMotion: "reduce",
   });
@@ -1531,6 +1546,7 @@ async function exerciseNarrowShellComposerFloor(browser) {
   const log = [];
   for (const width of NARROW_SHELL_WIDTHS) {
     const context = await browser.newContext({
+      locale: "ko-KR",
       viewport: { width, height: 800 },
       reducedMotion: "reduce",
     });
@@ -1639,6 +1655,7 @@ async function exerciseNarrowShellComposerFloor(browser) {
  */
 async function exerciseNarrowShellCollapseMotion(browser) {
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 600, height: 800 },
     reducedMotion: "no-preference",
   });
@@ -1684,6 +1701,7 @@ async function captureThreadPaneShots(browser) {
   for (const width of [700, 900]) {
     for (const scheme of ["light", "dark"]) {
       const context = await browser.newContext({
+        locale: "ko-KR",
         viewport: { width, height: 800 },
         reducedMotion: "reduce",
         colorScheme: scheme,
@@ -1738,6 +1756,7 @@ async function captureThreadPaneShots(browser) {
 async function exerciseHeadClauseBand(browser, width) {
   const scenario = { ...CO_OPEN_SCENARIO, channelName: HEAD_CLAUSE_CHANNEL_NAME };
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width, height: 800 },
     reducedMotion: "reduce",
   });
@@ -1874,6 +1893,7 @@ async function exerciseHeadClauseBand(browser, width) {
  */
 async function exerciseProbeRuler(browser, wideWidth, width) {
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: wideWidth, height: 800 },
     reducedMotion: "reduce",
   });
@@ -2036,6 +2056,7 @@ async function captureClauseShots(browser) {
       // 창을 그 뒤에 줄이는 것은 우회가 아니라 **이 수리가 도는 그 계기**다:
       // 폭이 바뀌면 `ResizeObserver` 가 문장을 다시 고른다.
       const context = await browser.newContext({
+        locale: "ko-KR",
         viewport: { width: Math.max(width, 900), height: 800 },
         reducedMotion: "reduce",
         colorScheme: scheme,

@@ -3,9 +3,18 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // 컴포저 트레이 썸네일 (#2701).
 //
@@ -46,7 +55,7 @@ function file(name: string, type: string, size = 64_000): File {
 function renderTray() {
   const drafts = readSurface(KEY).drafts;
   act(() => {
-    root.render(
+    root.render(withKo(
       <AttachmentTray
         drafts={drafts}
         rejected={0}
@@ -56,7 +65,7 @@ function renderTray() {
         onClear={() => {}}
         onAcknowledgeNotices={() => {}}
       />
-    );
+    ));
   });
 }
 

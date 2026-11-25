@@ -1,11 +1,13 @@
-import { particleFor } from "../../lib/koreanParticle";
-import { REMINDER_UNKNOWN_CHANNEL_LABEL } from "../reminders/model";
+import type { MessageKey } from "../../i18n/generated/messages";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+import { takesFinalForm } from "../../lib/koreanParticle";
+import { REMINDER_UNKNOWN_CHANNEL_KEY } from "../reminders/model";
 import type { ScheduledFailureReason } from "./types";
 
 // =============================================================================
 // 예약 메시지 문구표 (UI 명세 3절, ADR-0208 부록 B, #4237).
 //
-// 이 파일의 문장은 UI 명세의 표를 **그대로** 옮긴 것이다. 웹과 폰이 같은 상수를
+// 사전의 문장은 UI 명세의 표를 **그대로** 옮긴 것이다. 웹과 폰이 같은 상수를
 // 쓴다(디자인 시스템 README 1절: 문장·토큰·코어 로직만 공유하고 뷰는 각자). 값을
 // 바꿀 때는 명세를 먼저 고친다 — 시험(`copy.test.ts`)이 명세의 표를 문장 단위로
 // 고정한다.
@@ -13,253 +15,226 @@ import type { ScheduledFailureReason } from "./types";
 // - 해요체, 줄표 금지, 사과·느낌표·이모지 금지, 홍보 낱말 금지. 진행 낱말은
 //   「명사 + 중」이다(`예약 중`, `저장 중`. `예약하는 중`은 `progress_word` 위반).
 //   코어는 `design_preflight_core.mjs`가 hard-zero로 잰다.
-// - `{n}`·`{장소}`·`{시각}`은 템플릿 문자열을 내보내지 않고 함수로 둔다. 호출하는
-//   쪽이 자리표시를 치환하다가 빠뜨리는 길을 없앤다.
+// - 문장은 이 파일에 없다. 문구는 i18n 사전(`scheduled.*`, 공용 낱말은 `common.*`)에 있고 이 표는 그 **키**다
+//   (#6058). 화면이 그릴 때 `formatMessage(키, 값)`로 지금 언어의 문장을 만든다. `{n}`·`{장소}`·`{시각}` 같은
+//   자리는 사전의 ICU 인자(`{count}`·`{place}`·`{when}`)라서 값을 빠뜨리면 타입이 막는다.
 // - 서버가 돌려주는 `error.message`는 영어라서 화면에 보이지 않는다. 상태와
 //   `error.code`로 3.3의 문장을 고른다(`errors.ts`).
 // - 오프라인일 때 입력창의 이유는 이 표의 키가 아니라 앱의 기존
 //   `COMPOSER_OFFLINE_COPY`다(명세 0.4). 대화상자와 시트만 `dialog.offline`을 쓴다.
 // =============================================================================
 
-/** `{장소}`: 채널은 「채널」, DM·그룹 DM은 「대화」, 스레드는 「스레드」(명세 0.1). */
-export type PlaceWord = "채널" | "대화" | "스레드";
+/**
+ * 예약 화면이 그리는 문장의 키와 값. 이 칸의 키(`scheduled.*`)와 공용 낱말(`common.*`)만 담아, 화면의
+ * `formatMessage(ref.key, ref.values as never)`가 전체 키 합집합을 풀지 않게 좁힌다.
+ */
+export type ScheduledRef = MessageRef<Extract<MessageKey, `scheduled.${string}` | `common.${string}`>>;
+
+/** 값이 없는 문장의 키(위와 같은 범위). */
+export type ScheduledPlainKey = Extract<PlainMessageKey, `scheduled.${string}` | `common.${string}`>;
+
+/** `{장소}`: 채널은 `channel`, DM·그룹 DM은 `dm`, 스레드는 `thread`(명세 0.1). 사전의 `{place}` 선택 인자다. */
+export type PlaceWord = "channel" | "dm" | "thread";
 
 /** 실패 사유·오류 문장의 `{장소}`는 채널 또는 대화다(권한은 채널에 매인다, 명세 3.2). */
-export type ErrorPlaceWord = "채널" | "대화";
+export type ErrorPlaceWord = "channel" | "dm";
 
 /** 채널 종류와 스레드 여부로 `{장소}` 낱말을 고른다. */
 export function placeWord(input: {
   kind: "public" | "private" | "dm" | undefined;
   thread?: boolean;
 }): PlaceWord {
-  if (input.thread === true) return "스레드";
-  return input.kind === "dm" ? "대화" : "채널";
+  if (input.thread === true) return "thread";
+  return input.kind === "dm" ? "dm" : "channel";
 }
 
 /** 오류 문장용: 스레드도 그 채널·대화의 멤버십이므로 채널 또는 대화로 읽는다. */
 export function errorPlaceWord(kind: "public" | "private" | "dm" | undefined): ErrorPlaceWord {
-  return kind === "dm" ? "대화" : "채널";
+  return kind === "dm" ? "dm" : "channel";
 }
 
 /** 이름을 못 읽는 행(나간 비공개 채널 등)의 라벨. 리마인더와 같은 낱말을 쓴다(명세 0.1). */
-export const SCHEDULED_UNKNOWN_CHANNEL_LABEL = REMINDER_UNKNOWN_CHANNEL_LABEL;
+export const SCHEDULED_UNKNOWN_CHANNEL_KEY = REMINDER_UNKNOWN_CHANNEL_KEY;
 
-/** DM 행의 라벨 「{이름}과의 대화」. 조사는 코어 `koreanParticle`이 고른다(명세 0.1). */
-export function dmConversationLabel(name: string): string {
-  return `${name}${particleFor(name, "with")}의 대화`;
+/** DM 행의 라벨 「{이름}과의 대화」. 과/와는 받침으로 가려 `josa`로 넘긴다(한국어 값만 쓴다, 명세 0.1). */
+export function dmConversationLabel(name: string): MessageRef<"scheduled.dm.conversationLabel"> {
+  return {
+    key: "scheduled.dm.conversationLabel",
+    values: { name, josa: takesFinalForm(name) ? "final" : "other" },
+  } as MessageRef<"scheduled.dm.conversationLabel">;
 }
 
 export const SCHEDULED_COPY = {
   trigger: {
-    label: "예약해서 보내기",
-    /** 폰: 길게 누르기 힌트. 막힌 이유가 있으면 이 문장으로 덮어쓰지 않는다(명세 2.2). */
-    hint: "길게 눌러 예약",
+    label: "scheduled.trigger.label",
+    hint: "scheduled.trigger.hint",
   },
-
-  /** 비활성 사유(명세 0.4). 이유 줄은 입력창의 한 줄에, 다음 행동 줄은 `title`·낭독에 실린다. */
   disabled: {
-    empty: { reason: "보낼 내용을 쓰면 예약할 수 있어요" },
+    empty: {
+      reason: "scheduled.disabled.emptyReason",
+    },
     quote: {
-      reason: "인용 답장은 예약할 수 없어요",
-      next: "인용을 지우면 예약할 수 있어요",
+      reason: "scheduled.disabled.quoteReason",
+      next: "scheduled.disabled.quoteNext",
     },
     command: {
-      reason: "명령은 예약할 수 없어요",
-      next: "명령을 지우면 예약할 수 있어요",
+      reason: "scheduled.disabled.commandReason",
+      next: "scheduled.disabled.commandNext",
     },
     personalCall: {
-      reason: "개인 에이전트 호출은 예약할 수 없어요",
-      next: "호출을 빼면 예약할 수 있어요",
+      reason: "scheduled.disabled.personalCallReason",
+      next: "scheduled.disabled.personalCallNext",
     },
     attachUploading: {
-      reason: "파일이 올라가는 중이에요",
-      next: "끝나면 예약할 수 있어요",
+      reason: "scheduled.disabled.attachUploadingReason",
+      next: "scheduled.disabled.attachUploadingNext",
     },
     attachFailed: {
-      reason: "올리지 못한 파일이 있어요",
-      nextRetry: "다시 올리거나 지우면 예약할 수 있어요",
-      nextRemove: "지우면 예약할 수 있어요",
+      reason: "scheduled.disabled.attachFailedReason",
+      nextRetry: "scheduled.disabled.attachFailedNextRetry",
+      nextRemove: "scheduled.disabled.attachFailedNextRemove",
     },
     unavailable: {
-      reason: "이 서버에서는 예약을 쓸 수 없어요",
-      next: "관리자에게 물어보세요",
+      reason: "scheduled.disabled.unavailableReason",
+      next: "scheduled.disabled.unavailableNext",
     },
-    /** 대기 50개. 메뉴 안에서 말한다(`error.limit`과 같은 문장). */
-    limit: "예약은 50개까지 걸 수 있어요. 대기 중인 예약을 지우거나 지금 보낸 뒤에 다시 해 보세요.",
+    limit: "scheduled.disabled.limit",
   },
-
   secretKey: {
-    /** 기존 키 차단 줄의 첫 문장만 바뀐다. 나머지는 `SECRET_KEY_BLOCK_COPY`를 그대로 쓴다. */
-    lead: "키는 채팅에 붙여 넣지 마세요. 이 메시지는 예약하지 않았어요.",
+    lead: "scheduled.secretKey.lead",
   },
-
   menu: {
-    custom: "직접 고르기…",
-    /** 폰 메뉴 행의 보조 줄. */
-    customDetail: "날짜와 시간을 골라요",
-    zone: (zoneLabel: string) => `${zoneLabel} 기준이에요`,
-    routingNote: "모델 지정은 예약에 담기지 않아요",
+    custom: "scheduled.menu.custom",
+    customDetail: "scheduled.menu.customDetail",
+    zone: "scheduled.menu.zone",
+    routingNote: "scheduled.menu.routingNote",
   },
-
   preset: {
-    tomorrow: "내일",
-    nextMonday: "다음 주 월요일",
+    tomorrow: "scheduled.preset.tomorrow",
+    nextMonday: "scheduled.preset.nextMonday",
   },
-
   dialog: {
-    /** 대화상자·시트 안의 오프라인 한 줄. 오류 줄 자리에 서고 「예약하기」는 흐리다. */
-    offline: "연결이 없어서 지금은 할 수 없어요. 연결되면 다시 눌러 주세요.",
-    title: "보낼 시각 고르기",
-    titleChange: "보낼 시각 바꾸기",
-    titleRearm: "다시 예약하기",
-    description: "고른 시각에 이 메시지를 보내요. 내 기기가 꺼져 있어도 보내요.",
-    date: "날짜",
-    time: "시간",
-    preview: (when: string) => `${when}에 보내요`,
-    commit: "예약하기",
-    commitChange: "변경하기",
-    cancel: "취소",
-    saving: "예약 중",
-    errSoon: "1분 뒤부터 예약할 수 있어요",
-    errFar: "120일 안에서 골라 주세요",
-    errInvalid: "날짜와 시간을 확인해 주세요",
+    offline: "scheduled.dialog.offline",
+    title: "scheduled.dialog.title",
+    titleChange: "scheduled.dialog.titleChange",
+    titleRearm: "scheduled.dialog.titleRearm",
+    description: "scheduled.dialog.description",
+    date: "scheduled.dialog.date",
+    time: "scheduled.dialog.time",
+    preview: "scheduled.dialog.preview",
+    commit: "scheduled.dialog.commit",
+    commitChange: "scheduled.dialog.commitChange",
+    cancel: "common.action.cancel",
+    saving: "scheduled.dialog.saving",
+    errSoon: "scheduled.dialog.errSoon",
+    errFar: "scheduled.dialog.errFar",
+    errInvalid: "scheduled.dialog.errInvalid",
   },
-
   status: {
-    /** 응답의 `sendAtMs`로 그린 시각을 넣는다(명세 0.5). */
-    scheduled: (when: string) => `${when}에 보낼게요`,
-    sentNow: "메시지를 보냈어요",
+    scheduled: "scheduled.status.scheduled",
+    sentNow: "scheduled.status.sentNow",
   },
-
   banner: {
-    pending: (place: PlaceWord, count: number) => `이 ${place}에 예약된 메시지 ${count}개`,
-    failed: (count: number) => `예약한 메시지 ${count}개를 보내지 못했어요`,
-    action: "보기",
+    pending: "scheduled.banner.pending",
+    failed: "scheduled.banner.failed",
+    action: "scheduled.banner.action",
   },
-
   nav: {
-    label: "예약됨",
-    badgeLabel: (count: number) => `보내지 못한 예약 ${count}개`,
+    label: "scheduled.nav.label",
+    badgeLabel: "scheduled.nav.badgeLabel",
   },
-
   list: {
-    title: "예약됨",
-    count: (count: number) => `내 예약 ${count}개`,
-    sectionFailed: "보내지 못함",
-    sectionPending: "보낼 예정",
-    when: (when: string) => `${when}에 보내요`,
-    soon: "곧 보내요",
-    sending: "보내는 중",
-    attachments: (count: number) => `첨부 ${count}개`,
-    /** `{장소 이름}`: 채널은 「#일반」, DM은 「김인턴과의 대화」처럼 호출하는 쪽이 만든 라벨. */
-    filter: (placeLabel: string) => `${placeLabel} 예약만 보고 있어요`,
-    filterAction: "모두 보기",
-    /**
-     * 「내용 복사」가 실패했다(클립보드를 못 쓰는 곳: http로 도는 셀프호스트 등). 명세 표에 없는 문장이라 이 PR(#4215)이 더했다:
-     * 되살릴 수 없는 실패 행에서 「내용 복사」는 유일한 상시 단추이고 조용한 무동작이면 사람이 영문을 모른다(design-review 2회차 M5).
-     * 다음 행동은 글 전체가 보이는 곳(고치기의 글 칸)으로 보낸다. 이유 줄과 다음 행동 줄은 각각 한 문장이다(명세 0.1).
-     */
+    title: "scheduled.list.title",
+    count: "scheduled.list.count",
+    sectionFailed: "scheduled.list.sectionFailed",
+    sectionPending: "scheduled.list.sectionPending",
+    when: "scheduled.list.when",
+    soon: "scheduled.list.soon",
+    sending: "common.state.sending",
+    attachments: "scheduled.list.attachments",
+    filter: "scheduled.list.filter",
+    filterAction: "scheduled.list.filterAction",
     copyFailed: {
-      reason: "복사하지 못했어요",
-      next: "고치기에서 글을 열어 복사할 수 있어요",
+      reason: "scheduled.list.copyFailedReason",
+      next: "scheduled.list.copyFailedNext",
     },
   },
-
   action: {
-    sendNow: "지금 보내기",
-    change: "시간 바꾸기",
-    rearm: "다시 예약",
-    review: "내용 확인",
-    edit: "고치기",
-    copy: "내용 복사",
-    delete: "지우기",
-    /** `⋯`의 이름은 행마다 구별되게 채널과 시각을 싣는다. */
-    rowMenu: (channelLabel: string, when: string) => `${channelLabel}, ${when} 예약 동작`,
+    sendNow: "scheduled.action.sendNow",
+    change: "scheduled.action.change",
+    rearm: "scheduled.action.rearm",
+    review: "scheduled.action.review",
+    edit: "scheduled.action.edit",
+    copy: "scheduled.action.copy",
+    delete: "scheduled.action.delete",
+    rowMenu: "scheduled.action.rowMenu",
   },
-
   lock: {
-    /** 마감 30초 안의 「시간 바꾸기」·「고치기」가 흐린 이유. */
-    reason: "곧 보내서 바꿀 수 없어요",
+    reason: "scheduled.lock.reason",
   },
-
   error: {
-    tooLate: "곧 보내서 바꿀 수 없어요. 지금 보내거나 지울 수 있어요.",
+    tooLate: "scheduled.error.tooLate",
   },
-
   review: {
-    title: "내용을 확인해 주세요",
-    body: "로그인이 끝나서 멈춘 예약이에요. 내가 쓴 글이 맞는지 확인한 뒤에 보내 주세요.",
-    attachments: (count: number, names: readonly string[]) =>
-      `첨부 ${count}개: ${names.join(", ")}`,
-    close: "닫기",
-    bodyLabel: "예약한 메시지 본문",
-    when: (when: string) => `${when}에 보내려던 예약이에요`,
+    title: "scheduled.review.title",
+    body: "scheduled.review.body",
+    attachments: "scheduled.review.attachments",
+    close: "common.action.close",
+    bodyLabel: "scheduled.review.bodyLabel",
+    when: "scheduled.review.when",
   },
-
   edit: {
-    title: "예약한 메시지 고치기",
-    attachNote: "첨부는 바꿀 수 없어요. 바꾸려면 지우고 다시 예약해 주세요.",
-    commit: "저장하기",
-    saving: "저장 중",
+    title: "scheduled.edit.title",
+    attachNote: "scheduled.edit.attachNote",
+    commit: "scheduled.edit.commit",
+    saving: "common.state.saving",
   },
-
   delete: {
-    title: "예약을 지울까요?",
-    body: "지우면 이 메시지는 보내지 않아요. 되돌릴 수 없어요.",
-    confirm: "지우기",
-    pending: "지우는 중",
+    title: "scheduled.delete.title",
+    body: "scheduled.delete.body",
+    confirm: "scheduled.delete.confirm",
+    pending: "scheduled.delete.pending",
   },
-
   empty: {
-    title: "예약한 메시지가 없어요",
-    bodyWeb: "메시지를 쓰고 보내기 옆 화살표에서 시각을 고르면 예약돼요",
-    bodyPhone: "보내기 단추를 길게 누르면 예약할 수 있어요",
-    action: "대화로 돌아가기",
+    title: "scheduled.empty.title",
+    bodyWeb: "scheduled.empty.bodyWeb",
+    bodyPhone: "scheduled.empty.bodyPhone",
+    action: "scheduled.empty.action",
   },
-
   load: {
-    error: "예약 목록을 불러오지 못했어요",
-    retry: "다시 불러오기",
+    error: "scheduled.load.error",
+    retry: "common.action.reload",
   },
-
   offline: {
-    list: "연결이 없어요. 연결되면 예약을 바꿀 수 있어요.",
+    list: "scheduled.offline.list",
   },
-
-  /**
-   * 서버 오류 → 문장(명세 3.3). 연산·상태·코드로 문장을 고르는 일은 `errors.ts`가 한다.
-   * 여기는 문장 자체다.
-   */
   errors: {
-    tooSoon: "1분 뒤부터 예약할 수 있어요",
-    tooFar: "120일 안에서 골라 주세요",
-    emptyMessage: "보낼 글이나 첨부를 넣어 주세요",
-    createBadRequest:
-      "첨부 개수나 답하려는 메시지를 확인해 주세요. 첨부는 20개까지, 같은 파일은 한 번만 넣을 수 있어요.",
-    createForbidden: (place: ErrorPlaceWord) =>
-      `이 ${place}에 예약할 수 없어요. 들어가 있는 ${place}인지, 첨부가 내 파일인지 확인해 주세요.`,
-    createNotFound: "답하려던 메시지나 첨부를 찾을 수 없어요. 내용을 확인하고 다시 해 주세요.",
-    attachmentReserved:
-      "이 파일은 다른 예약에 쓰이고 있어요. 다른 파일을 고르거나 그 예약을 지워 주세요.",
-    attachmentUnusable: "첨부한 파일을 쓸 수 없어요. 다시 올려 주세요.",
-    alreadySent: "이미 보냈어요",
-    busyEdit: "지금 보내는 중이라 바꿀 수 없어요. 잠시 뒤에 다시 해 주세요.",
-    busyAct: "지금 보내는 중이에요. 잠시 뒤에 목록을 새로 불러와 주세요.",
-    rowNotFound: "예약을 찾을 수 없어요. 이미 지워졌을 수 있어요.",
-    rateLimited: "요청이 너무 많아요. 잠시 뒤에 다시 해 주세요.",
-    unknownCreate: "예약됐는지 확인하지 못했어요. 연결을 확인하고 다시 눌러 주세요.",
-    unknownEdit: "바뀌었는지 확인하지 못했어요. 연결을 확인하고 목록을 새로 불러와 주세요.",
-    unknownDelete: "지워졌는지 확인하지 못했어요. 연결을 확인하고 목록을 새로 불러와 주세요.",
-    unknownSendNow: "보냈는지 확인하지 못했어요. 연결을 확인하고 목록을 새로 불러와 주세요.",
-    otherCreate: "예약하지 못했어요. 다시 해 주세요.",
-    otherWrite: "처리하지 못했어요. 목록을 새로 불러와 다시 해 주세요.",
+    tooSoon: "scheduled.dialog.errSoon",
+    tooFar: "scheduled.dialog.errFar",
+    emptyMessage: "scheduled.errors.emptyMessage",
+    createBadRequest: "scheduled.errors.createBadRequest",
+    createForbidden: "scheduled.errors.createForbidden",
+    createNotFound: "scheduled.errors.createNotFound",
+    attachmentReserved: "scheduled.errors.attachmentReserved",
+    attachmentUnusable: "scheduled.errors.attachmentUnusable",
+    alreadySent: "scheduled.errors.alreadySent",
+    busyEdit: "scheduled.errors.busyEdit",
+    busyAct: "scheduled.errors.busyAct",
+    rowNotFound: "scheduled.errors.rowNotFound",
+    rateLimited: "scheduled.errors.rateLimited",
+    unknownCreate: "scheduled.errors.unknownCreate",
+    unknownEdit: "scheduled.errors.unknownEdit",
+    unknownDelete: "scheduled.errors.unknownDelete",
+    unknownSendNow: "scheduled.errors.unknownSendNow",
+    otherCreate: "scheduled.errors.otherCreate",
+    otherWrite: "scheduled.errors.otherWrite",
   },
-} as const;
+} as const satisfies Record<string, unknown>;
 
-/** 실패 사유 한 건의 두 줄(명세 3.2): 이유 줄과 다음 행동 줄. */
+/** 실패 사유 한 건의 두 줄(명세 3.2): 이유 줄과 다음 행동 줄. 화면이 `formatMessage(line.key, line.values)`로 그린다. */
 export interface FailureLines {
-  reason: string;
-  next: string;
+  reason: ScheduledRef;
+  next: ScheduledRef;
 }
 
 /**
@@ -273,44 +248,44 @@ export function failureLines(
   switch (reason) {
     case "sessions_ended":
       return {
-        reason: "로그인이 끝나서 예약을 멈췄어요",
-        next: "내용을 확인하고 보내거나 다시 예약해 주세요",
+        reason: { key: "scheduled.failure.sessionsEndedReason" },
+        next: { key: "scheduled.failure.sessionsEndedNext" },
       };
     case "author_inactive":
       return {
-        reason: "계정이 정지돼 있어서 보내지 못했어요",
-        next: "정지가 풀린 뒤에 다시 예약해 주세요",
+        reason: { key: "scheduled.failure.authorInactiveReason" },
+        next: { key: "scheduled.failure.authorInactiveNext" },
       };
     case "missed":
       return {
-        reason: "예약한 시각이 많이 지나서 보내지 않았어요",
-        next: "지금 보내거나 다시 예약할 수 있어요",
+        reason: { key: "scheduled.failure.missedReason" },
+        next: { key: "scheduled.failure.missedNext" },
       };
     case "send_error":
       return {
-        reason: "서버 문제로 보내지 못했어요",
-        next: "잠시 뒤에 지금 보내기로 다시 해 볼 수 있어요",
+        reason: { key: "scheduled.failure.sendErrorReason" },
+        next: { key: "scheduled.failure.sendErrorNext" },
       };
     case "not_member":
       return {
-        reason: `이 ${place}에서 나가서 보내지 못했어요`,
-        next: `${place}에 다시 들어간 뒤에 보낼 수 있어요`,
+        reason: { key: "scheduled.failure.notMemberReason", values: { place } },
+        next: { key: "scheduled.failure.notMemberNext", values: { place } },
       };
     case "root_unavailable":
       return {
-        reason: "답하려던 메시지가 지워져서 보내지 못했어요",
-        next: `내용을 복사해서 ${place}에 새로 보내 주세요`,
+        reason: { key: "scheduled.failure.rootUnavailableReason" },
+        next: { key: "scheduled.failure.rootUnavailableNext", values: { place } },
       };
     case "attachment_unavailable":
       return {
-        reason: "첨부한 파일을 쓸 수 없어서 보내지 못했어요",
-        next: "파일을 다시 올려서 새로 예약해 주세요",
+        reason: { key: "scheduled.failure.attachmentUnavailableReason" },
+        next: { key: "scheduled.failure.attachmentUnavailableNext" },
       };
     case "not_allowed":
     case undefined:
       return {
-        reason: `이 ${place}의 규칙 때문에 보내지 못했어요`,
-        next: "관리자에게 물어보세요",
+        reason: { key: "scheduled.failure.notAllowedReason", values: { place } },
+        next: { key: "scheduled.failure.notAllowedNext" },
       };
   }
 }

@@ -56,7 +56,7 @@ export function VideoPosterCard({
   const posterUri = useAttachmentPoster(workspaceId, channelId, attachment, true);
   const size = videoCardSize(media, VIDEO_CARD.max);
   const duration = media === null ? null : formatVideoDuration(media.durationMs);
-  const name = attachmentDisplayName(attachment);
+  const name = attachmentDisplayName(formatMessage, attachment);
 
   const onPress = (event?: GestureResponderEvent) => {
     event?.stopPropagation();

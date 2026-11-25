@@ -10,6 +10,15 @@ import type { RealtimeHandle } from "@momo/core/lib/realtimeEvents";
 import type { ScheduledMessageFrame } from "@momo/core/features/scheduled/events";
 import type { ScheduledMessage } from "@momo/core/features/scheduled/types";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 const api = vi.hoisted(() => ({
   listAllScheduledMessages: vi.fn(),
@@ -140,13 +149,13 @@ async function mount(node: ReactElement = createElement(Probe), realtime: Realti
   document.body.append(host);
   mountedRoot = createRoot(host);
   await act(async () => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(
         QueryClientProvider,
         { client },
         createElement(SessionProvider, { value: session(realtime) }, node)
       )
-    );
+    ));
   });
   await settle();
 }
@@ -380,9 +389,9 @@ describe("my own writes merge by the same rule", () => {
     document.body.append(host);
     mountedRoot = createRoot(host);
     await act(async () => {
-      mountedRoot?.render(
+      mountedRoot?.render(withKo(
         createElement(QueryClientProvider, { client }, createElement(SessionProvider, { value: session(null) }, createElement(Probe)))
-      );
+      ));
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10);
@@ -471,7 +480,7 @@ describe("the clock steps at the boundaries (UI spec 0.6)", () => {
     document.body.append(host);
     mountedRoot = createRoot(host);
     await act(async () => {
-      mountedRoot?.render(createElement(ClockProbe, { rows, onNow: (now: number) => seen.push(now) }));
+      mountedRoot?.render(withKo(createElement(ClockProbe, { rows, onNow: (now: number) => seen.push(now) })));
     });
     const initial = seen[seen.length - 1];
     expect(initial).toBe(Date.now());
@@ -503,7 +512,7 @@ describe("the clock steps at the boundaries (UI spec 0.6)", () => {
     document.body.append(host);
     mountedRoot = createRoot(host);
     await act(async () => {
-      mountedRoot?.render(createElement(ClockProbe, { rows: [], onNow: (now: number) => seen.push(now) }));
+      mountedRoot?.render(withKo(createElement(ClockProbe, { rows: [], onNow: (now: number) => seen.push(now) })));
     });
     const renders = seen.length;
     await act(async () => {
@@ -551,14 +560,14 @@ describe("the name of a place", () => {
     await settle();
     const places = resolve as unknown as (channelId: string) => ScheduledPlaceInfo;
 
-    expect(places(CH)).toMatchObject({ label: "배포", markedLabel: "#배포", known: true, word: "채널", errorWord: "채널", isAgent: false });
+    expect(places(CH)).toMatchObject({ label: "배포", markedLabel: "#배포", known: true, word: "channel", errorWord: "channel", isAgent: false });
     expect(places(CH.toUpperCase()).label).toBe("배포");
     expect(places(DM)).toMatchObject({
       label: "김인턴과의 대화",
       markedLabel: "김인턴과의 대화",
       known: true,
-      word: "대화",
-      errorWord: "대화",
+      word: "dm",
+      errorWord: "dm",
       isAgent: true,
     });
     expect(places("00000000-0000-7000-8000-0000000009ff")).toMatchObject({

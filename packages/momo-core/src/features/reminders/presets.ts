@@ -6,6 +6,8 @@
 // Monday 09:00" boundaries do not depend on the wall clock.
 // =============================================================================
 
+import type { ReminderPlainKey } from "./model";
+
 export type ReminderPresetId =
   | "30m"
   | "1h"
@@ -15,15 +17,15 @@ export type ReminderPresetId =
 
 export interface ReminderPreset {
   id: ReminderPresetId;
-  label: string;
+  labelKey: ReminderPlainKey;
 }
 
 export const REMINDER_PRESETS: readonly ReminderPreset[] = [
-  { id: "30m", label: "30분 후" },
-  { id: "1h", label: "1시간 후" },
-  { id: "3h", label: "3시간 후" },
-  { id: "tomorrow-9", label: "내일 오전 9시" },
-  { id: "next-monday-9", label: "다음 주 월요일 오전 9시" },
+  { id: "30m", labelKey: "reminders.preset.in30m" },
+  { id: "1h", labelKey: "reminders.preset.in1h" },
+  { id: "3h", labelKey: "reminders.preset.in3h" },
+  { id: "tomorrow-9", labelKey: "reminders.preset.tomorrow9" },
+  { id: "next-monday-9", labelKey: "reminders.preset.nextMonday9" },
 ];
 
 /** Relative offsets stay relative. Calendar presets land on local 09:00. */

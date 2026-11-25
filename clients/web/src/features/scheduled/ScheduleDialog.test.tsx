@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useState } from "react";
+import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScheduleDialog, type ScheduleDialogProps } from "./ScheduleDialog";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // ADR-0208 부록 B 1.4·1.9(#4215): 「보낼 시각 고르기」 대화상자를 호스트 없이 잰다. 입력창(만들기)과 목록 행(바꾸기·
@@ -56,7 +65,7 @@ async function mount(props: ScheduleDialogProps) {
   document.body.append(host);
   mountedRoot = createRoot(host);
   await act(async () => {
-    mountedRoot?.render(createElement(ScheduleDialog, props));
+    mountedRoot?.render(withKo(createElement(ScheduleDialog, props)));
   });
 }
 
@@ -225,7 +234,7 @@ describe("진행·오류·잠금 (UI 명세 0.5·0.6·1.9)", () => {
   });
 
   it("호출부의 오류는 role=alert 줄로 서고 다음 행동 줄도 함께 선다", async () => {
-    await mount(propsOf({ error: { text: "이 서버에서는 예약을 쓸 수 없어요", next: "관리자에게 물어보세요" } }));
+    await mount(propsOf({ error: { text: { key: "scheduled.disabled.unavailableReason" }, next: { key: "scheduled.disabled.unavailableNext" } } }));
     expect(need("schedule-dialog-error").getAttribute("role")).toBe("alert");
     expect([...need("schedule-dialog-error").querySelectorAll("p")].map((line) => line.textContent)).toEqual([
       "이 서버에서는 예약을 쓸 수 없어요",
@@ -234,14 +243,14 @@ describe("진행·오류·잠금 (UI 명세 0.5·0.6·1.9)", () => {
   });
 
   it("오프라인: 칸과 확인이 흐리고 안내 한 줄이 오류 줄 자리에 선다", async () => {
-    await mount(propsOf({ offline: true, error: { text: "다른 오류" } }));
+    await mount(propsOf({ offline: true, error: { text: { key: "scheduled.errors.otherCreate" } } }));
     expect(textOf("schedule-dialog-error")).toBe("연결이 없어서 지금은 할 수 없어요. 연결되면 다시 눌러 주세요.");
     expect((need("schedule-dialog-commit") as HTMLButtonElement).disabled).toBe(true);
     expect((need("schedule-dialog-date") as HTMLInputElement).disabled).toBe(true);
   });
 
   it("마감 30초 안으로 잠기면 저장이 잠기고 「곧 보내서 바꿀 수 없어요」를 말한다(오프라인·오류보다 먼저)", async () => {
-    await mount(propsOf({ mode: "change", lock: "tooLate", offline: true, error: { text: "다른 오류" } }));
+    await mount(propsOf({ mode: "change", lock: "tooLate", offline: true, error: { text: { key: "scheduled.errors.otherCreate" } } }));
     expect(textOf("schedule-dialog-error")).toBe("곧 보내서 바꿀 수 없어요. 지금 보내거나 지울 수 있어요.");
     expect((need("schedule-dialog-commit") as HTMLButtonElement).disabled).toBe(true);
   });
@@ -267,9 +276,9 @@ describe("진행·오류·잠금 (UI 명세 0.5·0.6·1.9)", () => {
   });
 
   it("오류 줄 자리의 우선순위: 잠금 > 오프라인 > 예약을 끈 서버 > 호출부의 오류", async () => {
-    await mount(propsOf({ unavailable: true, error: { text: "다른 오류" } }));
+    await mount(propsOf({ unavailable: true, error: { text: { key: "scheduled.errors.otherCreate" } } }));
     expect(textOf("schedule-dialog-error")).toContain("이 서버에서는 예약을 쓸 수 없어요");
-    expect(textOf("schedule-dialog-error")).not.toContain("다른 오류");
+    expect(textOf("schedule-dialog-error")).not.toContain("예약하지 못했어요");
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     host?.remove();
@@ -320,7 +329,7 @@ describe("초점", () => {
     document.body.append(host);
     mountedRoot = createRoot(host);
     await act(async () => {
-      mountedRoot?.render(createElement(Host));
+      mountedRoot?.render(withKo(createElement(Host)));
     });
     await act(async () => {
       need("schedule-dialog-cancel").click();
@@ -340,7 +349,7 @@ describe("초점", () => {
     act(() => mountedRoot?.unmount());
     mountedRoot = createRoot(host);
     await act(async () => {
-      mountedRoot?.render(createElement(Host, { onClose }));
+      mountedRoot?.render(withKo(createElement(Host, { onClose })));
     });
     await act(async () => {
       need("schedule-dialog-cancel").click();

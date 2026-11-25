@@ -1,4 +1,12 @@
-import { SCHEDULED_COPY, failureLines, type ErrorPlaceWord, type PlaceWord } from "./copy";
+import type { LocaleService } from "../../i18n/context";
+import {
+  SCHEDULED_COPY,
+  failureLines,
+  type ErrorPlaceWord,
+  type PlaceWord,
+  type ScheduledPlainKey,
+  type ScheduledRef,
+} from "./copy";
 import { formatScheduledAt } from "./presets";
 import {
   SCHEDULED_EDIT_LOCK_MS,
@@ -118,11 +126,11 @@ export function scheduledBanner(
   return pending > 0 ? { tone: "pending", count: pending } : null;
 }
 
-/** 배너 문장. `place`는 채널·대화·스레드다. 실패 어조의 문장은 장소를 말하지 않는다(명세 1.6). */
-export function bannerLine(banner: ScheduledBanner, place: PlaceWord): string {
+/** 배너 문장의 키와 값. `place`는 채널·대화·스레드다. 실패 어조의 문장은 장소를 말하지 않는다(명세 1.6). */
+export function bannerRef(banner: ScheduledBanner, place: PlaceWord): ScheduledRef {
   return banner.tone === "failed"
-    ? SCHEDULED_COPY.banner.failed(banner.count)
-    : SCHEDULED_COPY.banner.pending(place, banner.count);
+    ? { key: SCHEDULED_COPY.banner.failed, values: { count: banner.count } }
+    : { key: SCHEDULED_COPY.banner.pending, values: { place, count: banner.count } };
 }
 
 /**
@@ -134,7 +142,7 @@ export interface ScheduledNavEntry {
   /** 잉크 알약의 수. 0이면 알약이 없다. */
   failedCount: number;
   /** 알약의 낭독 이름 「보내지 못한 예약 {n}개」. 알약이 없으면 `null`. */
-  badgeLabel: string | null;
+  badgeLabel: ScheduledRef | null;
 }
 
 export function scheduledNavEntry(rows: readonly ScheduledMessage[]): ScheduledNavEntry {
@@ -142,7 +150,7 @@ export function scheduledNavEntry(rows: readonly ScheduledMessage[]): ScheduledN
   return {
     visible: total > 0,
     failedCount: failed,
-    badgeLabel: failed > 0 ? SCHEDULED_COPY.nav.badgeLabel(failed) : null,
+    badgeLabel: failed > 0 ? { key: SCHEDULED_COPY.nav.badgeLabel, values: { count: failed } } : null,
   };
 }
 
@@ -210,19 +218,23 @@ export function scheduledRefetchAtMs(row: ScheduledMessage): number | null {
 // ---- 행의 문장 -------------------------------------------------------------------------------
 
 /**
- * 보낼 예정 행의 시각 줄: 「내일 오전 9:00에 보내요」 · 마감 30초 안 「곧 보내요」 · 지난 뒤 「보내는 중」.
- * 보내지 못한 행은 시각 줄 대신 사유 줄을 쓰므로(`failureLines`) 빈 문자열이다.
+ * 보낼 예정 행의 시각 줄: 「내일 오전 9:00에 보내요」 · 마감 30초 안 「곧 보내요」 · 지난 뒤 「보내는 중」의 키와 값.
+ * 보내지 못한 행은 시각 줄 대신 사유 줄을 쓰므로(`failureLines`) `null`이다.
+ * 시각 낱말(「내일 오전 9:00」)은 `formatScheduledAt`이 지은 글을 `when` 값으로 넘긴다.
  */
-export function rowWhenLine(row: ScheduledMessage, nowMs: number): string {
+export function rowWhenRef(row: ScheduledMessage, nowMs: number): ScheduledRef | null {
   switch (rowPhase(row, nowMs)) {
     case "waiting":
-      return SCHEDULED_COPY.list.when(formatScheduledAt(row.sendAtMs, nowMs).full);
+      return {
+        key: SCHEDULED_COPY.list.when,
+        values: { when: formatScheduledAt(row.sendAtMs, nowMs).full },
+      };
     case "soon":
-      return SCHEDULED_COPY.list.soon;
+      return { key: SCHEDULED_COPY.list.soon };
     case "sending":
-      return SCHEDULED_COPY.list.sending;
+      return { key: SCHEDULED_COPY.list.sending };
     case "failed":
-      return "";
+      return null;
   }
 }
 
@@ -235,20 +247,21 @@ export function attachmentCount(row: ScheduledMessage): number {
   return row.attachments?.length ?? 0;
 }
 
-/** 행의 첨부 칩 「첨부 {n}개」. 첨부가 없으면 `null`. */
-export function attachmentChipLine(row: ScheduledMessage): string | null {
+/** 행의 첨부 칩 「첨부 {n}개」의 키와 값. 첨부가 없으면 `null`. */
+export function attachmentChipRef(row: ScheduledMessage): ScheduledRef | null {
   const count = attachmentCount(row);
-  return count > 0 ? SCHEDULED_COPY.list.attachments(count) : null;
+  return count > 0 ? { key: SCHEDULED_COPY.list.attachments, values: { count } } : null;
 }
 
 /** 「내용 확인」 대화상자의 첨부 줄 「첨부 2개: 일정.pdf, 변경목록.csv」. 첨부가 없으면 `null`. */
-export function reviewAttachmentsLine(row: ScheduledMessage): string | null {
+export function reviewAttachmentsRef(row: ScheduledMessage): ScheduledRef | null {
   const attachments = row.attachments ?? [];
   if (attachments.length === 0) return null;
-  return SCHEDULED_COPY.review.attachments(
-    attachments.length,
-    attachments.map((attachment) => attachment.name)
-  );
+  return {
+    key: SCHEDULED_COPY.review.attachments,
+    // 파일 이름은 사람이 올린 값이라 그대로 쉼표로 잇는다(문장의 일부가 아니다).
+    values: { count: attachments.length, names: attachments.map((attachment) => attachment.name).join(", ") },
+  };
 }
 
 /**
@@ -256,25 +269,36 @@ export function reviewAttachmentsLine(row: ScheduledMessage): string | null {
  * 대신 「곧 보내요」·「보내는 중」), 보내지 못함 「{채널}, {미리보기}, {사유}」다(명세 1.7).
  */
 export function rowAriaName(
+  formatMessage: LocaleService["formatMessage"],
   row: ScheduledMessage,
   channelLabel: string,
   nowMs: number,
   place: ErrorPlaceWord
 ): string {
   const preview = scheduledPreview(row);
-  const head = preview === "" ? channelLabel : `${channelLabel}, ${preview}`;
-  if (row.status === "failed") return `${head}, ${failureLines(row.failureReason, place).reason}`;
-  const phase = rowPhase(row, nowMs);
-  const tail =
-    phase === "waiting"
-      ? SCHEDULED_COPY.list.when(formatScheduledAt(row.sendAtMs, nowMs).aria)
-      : rowWhenLine(row, nowMs);
-  return `${head}, ${tail}`;
+  const ref: ScheduledRef | null =
+    row.status === "failed"
+      ? failureLines(row.failureReason, place).reason
+      : rowPhase(row, nowMs) === "waiting"
+        ? { key: SCHEDULED_COPY.list.when, values: { when: formatScheduledAt(row.sendAtMs, nowMs).aria } }
+        : rowWhenRef(row, nowMs);
+  const tail = ref === null ? "" : formatMessage(ref.key, ref.values as never);
+  return preview === ""
+    ? formatMessage("scheduled.row.ariaNoPreview", { channelLabel, tail })
+    : formatMessage("scheduled.row.ariaWithPreview", { channelLabel, preview, tail });
 }
 
 /** `⋯`의 이름: 행마다 구별되게 채널과 보낼 시각을 싣는다. */
-export function rowMenuAriaName(row: ScheduledMessage, channelLabel: string, nowMs: number): string {
-  return SCHEDULED_COPY.action.rowMenu(channelLabel, formatScheduledAt(row.sendAtMs, nowMs).aria);
+export function rowMenuAriaName(
+  formatMessage: LocaleService["formatMessage"],
+  row: ScheduledMessage,
+  channelLabel: string,
+  nowMs: number
+): string {
+  return formatMessage(SCHEDULED_COPY.action.rowMenu, {
+    channelLabel,
+    when: formatScheduledAt(row.sendAtMs, nowMs).aria,
+  });
 }
 
 // ---- 행 동작 ----------------------------------------------------------------------------------
@@ -341,8 +365,8 @@ export function rowActions(row: ScheduledMessage, nowMs: number): ScheduledRowAc
   };
 }
 
-/** 동작의 단추 문구. */
-export function actionLabel(id: ScheduledActionId): string {
+/** 동작의 단추 문구의 키. */
+export function actionLabelKey(id: ScheduledActionId): ScheduledPlainKey {
   const copy = SCHEDULED_COPY.action;
   switch (id) {
     case "sendNow":

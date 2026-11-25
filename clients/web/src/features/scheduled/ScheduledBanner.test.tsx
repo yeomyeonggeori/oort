@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +10,15 @@ import type { RealtimeHandle } from "@momo/core/lib/realtimeEvents";
 import type { ScheduledMessageFrame } from "@momo/core/features/scheduled/events";
 import type { ScheduledMessage } from "@momo/core/features/scheduled/types";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // ADR-0208 부록 B 1.6(#4215): 입력창 위의 예약 배너. 세 모양(대기·스레드·실패)과 「보기」, 그리고 이벤트가 도착하는
@@ -116,6 +125,9 @@ async function settle(rounds = 3) {
   }
 }
 
+// 시험은 낱말로 적고(채널·대화·스레드), 배너는 사전의 선택 인자(channel·dm·thread)를 받는다(#6058).
+const PLACE_WORD = { 채널: "channel", 대화: "dm", 스레드: "thread" } as const;
+
 async function mount(props: { place: { channelId: string; rootId?: string }; word?: "채널" | "대화" | "스레드"; className?: string }, options: { router?: boolean; realtime?: RealtimeHandle | null } = {}) {
   host = document.createElement("div");
   document.body.append(host);
@@ -123,13 +135,13 @@ async function mount(props: { place: { channelId: string; rootId?: string }; wor
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   const banner = createElement(ScheduledBanner, {
     place: props.place,
-    word: props.word ?? "채널",
+    word: PLACE_WORD[props.word ?? "채널"],
     testId: "banner",
     ...(props.className === undefined ? {} : { className: props.className }),
   });
   const inside = createElement(SessionProvider, { value: session(options.realtime ?? null) }, banner);
   await act(async () => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(
         QueryClientProvider,
         { client },
@@ -137,7 +149,7 @@ async function mount(props: { place: { channelId: string; rootId?: string }; wor
           ? inside
           : createElement(MemoryRouter, { initialEntries: ["/c/x"] }, inside, createElement(Probe))
       )
-    );
+    ));
   });
   await settle();
 }

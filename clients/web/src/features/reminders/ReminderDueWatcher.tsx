@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useSession } from "@/app/session";
 import { dueArrivalPlan } from "@momo/core/features/reminders/model";
-import type { NotifyFormat } from "@momo/core/features/notifications/model";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   fireReminderBacklogNotification,
@@ -49,15 +48,15 @@ export function ReminderDueWatcher() {
       void fireReminderBacklogNotification(
         plan.backlogCount,
         announcedRef.current,
-        plan.backlogIds
+        plan.backlogIds,
+        formatRef.current
       );
       return;
     }
     for (const id of plan.notifyIds) {
       const reminder = page.reminders.find((row) => row.id === id);
       if (!reminder) continue;
-      const format: NotifyFormat = (key, values) => formatRef.current(key, values as never);
-      void fireReminderNotification(reminder, announcedRef.current, format);
+      void fireReminderNotification(reminder, announcedRef.current, formatRef.current);
     }
   }, [query.data, query.dataUpdatedAt, workspaceId]);
 

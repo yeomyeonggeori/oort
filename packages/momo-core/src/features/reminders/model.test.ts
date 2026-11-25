@@ -7,15 +7,28 @@ import {
   parseReminder,
   parseReminderPage,
   parseReminderResponse,
-  reminderBacklogNotificationBody,
-  reminderDueLabel,
-  reminderFailureMessage,
+  reminderBacklogNotificationBody as reminderBacklogNotificationBodyWith,
+  reminderDueLabel as reminderDueLabelWith,
+  reminderFailureKey,
   reminderIsOverdue,
   reminderNoteForWire,
-  reminderPreviewText,
+  reminderPreviewText as reminderPreviewTextWith,
   REMINDER_NOTE_MAX,
   type MessageReminder,
 } from "./model";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`reminders.json`)에 있다(#6058). 이 시험은 제품과 같은 한국어 생성물로 풀어 예전 한국어 문장을 그대로 단정한다.
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+const reminderDueLabel = (...args: Tail<Parameters<typeof reminderDueLabelWith>>) => reminderDueLabelWith(formatMessage, ...args);
+const reminderPreviewText = (...args: Tail<Parameters<typeof reminderPreviewTextWith>>) => reminderPreviewTextWith(formatMessage, ...args);
+const reminderBacklogNotificationBody = (...args: Tail<Parameters<typeof reminderBacklogNotificationBodyWith>>) =>
+  reminderBacklogNotificationBodyWith(formatMessage, ...args);
+const reminderFailureMessage = (...args: Parameters<typeof reminderFailureKey>) => ko(reminderFailureKey(...args));
 
 const NOW = at(2026, 0, 7, 12, 0);
 

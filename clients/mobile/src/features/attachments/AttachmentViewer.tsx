@@ -269,6 +269,7 @@ function ViewerPage({
   onZoomedChange: (position: number, zoomed: boolean) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
@@ -372,15 +373,17 @@ function ViewerPage({
             // 확대 상태는 접근성 값이다(원래 크기에서는 말하지 않는다). `accessible` 이 있어야 보조기술이 사진에 닿아 값을 읽는다.
             accessible
             accessibilityRole="image"
-            accessibilityLabel={attachmentDisplayName(attachment)}
+            accessibilityLabel={attachmentDisplayName(formatMessage, attachment)}
             accessibilityValue={zoomed ? { text: ZOOMED_A11Y_VALUE } : undefined}
             testID="attachment-viewer-image"
           />
         ) : (
           <Text style={styles.viewerState}>
-            {preview.status === 'loading'
-              ? ATTACH_COPY.previewLoading
-              : ATTACH_COPY.previewFailed}
+            {formatMessage(
+              preview.status === 'loading'
+                ? ATTACH_COPY.previewLoading
+                : ATTACH_COPY.previewFailed,
+            )}
           </Text>
         )}
       </View>
@@ -888,10 +891,13 @@ function ViewerFrame({
   useEffect(() => {
     if (download.status === 'failed') {
       AccessibilityInfo.announceForAccessibility(
-        `${ATTACH_COPY.downloadFailed}. ${ATTACH_COPY.retry}`,
+        formatMessage('attachments.status.failedWithNext', {
+          reason: formatMessage(ATTACH_COPY.downloadFailed),
+          next: formatMessage(ATTACH_COPY.retry),
+        }),
       );
     }
-  }, [download.status]);
+  }, [download.status, formatMessage]);
 
   const busy = download.status === 'downloading' || saving.state.status === 'working';
   const save = useCallback(() => {
@@ -920,9 +926,12 @@ function ViewerFrame({
   } else if (pressedBy === 'share' && download.status !== 'idle') {
     pill =
       download.status === 'downloading'
-        ? { text: ATTACH_COPY.downloading, failed: false }
+        ? { text: formatMessage(ATTACH_COPY.downloading), failed: false }
         : {
-            text: `${ATTACH_COPY.downloadFailed} · ${ATTACH_COPY.retry}`,
+            text: formatMessage('attachments.status.pairDot', {
+              first: formatMessage(ATTACH_COPY.downloadFailed),
+              second: formatMessage(ATTACH_COPY.retry),
+            }),
             failed: true,
             onPress: sendOut,
             testID: 'attachment-viewer-share-retry',

@@ -9,11 +9,21 @@ import {
   scheduledZoneLine,
   sendAtFromInputs,
   sendAtInputs,
-  sendAtProblemSentence,
+  sendAtProblemRef,
   utcOffsetLabel,
   validateSendAt,
 } from "./presets";
 import { SCHEDULED_MAX_LEAD_MS, SCHEDULED_MIN_LEAD_MS } from "./types";
+import type { ScheduledRef } from "./copy";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`scheduled.json`)에 있고 프리셋·검증은 키를 돌려준다(#6058). 단정은 예전 한국어 문장 그대로다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const say = (ref: ScheduledRef) => {
+  const speak = ko as unknown as (key: string, values?: unknown) => string;
+  return ref.values === undefined ? speak(ref.key) : speak(ref.key, ref.values);
+};
 
 // 이 파일은 서머타임이 없는 Asia/Seoul로 고정한다: 문장·경계 시험이 실행하는 기계의 시간대와 무관하다.
 // 서머타임·UTC 오프셋이 다른 시간대는 `presets.tz.test.ts`가 잰다.
@@ -118,7 +128,7 @@ describe("scheduledPresets: 내일 오전 9:00 and 다음 주 월요일 오전 9
   it("offers both from a Thursday, with the time, the supporting date and the aria sentence", () => {
     const presets = scheduledPresets(NOW);
     expect(presets.map((preset) => preset.id)).toEqual(["tomorrow", "next-monday"]);
-    expect(presets.map((preset) => preset.label)).toEqual(["내일", "다음 주 월요일"]);
+    expect(presets.map((preset) => ko(preset.labelKey))).toEqual(["내일", "다음 주 월요일"]);
     expect(presets.map((preset) => preset.atMs)).toEqual([at(2026, 10, 23, 9), at(2026, 10, 26, 9)]);
     expect(presets.map((preset) => preset.time)).toEqual(["오전 9:00", "오전 9:00"]);
     expect(presets.map((preset) => preset.date)).toEqual(["10월 23일 (금)", "10월 26일 (월)"]);
@@ -198,9 +208,9 @@ describe("validateSendAt: 1분 뒤부터, 120일 안에서 (ADR-0208 D2)", () =>
   });
 
   it("answers each problem with the dialog's spec sentence", () => {
-    expect(sendAtProblemSentence("soon")).toBe("1분 뒤부터 예약할 수 있어요");
-    expect(sendAtProblemSentence("far")).toBe("120일 안에서 골라 주세요");
-    expect(sendAtProblemSentence("invalid")).toBe("날짜와 시간을 확인해 주세요");
+    expect(say(sendAtProblemRef("soon"))).toBe("1분 뒤부터 예약할 수 있어요");
+    expect(say(sendAtProblemRef("far"))).toBe("120일 안에서 골라 주세요");
+    expect(say(sendAtProblemRef("invalid"))).toBe("날짜와 시간을 확인해 주세요");
   });
 });
 
@@ -245,13 +255,13 @@ describe("the time zone line", () => {
     const tomorrow = at(2026, 10, 23, 9);
     expect(utcOffsetLabel(tomorrow)).toBe("UTC+9");
     expect(scheduledZoneLabel(tomorrow)).toBe("Asia/Seoul (UTC+9)");
-    expect(scheduledZoneLine(tomorrow)).toBe("Asia/Seoul (UTC+9) 기준이에요");
+    expect(say(scheduledZoneLine(tomorrow))).toBe("Asia/Seoul (UTC+9) 기준이에요");
   });
 
   it("lets a host inject the zone name, and falls back to the offset alone without one", () => {
     const tomorrow = at(2026, 10, 23, 9);
     expect(scheduledZoneLabel(tomorrow, "Test/Zone")).toBe("Test/Zone (UTC+9)");
     expect(scheduledZoneLabel(tomorrow, "")).toBe("UTC+9");
-    expect(scheduledZoneLine(tomorrow, "")).toBe("UTC+9 기준이에요");
+    expect(say(scheduledZoneLine(tomorrow, ""))).toBe("UTC+9 기준이에요");
   });
 });

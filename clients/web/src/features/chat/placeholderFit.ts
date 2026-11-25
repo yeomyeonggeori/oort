@@ -4,6 +4,7 @@ import {
   fitComposerPlaceholder,
 } from "@momo/core/features/chat/composerCopy";
 import type { RecipientKind } from "@momo/core/lib/koreanParticle";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 이 클라의 **자** (#1422).
@@ -103,9 +104,10 @@ export function useFittedComposerPlaceholder(
   channelLabel: string,
   recipient: RecipientKind
 ): string {
+  const formatMessage = useFormatMessage();
   const clauses = useMemo(
-    () => composerPlaceholderClauses(channelLabel, recipient),
-    [channelLabel, recipient]
+    () => composerPlaceholderClauses(formatMessage, channelLabel, recipient),
+    [formatMessage, channelLabel, recipient]
   );
   // 절을 다 실은 문장. 이음쇠를 손으로 적지 않으려고 코어의 규칙에 "다 든다"고
   // 답한다 — 이 파일이 `", "` 를 들면 그것이 두 번째 사본이다.

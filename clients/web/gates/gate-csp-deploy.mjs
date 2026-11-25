@@ -199,8 +199,14 @@ const channelId = "00000000-0000-7000-8000-000000000201";
 function blockedCopy() {
   const source = readFileSync(modelPath, "utf8");
   const match = source.match(/case "blocked":\s*\n\s*return "([^"]+)";/);
-  if (!match) throw new Error(`${modelPath}: uploadIssueCopy("blocked") 문구를 못 읽었다`);
-  return match[1];
+  if (!match) throw new Error(`${modelPath}: uploadIssueKey("blocked") 문구를 못 읽었다`);
+  // 문장은 사전에 있다(#6058): 코어는 키를 돌려주고, 게이트의 브라우저는 `ko-KR`로 열려 그 한국어를 그린다.
+  const catalog = JSON.parse(
+    readFileSync(resolve(repoRoot, "packages/momo-core/src/i18n/catalogs/ko-KR/attachments.json"), "utf8")
+  );
+  const text = catalog[match[1]];
+  if (typeof text !== "string") throw new Error(`사전에 ${match[1]}가 없다`);
+  return text;
 }
 
 /**
@@ -701,6 +707,7 @@ async function runTarget(target, policy) {
     const browser = await chromium.launch();
     try {
       const context = await browser.newContext({
+        locale: "ko-KR",
         viewport: { width: 1280, height: 900 },
         reducedMotion: "reduce",
       });

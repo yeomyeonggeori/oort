@@ -17,10 +17,27 @@ import {
 } from "@momo/core/features/chat/composerKeys";
 import type { CatalogEmoji } from "@/features/emoji/catalog";
 import { loadCatalog } from "@/features/emoji/catalog";
-import { EMOJI_CATALOG_COPY } from "@/features/emoji/copy";
+import { EMOJI_CATALOG_COPY as EMOJI_CATALOG_KEYS } from "@/features/emoji/copy";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 문장은 사전에 있고 `EMOJI_CATALOG_COPY`는 키 표다(#6058). 한국어 생성물로 풀어 예전 문장 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const EMOJI_CATALOG_COPY = Object.fromEntries(
+  Object.entries(EMOJI_CATALOG_KEYS).map(([name, key]) => [name, koCopy(key as never)])
+) as Record<keyof typeof EMOJI_CATALOG_KEYS, string>;
 import { resetEscapeLayers, useEscapeLayer } from "@/design/ui/escapeLayer";
 import { ComposerAutocompleteList } from "./ComposerAutocompleteList";
 import { useComposerAutocomplete } from "./useComposerAutocomplete";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // `:` 만 비동기 소스다 (design-review #1930 H-2), 그리고 그 상태가 내미는 손이
@@ -189,7 +206,7 @@ function mount(node: ReactElement): HTMLElement {
   document.body.append(host);
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(node);
+    mountedRoot?.render(withKo(node));
   });
   return host;
 }

@@ -125,8 +125,14 @@ export type NotifyDecision =
 export type NotifyCopyKey =
   | "notifications.banner.code"
   | "notifications.banner.secret"
-  | "notifications.banner.approvalTitle";
-export type NotifyFormat = (key: NotifyCopyKey, values?: { actor: string }) => string;
+  | "notifications.banner.approvalTitle"
+  | "attachments.preview.photos"
+  | "attachments.preview.files"
+  | "attachments.preview.photosAndFiles";
+export type NotifyFormat = (
+  key: NotifyCopyKey,
+  values?: { actor: string } | { count: number } | { photos: string; files: string }
+) => string;
 
 /** Body budget. Longer than a macOS banner renders anyway. */
 export const BODY_MAX = 80;
@@ -440,7 +446,9 @@ export function notifyDecision(
     notificationBody(notificationSource(message, kind, context.inviteLinkSentence), context.formatMessage) ??
     // 글 없이 사진·파일만 보낸 DM·멘션(#4294): 제목만 있는 배너가 되지 않게 개수로 말한다.
     // 본문이 있으면 본문이 이긴다(위 식이 이미 답했다). 승인 카드에는 첨부가 없다.
-    (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
+    (kind === "approval"
+      ? undefined
+      : (attachmentPreviewLine(context.formatMessage, message.attachments) ?? undefined));
   if (body !== undefined) notification.body = body;
   return { show: true, notification };
 }

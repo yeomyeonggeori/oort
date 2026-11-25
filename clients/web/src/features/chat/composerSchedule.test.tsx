@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
@@ -11,6 +11,15 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { ScheduledMessage } from "@momo/core/features/scheduled/types";
 import type { QuoteDraft } from "@momo/core/features/timeline/quote";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // ADR-0208 부록 B(#4215): 채널 입력창의 「예약해서 보내기」 한 벌.
@@ -204,7 +213,7 @@ async function mount(options: MountOptions = {}): Promise<HTMLElement> {
   mountedRoot = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   await act(async () => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(
         QueryClientProvider,
         { client },
@@ -223,7 +232,7 @@ async function mount(options: MountOptions = {}): Promise<HTMLElement> {
           )
         )
       )
-    );
+    ));
   });
   await settle();
   return host;

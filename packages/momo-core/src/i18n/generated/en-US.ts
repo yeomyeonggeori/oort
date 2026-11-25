@@ -34,6 +34,703 @@ export const catalog: MessageCatalog = {
       "value": "Search shortcuts"
     }
   ],
+  "attachments.action.attach": [
+    {
+      "type": 0,
+      "value": "Attach files"
+    }
+  ],
+  "attachments.action.clearAll": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "attachments.action.download": [
+    {
+      "type": 0,
+      "value": "Download attachment"
+    }
+  ],
+  "attachments.action.downloadNamed": [
+    {
+      "type": 0,
+      "value": "Download "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.action.expandImage": [
+    {
+      "type": 0,
+      "value": "View larger"
+    }
+  ],
+  "attachments.action.expandNamed": [
+    {
+      "type": 0,
+      "value": "View "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " larger"
+    }
+  ],
+  "attachments.action.expandNamedAt": [
+    {
+      "type": 0,
+      "value": "View "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " larger"
+    }
+  ],
+  "attachments.action.remove": [
+    {
+      "type": 0,
+      "value": "Remove attachment"
+    }
+  ],
+  "attachments.action.removeNamed": [
+    {
+      "type": 0,
+      "value": "Remove attachment "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.action.retryNamed": [
+    {
+      "type": 0,
+      "value": "Retry "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.announce.firstGroup": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.nextGroup": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.pair": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.announce.single": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "attachments.card.aria": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "meta"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "attachments.card.stateIdle": [
+    {
+      "type": 0,
+      "value": "Download attachment, share"
+    }
+  ],
+  "attachments.issue.blocked": [
+    {
+      "type": 0,
+      "value": "This deployment's security policy blocked the storage address"
+    }
+  ],
+  "attachments.issue.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "Camera access is turned off"
+    }
+  ],
+  "attachments.issue.cameraUnavailable": [
+    {
+      "type": 0,
+      "value": "Couldn't open the camera"
+    }
+  ],
+  "attachments.issue.forbidden": [
+    {
+      "type": 0,
+      "value": "You can't upload files to this channel"
+    }
+  ],
+  "attachments.issue.mismatch": [
+    {
+      "type": 0,
+      "value": "The uploaded file doesn't match the one you picked"
+    }
+  ],
+  "attachments.issue.noArchive": [
+    {
+      "type": 0,
+      "value": "File storage isn't connected"
+    }
+  ],
+  "attachments.issue.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Photo access is turned off"
+    }
+  ],
+  "attachments.issue.selectionCancelled": [
+    {
+      "type": 0,
+      "value": "Selection cancelled"
+    }
+  ],
+  "attachments.issue.tooLarge": [
+    {
+      "type": 0,
+      "value": "Over the 100 MB limit"
+    }
+  ],
+  "attachments.issue.unavailable": [
+    {
+      "type": 0,
+      "value": "Upload failed"
+    }
+  ],
+  "attachments.kind.archive": [
+    {
+      "type": 0,
+      "value": "Archive"
+    }
+  ],
+  "attachments.kind.audio": [
+    {
+      "type": 0,
+      "value": "Audio"
+    }
+  ],
+  "attachments.kind.file": [
+    {
+      "type": 0,
+      "value": "File"
+    }
+  ],
+  "attachments.kind.font": [
+    {
+      "type": 0,
+      "value": "Font"
+    }
+  ],
+  "attachments.kind.image": [
+    {
+      "type": 0,
+      "value": "Image"
+    }
+  ],
+  "attachments.kind.pdf": [
+    {
+      "type": 0,
+      "value": "PDF"
+    }
+  ],
+  "attachments.kind.pdfDocument": [
+    {
+      "type": 0,
+      "value": "PDF document"
+    }
+  ],
+  "attachments.kind.text": [
+    {
+      "type": 0,
+      "value": "Text"
+    }
+  ],
+  "attachments.kind.video": [
+    {
+      "type": 0,
+      "value": "Video"
+    }
+  ],
+  "attachments.meta.kindDurationSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.meta.kindSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.next.blocked": [
+    {
+      "type": 0,
+      "value": "Check the server settings"
+    }
+  ],
+  "attachments.next.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "Allow camera access in device settings, then try again"
+    }
+  ],
+  "attachments.next.forbidden": [
+    {
+      "type": 0,
+      "value": "Ask a channel admin"
+    }
+  ],
+  "attachments.next.noArchive": [
+    {
+      "type": 0,
+      "value": "Tell a server admin"
+    }
+  ],
+  "attachments.next.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Allow photo access in device settings, then try again"
+    }
+  ],
+  "attachments.next.tooLarge": [
+    {
+      "type": 0,
+      "value": "Pick a smaller file"
+    }
+  ],
+  "attachments.pdf.notPdf": [
+    {
+      "type": 0,
+      "value": "This isn't a PDF, so it can't be opened. Download the file to check it."
+    }
+  ],
+  "attachments.pdf.open": [
+    {
+      "type": 0,
+      "value": "Open PDF in a new window"
+    }
+  ],
+  "attachments.pdf.openDesktop": [
+    {
+      "type": 0,
+      "value": "Open PDF in the default app"
+    }
+  ],
+  "attachments.pdf.openFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't open the PDF. Try again or download the file."
+    }
+  ],
+  "attachments.pdf.opening": [
+    {
+      "type": 0,
+      "value": "Opening PDF"
+    }
+  ],
+  "attachments.pdf.popupBlocked": [
+    {
+      "type": 0,
+      "value": "The new window was blocked. Allow pop-ups in your browser or download the file."
+    }
+  ],
+  "attachments.preview.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the preview"
+    }
+  ],
+  "attachments.preview.files": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "attachments.preview.loading": [
+    {
+      "type": 0,
+      "value": "Loading preview"
+    }
+  ],
+  "attachments.preview.photos": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " photo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " photos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "attachments.preview.photosAndFiles": [
+    {
+      "type": 1,
+      "value": "photos"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "files"
+    }
+  ],
+  "attachments.sendBlock.failed": [
+    {
+      "type": 0,
+      "value": "Remove the failed attachments, then send."
+    }
+  ],
+  "attachments.sendBlock.retryable": [
+    {
+      "type": 0,
+      "value": "Retry or remove the failed attachments, then send."
+    }
+  ],
+  "attachments.sendBlock.uploading": [
+    {
+      "type": 0,
+      "value": "You can send once the upload finishes."
+    }
+  ],
+  "attachments.status.downloadFailed": [
+    {
+      "type": 0,
+      "value": "Download failed"
+    }
+  ],
+  "attachments.status.downloading": [
+    {
+      "type": 0,
+      "value": "Downloading"
+    }
+  ],
+  "attachments.status.downloadingPercent": [
+    {
+      "type": 0,
+      "value": "Downloading "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "attachments.status.failedWithNext": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    }
+  ],
+  "attachments.status.pairDot": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.status.queued": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "attachments.status.sizeAndWord": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.status.uploaded": [
+    {
+      "type": 0,
+      "value": "Uploaded"
+    }
+  ],
+  "attachments.status.uploading": [
+    {
+      "type": 0,
+      "value": "Uploading"
+    }
+  ],
+  "attachments.status.uploadingNamed": [
+    {
+      "type": 0,
+      "value": "Uploading "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.tray.countLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "attachments.tray.folderRejected": [
+    {
+      "type": 0,
+      "value": "Folders can't be attached. Pick the files inside instead."
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
@@ -93,6 +790,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "attachments.tray.title": [
+    {
+      "type": 0,
+      "value": "Attachments"
     }
   ],
   "attachments.video.cardLabel": [
@@ -2627,6 +3330,76 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " characters or fewer."
+    }
+  ],
+  "chat.composer.fieldLabelPerson": [
+    {
+      "type": 0,
+      "value": "Message to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.composer.fieldLabelPlace": [
+    {
+      "type": 0,
+      "value": "Message to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.composer.mentionAffordance": [
+    {
+      "type": 0,
+      "value": "type @ to mention"
+    }
+  ],
+  "chat.composer.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send right now. Your draft stays here, and you can send it once you're connected."
+    }
+  ],
+  "chat.composer.placeholderPerson": [
+    {
+      "type": 0,
+      "value": "Message "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.composer.placeholderPlace": [
+    {
+      "type": 0,
+      "value": "Message "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.hint.composerKeys": [
+    {
+      "type": 0,
+      "value": "Enter to send · Shift+Enter for a new line"
+    }
+  ],
+  "chat.hint.editorKeys": [
+    {
+      "type": 0,
+      "value": "Enter to save · Shift+Enter for a new line · Esc to cancel"
+    }
+  ],
+  "chat.thread.placeholder": [
+    {
+      "type": 0,
+      "value": "Write a reply"
     }
   ],
   "cliLogin.consent.approve": [
@@ -5234,6 +6007,120 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Suspended"
+    }
+  ],
+  "emoji.catalog.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Search by another name or :code:."
+    }
+  ],
+  "emoji.catalog.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "No emoji found"
+    }
+  ],
+  "emoji.catalog.error": [
+    {
+      "type": 0,
+      "value": "Couldn't load the emoji list."
+    }
+  ],
+  "emoji.catalog.offline": [
+    {
+      "type": 0,
+      "value": "You're offline. Open this again once you're connected."
+    }
+  ],
+  "emoji.category.activity": [
+    {
+      "type": 0,
+      "value": "Activities"
+    }
+  ],
+  "emoji.category.flags": [
+    {
+      "type": 0,
+      "value": "Flags"
+    }
+  ],
+  "emoji.category.foods": [
+    {
+      "type": 0,
+      "value": "Food"
+    }
+  ],
+  "emoji.category.frequent": [
+    {
+      "type": 0,
+      "value": "Frequently used"
+    }
+  ],
+  "emoji.category.nature": [
+    {
+      "type": 0,
+      "value": "Nature"
+    }
+  ],
+  "emoji.category.objects": [
+    {
+      "type": 0,
+      "value": "Objects"
+    }
+  ],
+  "emoji.category.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "emoji.category.places": [
+    {
+      "type": 0,
+      "value": "Places"
+    }
+  ],
+  "emoji.category.symbols": [
+    {
+      "type": 0,
+      "value": "Symbols"
+    }
+  ],
+  "emoji.tone.dark": [
+    {
+      "type": 0,
+      "value": "Dark skin tone"
+    }
+  ],
+  "emoji.tone.default": [
+    {
+      "type": 0,
+      "value": "Default skin tone"
+    }
+  ],
+  "emoji.tone.light": [
+    {
+      "type": 0,
+      "value": "Light skin tone"
+    }
+  ],
+  "emoji.tone.medium": [
+    {
+      "type": 0,
+      "value": "Medium skin tone"
+    }
+  ],
+  "emoji.tone.mediumDark": [
+    {
+      "type": 0,
+      "value": "Medium-dark skin tone"
+    }
+  ],
+  "emoji.tone.mediumLight": [
+    {
+      "type": 0,
+      "value": "Medium-light skin tone"
     }
   ],
   "expressions.add.adminsOnly": [
@@ -12340,6 +13227,326 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
+  "reminders.action.complete": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "reminders.action.custom": [
+    {
+      "type": 0,
+      "value": "Pick a date and time"
+    }
+  ],
+  "reminders.action.delete": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "reminders.action.snooze": [
+    {
+      "type": 0,
+      "value": "Snooze"
+    }
+  ],
+  "reminders.action.snoozeCommit": [
+    {
+      "type": 0,
+      "value": "Snooze reminder"
+    }
+  ],
+  "reminders.channel.unknown": [
+    {
+      "type": 0,
+      "value": "Unknown channel"
+    }
+  ],
+  "reminders.confirm.detail": [
+    {
+      "type": 0,
+      "value": "A completed reminder leaves the list and can't be restored."
+    }
+  ],
+  "reminders.confirm.title": [
+    {
+      "type": 0,
+      "value": "Mark this reminder as done?"
+    }
+  ],
+  "reminders.due.days": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.due.hours": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hour"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hours"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.due.minutes": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.due.overdue": [
+    {
+      "type": 0,
+      "value": "Overdue"
+    }
+  ],
+  "reminders.due.soon": [
+    {
+      "type": 0,
+      "value": "Soon"
+    }
+  ],
+  "reminders.empty.detail": [
+    {
+      "type": 0,
+      "value": "Choose Remind me later in a message's menu and it shows up here."
+    }
+  ],
+  "reminders.empty.headline": [
+    {
+      "type": 0,
+      "value": "No messages saved for later yet."
+    }
+  ],
+  "reminders.error.completeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't complete the reminder. Try again."
+    }
+  ],
+  "reminders.error.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't delete the reminder. Try again."
+    }
+  ],
+  "reminders.error.forbiddenChange": [
+    {
+      "type": 0,
+      "value": "This account can't change that reminder."
+    }
+  ],
+  "reminders.error.forbiddenCreate": [
+    {
+      "type": 0,
+      "value": "This account can't create reminders."
+    }
+  ],
+  "reminders.error.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load your saved messages."
+    }
+  ],
+  "reminders.error.notFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find that reminder. Reload the list."
+    }
+  ],
+  "reminders.error.pastTime": [
+    {
+      "type": 0,
+      "value": "You can't pick a time in the past. Pick another time."
+    }
+  ],
+  "reminders.error.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the reminder. Try again."
+    }
+  ],
+  "reminders.error.snoozeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't snooze the reminder. Try again."
+    }
+  ],
+  "reminders.item.fallbackPreview": [
+    {
+      "type": 0,
+      "value": "Message"
+    }
+  ],
+  "reminders.menu.remind": [
+    {
+      "type": 0,
+      "value": "Remind me later"
+    }
+  ],
+  "reminders.notify.backlog": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " overdue reminder"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " overdue reminders"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.notify.title": [
+    {
+      "type": 0,
+      "value": "Remind me later"
+    }
+  ],
+  "reminders.preset.in1h": [
+    {
+      "type": 0,
+      "value": "In 1 hour"
+    }
+  ],
+  "reminders.preset.in30m": [
+    {
+      "type": 0,
+      "value": "In 30 minutes"
+    }
+  ],
+  "reminders.preset.in3h": [
+    {
+      "type": 0,
+      "value": "In 3 hours"
+    }
+  ],
+  "reminders.preset.nextMonday9": [
+    {
+      "type": 0,
+      "value": "Next Monday at 9 AM"
+    }
+  ],
+  "reminders.preset.tomorrow9": [
+    {
+      "type": 0,
+      "value": "Tomorrow at 9 AM"
+    }
+  ],
+  "reminders.tab.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -12434,6 +13641,1148 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open the thread this reply is in"
+    }
+  ],
+  "scheduled.action.change": [
+    {
+      "type": 0,
+      "value": "Change time"
+    }
+  ],
+  "scheduled.action.copy": [
+    {
+      "type": 0,
+      "value": "Copy text"
+    }
+  ],
+  "scheduled.action.delete": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "scheduled.action.edit": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "scheduled.action.rearm": [
+    {
+      "type": 0,
+      "value": "Schedule again"
+    }
+  ],
+  "scheduled.action.review": [
+    {
+      "type": 0,
+      "value": "Review"
+    }
+  ],
+  "scheduled.action.rowMenu": [
+    {
+      "type": 0,
+      "value": "Scheduled message actions, "
+    },
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.action.sendNow": [
+    {
+      "type": 0,
+      "value": "Send now"
+    }
+  ],
+  "scheduled.banner.action": [
+    {
+      "type": 0,
+      "value": "View"
+    }
+  ],
+  "scheduled.banner.failed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " couldn't be sent"
+    }
+  ],
+  "scheduled.banner.pending": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "dm": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "thread"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.block.titleTwoLines": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "scheduled.delete.body": [
+    {
+      "type": 0,
+      "value": "It won't be sent. This can't be undone."
+    }
+  ],
+  "scheduled.delete.confirm": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "scheduled.delete.pending": [
+    {
+      "type": 0,
+      "value": "Deleting"
+    }
+  ],
+  "scheduled.delete.title": [
+    {
+      "type": 0,
+      "value": "Delete this scheduled message?"
+    }
+  ],
+  "scheduled.dialog.commit": [
+    {
+      "type": 0,
+      "value": "Schedule"
+    }
+  ],
+  "scheduled.dialog.commitChange": [
+    {
+      "type": 0,
+      "value": "Save change"
+    }
+  ],
+  "scheduled.dialog.date": [
+    {
+      "type": 0,
+      "value": "Date"
+    }
+  ],
+  "scheduled.dialog.description": [
+    {
+      "type": 0,
+      "value": "This message will be sent at the time you pick, even if your device is off."
+    }
+  ],
+  "scheduled.dialog.errFar": [
+    {
+      "type": 0,
+      "value": "Pick a time within 120 days"
+    }
+  ],
+  "scheduled.dialog.errInvalid": [
+    {
+      "type": 0,
+      "value": "Check the date and time"
+    }
+  ],
+  "scheduled.dialog.errSoon": [
+    {
+      "type": 0,
+      "value": "Pick a time at least 1 minute from now"
+    }
+  ],
+  "scheduled.dialog.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so this isn't available right now. Try again once you're connected."
+    }
+  ],
+  "scheduled.dialog.preview": [
+    {
+      "type": 0,
+      "value": "Sends "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.dialog.saving": [
+    {
+      "type": 0,
+      "value": "Scheduling"
+    }
+  ],
+  "scheduled.dialog.time": [
+    {
+      "type": 0,
+      "value": "Time"
+    }
+  ],
+  "scheduled.dialog.title": [
+    {
+      "type": 0,
+      "value": "Pick a send time"
+    }
+  ],
+  "scheduled.dialog.titleChange": [
+    {
+      "type": 0,
+      "value": "Change send time"
+    }
+  ],
+  "scheduled.dialog.titleRearm": [
+    {
+      "type": 0,
+      "value": "Schedule again"
+    }
+  ],
+  "scheduled.disabled.attachFailedNextRemove": [
+    {
+      "type": 0,
+      "value": "Remove it to schedule"
+    }
+  ],
+  "scheduled.disabled.attachFailedNextRetry": [
+    {
+      "type": 0,
+      "value": "Upload it again or remove it to schedule"
+    }
+  ],
+  "scheduled.disabled.attachFailedReason": [
+    {
+      "type": 0,
+      "value": "A file didn't upload"
+    }
+  ],
+  "scheduled.disabled.attachUploadingNext": [
+    {
+      "type": 0,
+      "value": "You can schedule once it finishes"
+    }
+  ],
+  "scheduled.disabled.attachUploadingReason": [
+    {
+      "type": 0,
+      "value": "A file is still uploading"
+    }
+  ],
+  "scheduled.disabled.commandNext": [
+    {
+      "type": 0,
+      "value": "Remove the command to schedule it"
+    }
+  ],
+  "scheduled.disabled.commandReason": [
+    {
+      "type": 0,
+      "value": "Commands can't be scheduled"
+    }
+  ],
+  "scheduled.disabled.emptyReason": [
+    {
+      "type": 0,
+      "value": "Write something to schedule it"
+    }
+  ],
+  "scheduled.disabled.limit": [
+    {
+      "type": 0,
+      "value": "You can schedule up to 50 messages. Delete a pending one or send it now, then try again."
+    }
+  ],
+  "scheduled.disabled.personalCallNext": [
+    {
+      "type": 0,
+      "value": "Remove the call to schedule it"
+    }
+  ],
+  "scheduled.disabled.personalCallReason": [
+    {
+      "type": 0,
+      "value": "Personal agent calls can't be scheduled"
+    }
+  ],
+  "scheduled.disabled.quoteNext": [
+    {
+      "type": 0,
+      "value": "Remove the quote to schedule it"
+    }
+  ],
+  "scheduled.disabled.quoteReason": [
+    {
+      "type": 0,
+      "value": "Quoted replies can't be scheduled"
+    }
+  ],
+  "scheduled.disabled.unavailableNext": [
+    {
+      "type": 0,
+      "value": "Ask an admin"
+    }
+  ],
+  "scheduled.disabled.unavailableReason": [
+    {
+      "type": 0,
+      "value": "Scheduling isn't available on this server"
+    }
+  ],
+  "scheduled.dm.conversationLabel": [
+    {
+      "type": 0,
+      "value": "Conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "scheduled.edit.attachNote": [
+    {
+      "type": 0,
+      "value": "Attachments can't be changed. To change them, delete this and schedule it again."
+    }
+  ],
+  "scheduled.edit.commit": [
+    {
+      "type": 0,
+      "value": "Save changes"
+    }
+  ],
+  "scheduled.edit.title": [
+    {
+      "type": 0,
+      "value": "Edit scheduled message"
+    }
+  ],
+  "scheduled.empty.action": [
+    {
+      "type": 0,
+      "value": "Back to the conversation"
+    }
+  ],
+  "scheduled.empty.bodyPhone": [
+    {
+      "type": 0,
+      "value": "Long-press Send to schedule a message"
+    }
+  ],
+  "scheduled.empty.bodyWeb": [
+    {
+      "type": 0,
+      "value": "Write a message, then pick a time from the arrow next to Send"
+    }
+  ],
+  "scheduled.empty.title": [
+    {
+      "type": 0,
+      "value": "No scheduled messages"
+    }
+  ],
+  "scheduled.error.tooLate": [
+    {
+      "type": 0,
+      "value": "Sending soon, so it can't be changed. You can send it now or delete it."
+    }
+  ],
+  "scheduled.errors.alreadySent": [
+    {
+      "type": 0,
+      "value": "Already sent"
+    }
+  ],
+  "scheduled.errors.attachmentReserved": [
+    {
+      "type": 0,
+      "value": "This file is used by another scheduled message. Pick a different file or delete that one."
+    }
+  ],
+  "scheduled.errors.attachmentUnusable": [
+    {
+      "type": 0,
+      "value": "An attached file can't be used. Upload it again."
+    }
+  ],
+  "scheduled.errors.busyAct": [
+    {
+      "type": 0,
+      "value": "It's being sent right now. Reload the list in a moment."
+    }
+  ],
+  "scheduled.errors.busyEdit": [
+    {
+      "type": 0,
+      "value": "It's being sent right now, so it can't be changed. Try again in a moment."
+    }
+  ],
+  "scheduled.errors.createBadRequest": [
+    {
+      "type": 0,
+      "value": "Check the attachments and the message you're replying to. You can attach up to 20 files, and each file only once."
+    }
+  ],
+  "scheduled.errors.createForbidden": [
+    {
+      "type": 0,
+      "value": "You can't schedule in this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": ". Check that you're a member and that the attachments are your own files."
+    }
+  ],
+  "scheduled.errors.createNotFound": [
+    {
+      "type": 0,
+      "value": "The message you were replying to or an attachment can't be found. Check the content and try again."
+    }
+  ],
+  "scheduled.errors.emptyMessage": [
+    {
+      "type": 0,
+      "value": "Add some text or an attachment to send"
+    }
+  ],
+  "scheduled.errors.otherCreate": [
+    {
+      "type": 0,
+      "value": "Couldn't schedule it. Try again."
+    }
+  ],
+  "scheduled.errors.otherWrite": [
+    {
+      "type": 0,
+      "value": "Couldn't process that. Reload the list and try again."
+    }
+  ],
+  "scheduled.errors.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "scheduled.errors.rowNotFound": [
+    {
+      "type": 0,
+      "value": "This scheduled message can't be found. It may have been deleted."
+    }
+  ],
+  "scheduled.errors.unknownCreate": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm it was scheduled. Check your connection and try again."
+    }
+  ],
+  "scheduled.errors.unknownDelete": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm it was deleted. Check your connection and reload the list."
+    }
+  ],
+  "scheduled.errors.unknownEdit": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm the change. Check your connection and reload the list."
+    }
+  ],
+  "scheduled.errors.unknownSendNow": [
+    {
+      "type": 0,
+      "value": "Couldn't confirm it was sent. Check your connection and reload the list."
+    }
+  ],
+  "scheduled.failure.attachmentUnavailableNext": [
+    {
+      "type": 0,
+      "value": "Upload the file again and schedule it as new"
+    }
+  ],
+  "scheduled.failure.attachmentUnavailableReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because an attached file can't be used"
+    }
+  ],
+  "scheduled.failure.authorInactiveNext": [
+    {
+      "type": 0,
+      "value": "Schedule it again once the suspension is lifted"
+    }
+  ],
+  "scheduled.failure.authorInactiveReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because the account is suspended"
+    }
+  ],
+  "scheduled.failure.missedNext": [
+    {
+      "type": 0,
+      "value": "You can send it now or schedule it again"
+    }
+  ],
+  "scheduled.failure.missedReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because the scheduled time passed long ago"
+    }
+  ],
+  "scheduled.failure.notAllowedNext": [
+    {
+      "type": 0,
+      "value": "Ask an admin"
+    }
+  ],
+  "scheduled.failure.notAllowedReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because of this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "'s rules"
+    }
+  ],
+  "scheduled.failure.notMemberNext": [
+    {
+      "type": 0,
+      "value": "You can send it after you rejoin the "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.failure.notMemberReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because you left this "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.failure.rootUnavailableNext": [
+    {
+      "type": 0,
+      "value": "Copy the text and send it as a new message in the "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "channel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "conversation"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "scheduled.failure.rootUnavailableReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because the message you were replying to was deleted"
+    }
+  ],
+  "scheduled.failure.sendErrorNext": [
+    {
+      "type": 0,
+      "value": "Try Send now again in a moment"
+    }
+  ],
+  "scheduled.failure.sendErrorReason": [
+    {
+      "type": 0,
+      "value": "It wasn't sent because of a server problem"
+    }
+  ],
+  "scheduled.failure.sessionsEndedNext": [
+    {
+      "type": 0,
+      "value": "Review it, then send it or schedule it again"
+    }
+  ],
+  "scheduled.failure.sessionsEndedReason": [
+    {
+      "type": 0,
+      "value": "Scheduling paused because your session ended"
+    }
+  ],
+  "scheduled.list.attachments": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "scheduled.list.copyFailedNext": [
+    {
+      "type": 0,
+      "value": "Open the text in Edit to copy it"
+    }
+  ],
+  "scheduled.list.copyFailedReason": [
+    {
+      "type": 0,
+      "value": "Couldn't copy"
+    }
+  ],
+  "scheduled.list.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "scheduled.list.filter": [
+    {
+      "type": 0,
+      "value": "Showing scheduled messages for "
+    },
+    {
+      "type": 1,
+      "value": "placeLabel"
+    },
+    {
+      "type": 0,
+      "value": " only"
+    }
+  ],
+  "scheduled.list.filterAction": [
+    {
+      "type": 0,
+      "value": "Show all"
+    }
+  ],
+  "scheduled.list.sectionFailed": [
+    {
+      "type": 0,
+      "value": "Not sent"
+    }
+  ],
+  "scheduled.list.sectionPending": [
+    {
+      "type": 0,
+      "value": "Upcoming"
+    }
+  ],
+  "scheduled.list.soon": [
+    {
+      "type": 0,
+      "value": "Sending soon"
+    }
+  ],
+  "scheduled.list.title": [
+    {
+      "type": 0,
+      "value": "Scheduled"
+    }
+  ],
+  "scheduled.list.when": [
+    {
+      "type": 0,
+      "value": "Sends "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.load.error": [
+    {
+      "type": 0,
+      "value": "Couldn't load scheduled messages"
+    }
+  ],
+  "scheduled.lock.reason": [
+    {
+      "type": 0,
+      "value": "Sending soon, so it can't be changed"
+    }
+  ],
+  "scheduled.menu.custom": [
+    {
+      "type": 0,
+      "value": "Pick a time…"
+    }
+  ],
+  "scheduled.menu.customDetail": [
+    {
+      "type": 0,
+      "value": "Choose a date and time"
+    }
+  ],
+  "scheduled.menu.routingNote": [
+    {
+      "type": 0,
+      "value": "The model you pick isn't saved with a scheduled message"
+    }
+  ],
+  "scheduled.menu.zone": [
+    {
+      "type": 0,
+      "value": "Times are in "
+    },
+    {
+      "type": 1,
+      "value": "zone"
+    }
+  ],
+  "scheduled.nav.badgeLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " not sent"
+    }
+  ],
+  "scheduled.nav.label": [
+    {
+      "type": 0,
+      "value": "Scheduled"
+    }
+  ],
+  "scheduled.offline.list": [
+    {
+      "type": 0,
+      "value": "You're offline. You can change scheduled messages once you're connected."
+    }
+  ],
+  "scheduled.preset.nextMonday": [
+    {
+      "type": 0,
+      "value": "Next Monday"
+    }
+  ],
+  "scheduled.preset.tomorrow": [
+    {
+      "type": 0,
+      "value": "Tomorrow"
+    }
+  ],
+  "scheduled.review.attachments": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "scheduled.review.body": [
+    {
+      "type": 0,
+      "value": "This scheduled message paused because your session ended. Check that it's what you wrote, then send it."
+    }
+  ],
+  "scheduled.review.bodyLabel": [
+    {
+      "type": 0,
+      "value": "Scheduled message text"
+    }
+  ],
+  "scheduled.review.title": [
+    {
+      "type": 0,
+      "value": "Review the message"
+    }
+  ],
+  "scheduled.review.when": [
+    {
+      "type": 0,
+      "value": "It was set to send "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.row.ariaNoPreview": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "tail"
+    }
+  ],
+  "scheduled.row.ariaWithPreview": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "tail"
+    }
+  ],
+  "scheduled.secretKey.lead": [
+    {
+      "type": 0,
+      "value": "Don't paste keys into chat. This message wasn't scheduled."
+    }
+  ],
+  "scheduled.status.scheduled": [
+    {
+      "type": 0,
+      "value": "Scheduled to send "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    }
+  ],
+  "scheduled.status.sentNow": [
+    {
+      "type": 0,
+      "value": "Message sent"
+    }
+  ],
+  "scheduled.trigger.hint": [
+    {
+      "type": 0,
+      "value": "Long-press to schedule"
+    }
+  ],
+  "scheduled.trigger.label": [
+    {
+      "type": 0,
+      "value": "Schedule send"
     }
   ],
   "search.entry.thisChannel": [

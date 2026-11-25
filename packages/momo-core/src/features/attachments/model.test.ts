@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   admitDrafts,
-  attachmentDisplayName,
+  attachmentDisplayName as attachmentDisplayNameWith,
   imageGridColumns,
   looksLikeOpaqueFileName,
-  ATTACH_COPY,
-  draftAnnouncement,
-  draftStatusLine,
+  ATTACH_COPY as ATTACH_KEYS,
+  draftAnnouncement as draftAnnouncementWith,
+  draftStatusLine as draftStatusLineWith,
   attachmentIdsOf,
-  attachmentMetaLine,
-  attachmentPreviewLine,
+  attachmentMetaLine as attachmentMetaLineWith,
+  attachmentPreviewLine as attachmentPreviewLineWith,
   beginUpload,
   completeUpload,
   draftFor,
   failUpload,
   formatBytes,
-  formatMimeLabel,
+  mimeLabelKey,
   hasPdfSignature,
   isPdfAttachment,
   isPhotoAttachment,
@@ -28,17 +28,46 @@ import {
   removeDraft,
   requeueUpload,
   rewindUpload,
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
   sentAttachmentsOf,
   showsDraftThumbnail,
   showsInlinePreview,
   splitFileName,
-  uploadIssueCopy,
-  uploadIssueNext,
+  uploadIssueKey,
+  uploadIssueNextKey,
   verifyUpload,
   type AttachmentDraft,
 } from "./model";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`attachments.json`)에 있고 모델은 키를 돌려주거나 말하는 함수가 언어 서비스를 받는다(#6058). 이 시험은 제품과 같은
+// 한국어 생성물로 풀어서 예전 한국어 문장을 그대로 단정한다.
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+// `ATTACH_COPY`는 키 표다. 이 시험은 한국어로 풀어 예전 문장 그대로 견준다.
+const ATTACH_COPY = Object.fromEntries(
+  Object.entries(ATTACH_KEYS).map(([name, key]) => [name, ko(key as never)])
+) as Record<keyof typeof ATTACH_KEYS, string>;
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+const attachmentDisplayName = (...args: Tail<Parameters<typeof attachmentDisplayNameWith>>) => attachmentDisplayNameWith(formatMessage, ...args);
+const draftAnnouncement = (...args: Tail<Parameters<typeof draftAnnouncementWith>>) => draftAnnouncementWith(formatMessage, ...args);
+const draftStatusLine = (...args: Tail<Parameters<typeof draftStatusLineWith>>) => draftStatusLineWith(formatMessage, ...args);
+const attachmentMetaLine = (...args: Tail<Parameters<typeof attachmentMetaLineWith>>) => attachmentMetaLineWith(formatMessage, ...args);
+const attachmentPreviewLine = (...args: Tail<Parameters<typeof attachmentPreviewLineWith>>) => attachmentPreviewLineWith(formatMessage, ...args);
+const formatMimeLabel = (mime: string) => ko(mimeLabelKey(mime));
+const sendBlockCopy = (drafts: Parameters<typeof sendBlockKey>[0]) => {
+  const key = sendBlockKey(drafts);
+  return key === null ? null : ko(key);
+};
+const uploadIssueCopy = (issue: Parameters<typeof uploadIssueKey>[0]) => ko(uploadIssueKey(issue));
+const uploadIssueNext = (issue: Parameters<typeof uploadIssueNextKey>[0]) => {
+  const key = uploadIssueNextKey(issue);
+  return key === null ? null : ko(key);
+};
 
 function picked(over: Partial<AttachmentDraft> = {}): AttachmentDraft {
   return {

@@ -1,10 +1,27 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ATTACH_COPY, type MessageAttachment } from "@momo/core/features/attachments/model";
+import { afterEach, beforeEach, describe, expect, it, vi, beforeAll } from "vitest";
+import { ATTACH_COPY as ATTACH_KEYS, type MessageAttachment } from "@momo/core/features/attachments/model";
 import { inlineImageBox } from "./inlineImageModel";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// `ATTACH_COPY`는 사전 키 표다(#6058). 이 시험은 한국어 생성물로 풀어 화면의 한국어 문장과 그대로 견준다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const ATTACH_COPY = Object.fromEntries(
+  Object.entries(ATTACH_KEYS).map(([name, key]) => [name, koCopy(key as never)])
+) as Record<keyof typeof ATTACH_KEYS, string>;
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // 처음 보는 사진도 첫 프레임부터 제 칸에 선다 (ADR-0151 증보 9 I6, #5469).
 //
@@ -53,7 +70,7 @@ function photo(id: string, media?: unknown, mime = "image/jpeg"): MessageAttachm
 
 function render(attachments: MessageAttachment[]) {
   act(() => {
-    root.render(<AttachmentList channelId="ch" attachments={attachments} />);
+    root.render(withKo(<AttachmentList channelId="ch" attachments={attachments} />));
   });
 }
 
