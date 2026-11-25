@@ -1023,8 +1023,8 @@ pub struct WorkspaceAction {
     /// May an agent raise this card **unasked**, through `oort_action_initiate`
     /// (ADR-0186 증보 v5 U-b-2, #4704)? The one definition: the tool's `actionId` enum, the
     /// OpenAPI `InitiativeActionId` and the catalog's `initiative` flag are all read from here
-    /// and measured against each other (`routes::actions`' drift test). Four actions are
-    /// `true`; never one that mints a value shown once, widens what an agent reads, or
+    /// and measured against each other (`routes::actions`' drift test). Five actions are
+    /// `true` (v9 X9-1 added `expression.create`, one picture); never one that mints a value shown once, widens what an agent reads, or
     /// changes who or what an agent is (`every_initiative_action_is_one_a_person_may_look_at`).
     pub initiative: bool,
     /// What approving this executes, as a verb phrase. Only used to build
@@ -2167,7 +2167,9 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::ExpressionAdder,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
-        initiative: false,
+        // ADR-0186 증보 v9 X9-2 (#6137): an agent may raise it unasked — ONE picture it made, nobody's
+        // face (`initiative_args_checks`). A person still looks at the stored picture and approves.
+        initiative: true,
         effect: "카드에서 고른 그림 하나를 팀 보관함에 저장해요",
         question: "팀 표현을 추가해도 될까요?",
         done: "팀 표현을 추가했어요",
@@ -2361,8 +2363,8 @@ pub fn proposable_action_by_id(id: &str, door: ProposalDoor) -> Option<&'static 
     action_by_id(id).filter(|action| action.proposable_through(door))
 }
 
-/// The ids an agent may raise **unasked**, in catalog order (ADR-0186 증보 v5 U-b-2). Exactly
-/// `{channel.create, channel.member.add, message.pin, message.unpin}`; the Agent Port's
+/// The ids an agent may raise **unasked**, in catalog order (ADR-0186 증보 v5 U-b-2 · v9 X9-1). Exactly
+/// `{channel.create, channel.member.add, message.pin, message.unpin, expression.create}`; the Agent Port's
 /// `oort_action_initiate` enum and OpenAPI's `InitiativeActionId` are measured against this.
 pub fn initiative_action_ids() -> Vec<&'static str> {
     ACTIONS
@@ -3520,7 +3522,7 @@ mod tests {
             Some(RequiredRole::RequestingMember)
         );
         assert_eq!(proposable_action_ids(ProposalDoor::AgentPort).len(), 13);
-        assert_eq!(initiative_action_ids().len(), 4);
+        assert_eq!(initiative_action_ids().len(), 5);
         // What a model may be told is the allow-list without the two.
         let offerable = model_offerable_action_ids();
         assert_eq!(offerable.len(), 14);

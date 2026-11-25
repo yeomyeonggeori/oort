@@ -317,6 +317,13 @@ const DELIVER_SECRET_NOT_SUPPORTED: &str = "deliver_secret_not_supported";
 /// be opened in the app (ADR-0204 D7): the native handler turns any 403 into 「눌러서
 /// 앱에서 마무리」 (D6).
 const OPENS_IN_APP: &str = "opens_in_app";
+/// #6137 (ADR-0218 §19 Y2.1 ②): `keepAllowing` sent where it means nothing (400).
+const KEEP_ALLOWING_NOT_SUPPORTED: &str = "keep_allowing_not_supported";
+/// #6137: `keepAllowing` from a decider who is not an active administrator (403); nothing is spent.
+const KEEP_ALLOWING_REQUIRES_ADMIN: &str = "keep_allowing_requires_admin";
+/// #6137: the standing grant cannot stand right now — the workspace switch is off, or the connection
+/// the card was raised through no longer stands (409); nothing is spent, 「이번만」 still works.
+const KEEP_ALLOWING_UNAVAILABLE: &str = "keep_allowing_unavailable";
 
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
@@ -662,6 +669,7 @@ async fn decide(
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
+    let keep_allowing = request.keep_allowing == Some(true);
     // `expressionChoice` is parsed strictly (closed keys) before anything is read: a malformed
     // one is a 400 of the request, not a verdict on the card. A choice without `sha256` names a
     // link candidate nobody has fetched yet (#5899): there is no picture to pin until this
@@ -752,6 +760,7 @@ async fn decide(
         claude_subscription_agents_enabled,
         operator_scope,
         deliver_secret_to_agent,
+        keep_allowing,
         context_max_messages,
     };
     let not_parked = || {
@@ -866,6 +875,7 @@ struct DecisionParts {
     claude_subscription_agents_enabled: bool,
     operator_scope: bool,
     deliver_secret_to_agent: bool,
+    keep_allowing: bool,
     context_max_messages: i64,
 }
 
@@ -893,6 +903,7 @@ impl DecisionParts {
             claude_subscription_agents_enabled: self.claude_subscription_agents_enabled,
             operator_scope: self.operator_scope,
             deliver_secret_to_agent: self.deliver_secret_to_agent,
+            keep_allowing: self.keep_allowing,
             expression_choice,
             expression_choices,
             expression_link,
@@ -1183,6 +1194,8 @@ struct DecisionInput<'a> {
     operator_scope: bool,
     /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
     deliver_secret_to_agent: bool,
+    /// `keepAllowing` as sent (#6137, ADR-0218 §19 Y2.1 ②). Only `Some(true)` matters.
+    keep_allowing: bool,
     /// ADR-0186 v8: the picture the person chose on an `expression.create` card.
     expression_choice: Option<momo_expressions::Choice>,
     /// ADR-0218 §12 L5.4: the pictures kept on an `expression.set.create` card, already parsed.
@@ -1250,6 +1263,92 @@ fn deliver_flag_refused(
     offers_opt_in: bool,
 ) -> bool {
     deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
+}
+
+/// The early `keepAllowing` guard as a pure function (#6137, ADR-0218 §19 Y2.1 ②): a `true` is
+/// honoured only on **approving** an `expression.create` card (one picture) with a picture chosen in the
+/// app — not a link still to be fetched, not through the lock screen's credential — that an agent raised
+/// (the team AI's door does not open, Y2.2). Who may ask is the executor's question.
+fn keep_allowing_refused(
+    keep_allowing: bool,
+    card: ChoiceCard,
+    approve: bool,
+    link: bool,
+    lock_screen: bool,
+    team_ai: bool,
+) -> bool {
+    keep_allowing && !(approve && card == ChoiceCard::One && !link && !lock_screen && !team_ai)
+}
+
+/// The connection an agent's `expression.create` card was raised through, as the server wrote it: an
+/// unasked card's `payload.initiative.connection_id`, a proposal's `action.pins.hostedConnection`.
+/// `None` for a card that names neither (the team AI's has no connection).
+fn card_hosted_connection(payload: &Value) -> Option<Uuid> {
+    momo_agent::initiative::card_connection_id(payload).or_else(|| {
+        payload
+            .pointer("/action/pins/hostedConnection")
+            .and_then(Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok())
+    })
+}
+
+/// 「승인하고 계속 허용」's own conditions (ADR-0218 §19 Y2.1 ② · Y3, #6137), judged before the picture is
+/// registered so a refusal spends nothing: the decider is an active administrator **now**
+/// (`keep_allowing_requires_admin`, 403), the workspace switch over agents' own expressions is on and the
+/// connection the card was raised through still stands — the one the grant will pin
+/// (`keep_allowing_unavailable`, 409). `Ok(connection)` when the grant can stand.
+async fn keep_allowing_stands_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+) -> Result<Result<Uuid, Decision>, momo_db::DbError> {
+    if !momo_expressions::self_register::active_admin_in_tx(
+        conn,
+        input.workspace_id,
+        input.member_id,
+    )
+    .await
+    .map_err(expression_db_error)?
+    {
+        return Ok(Err(refusal(
+            approval.id,
+            input.member_id,
+            KEEP_ALLOWING_REQUIRES_ADMIN,
+            "only a workspace admin can keep allowing an agent's own expressions",
+            StatusCode::FORBIDDEN,
+            now,
+        )));
+    }
+    let unavailable = || {
+        refusal(
+            approval.id,
+            input.member_id,
+            KEEP_ALLOWING_UNAVAILABLE,
+            "this agent cannot be kept allowed right now; approve this picture only",
+            StatusCode::CONFLICT,
+            now,
+        )
+    };
+    let settings = momo_settings::read_workspace_settings(conn, input.workspace_id).await?;
+    if !momo_expressions::self_register::switch_is_on(settings.as_ref()) {
+        return Ok(Err(unavailable()));
+    }
+    let Some(connection) = card_hosted_connection(&approval.payload) else {
+        return Ok(Err(unavailable()));
+    };
+    if !momo_auth::hosted_connection_stands_in_tx(
+        conn,
+        input.workspace_id,
+        approval.requested_by,
+        connection,
+    )
+    .await
+    .map_err(momo_db::DbError::from)?
+    {
+        return Ok(Err(unavailable()));
+    }
+    Ok(Ok(connection))
 }
 
 /// Is this card one that answers a person **outside its room** as a missing approval does? The
@@ -1450,6 +1549,30 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             code,
             "expressionChoice applies only to approving an expression.create card and \
              expressionChoices only to approving an expression.set.create card",
+            StatusCode::BAD_REQUEST,
+            now,
+        )));
+    }
+
+    // **`keepAllowing` belongs to approving an agent's `expression.create` card** (ADR-0218 §19 Y2.1 ②,
+    // #6137): a picture chosen in the app (a link not fetched yet is a two-step decision and cannot carry
+    // it), never through the lock screen's credential, never on a card the team AI raised (its door does
+    // not open, Y2.2). Anywhere else it is a malformed request — judged here, before the status and expiry
+    // arms, like the two fields above. Who may ask (an administrator) and whether the grant can stand (the
+    // switch, the card's connection) are judged by the executor, before anything is registered.
+    if keep_allowing_refused(
+        input.keep_allowing,
+        choice_card(&approval),
+        input.approve,
+        input.expression_link.is_some(),
+        input.credential_via.is_some(),
+        raised_by_team_ai(&approval.payload),
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            KEEP_ALLOWING_NOT_SUPPORTED,
+            "keepAllowing applies only to approving an agent's expression.create card in the app",
             StatusCode::BAD_REQUEST,
             now,
         )));
@@ -4861,6 +4984,16 @@ async fn execute_expression_create(
         workspace: input.workspace_id,
         member: input.member_id,
     };
+    // #6137: 「승인하고 계속 허용」 — its conditions first, so a refusal registers nothing and spends
+    // nothing (the early guard already refused it anywhere but here, and with a link).
+    let keep_allowing = if input.keep_allowing {
+        match keep_allowing_stands_in_tx(conn, approval, input, now).await? {
+            Ok(connection) => Some(connection),
+            Err(decision) => return Ok(Execution::Refused(decision)),
+        }
+    } else {
+        None
+    };
     // #5899: the person approved a link candidate nobody has fetched. Every gate a registration
     // passes has been passed to get here; the candidate is taken (once, for good) and the fetch
     // happens after this transaction commits, in [`decide`]. Nothing is decided yet: the approval
@@ -4920,23 +5053,38 @@ async fn execute_expression_create(
     )
     .await
     {
-        Ok(chosen) => Ok(Execution::Ran(Executed {
-            audits: Vec::new(),
-            ref_type: momo_agent::actions::REF_TYPE_EXPRESSION,
-            ref_id: chosen.expression_id,
-            result_body: momo_agent::actions::expression_create_result_body(),
-            result_rows: vec![
-                momo_agent::actions::action_row("이름", format!(":{}:", chosen.name)),
-                momo_agent::actions::action_row("보관", "팀 보관함에 저장했어요"),
-            ],
-            secret_once: None,
-            next: None,
-            expression: Some(ExpressionOutcome::One(json!({
-                "id": chosen.expression_id.to_string(),
-                "name": chosen.name,
-                "token": format!(":{}:", chosen.name),
-            }))),
-        })),
+        Ok(chosen) => {
+            // The standing grant, in this same transaction and only after the picture registered: a
+            // refusal above leaves neither. 「이번만」 (no field) writes no grant (YA11).
+            if let Some(connection) = keep_allowing {
+                momo_expressions::self_register::give_on_card_in_tx(
+                    conn,
+                    input.workspace_id,
+                    input.member_id,
+                    approval.requested_by,
+                    connection,
+                )
+                .await
+                .map_err(expression_db_error)?;
+            }
+            Ok(Execution::Ran(Executed {
+                audits: Vec::new(),
+                ref_type: momo_agent::actions::REF_TYPE_EXPRESSION,
+                ref_id: chosen.expression_id,
+                result_body: momo_agent::actions::expression_create_result_body(),
+                result_rows: vec![
+                    momo_agent::actions::action_row("이름", format!(":{}:", chosen.name)),
+                    momo_agent::actions::action_row("보관", "팀 보관함에 저장했어요"),
+                ],
+                secret_once: None,
+                next: None,
+                expression: Some(ExpressionOutcome::One(json!({
+                    "id": chosen.expression_id.to_string(),
+                    "name": chosen.name,
+                    "token": format!(":{}:", chosen.name),
+                }))),
+            }))
+        }
         Err(error) => expression_refusal(conn, approval, input, now, error).await,
     }
 }
@@ -6048,6 +6196,71 @@ mod tests {
         }
     }
 
+    /// #6137 (ADR-0218 §19 Y2.1 ② · YA11): `keepAllowing` is honoured in exactly one cell — approving an
+    /// `expression.create` card with a picture chosen in the app, not a link to fetch, not through the lock
+    /// screen, on a card an agent raised. A set card, every other card, a rejection, a link, the lock
+    /// screen and the team AI's card are each a refusal; not asking is never one.
+    #[test]
+    fn keep_allowing_is_honoured_in_exactly_one_cell() {
+        for card in [ChoiceCard::One, ChoiceCard::Set, ChoiceCard::Other] {
+            for approve in [true, false] {
+                for link in [true, false] {
+                    for lock_screen in [true, false] {
+                        for team_ai in [true, false] {
+                            let honoured = !keep_allowing_refused(
+                                true,
+                                card,
+                                approve,
+                                link,
+                                lock_screen,
+                                team_ai,
+                            );
+                            assert_eq!(
+                                honoured,
+                                card == ChoiceCard::One && approve && !link && !lock_screen && !team_ai,
+                                "{card:?} approve={approve} link={link} lock={lock_screen} team_ai={team_ai}"
+                            );
+                            assert!(!keep_allowing_refused(
+                                false,
+                                card,
+                                approve,
+                                link,
+                                lock_screen,
+                                team_ai
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The connection a 「계속 허용」 pins is the one the server wrote on the card: an unasked card's
+    /// `initiative.connection_id` first, a proposal's `pins.hostedConnection` otherwise, none for a card
+    /// that names neither.
+    #[test]
+    fn the_kept_grant_pins_the_cards_own_connection() {
+        let unasked = Uuid::from_u128(7);
+        let proposed = Uuid::from_u128(9);
+        assert_eq!(
+            card_hosted_connection(
+                &json!({"initiative": {"connection_id": unasked.to_string()},
+                                           "action": {"pins": {"hostedConnection": proposed.to_string()}}})
+            ),
+            Some(unasked)
+        );
+        assert_eq!(
+            card_hosted_connection(
+                &json!({"action": {"pins": {"hostedConnection": proposed.to_string()}}})
+            ),
+            Some(proposed)
+        );
+        assert_eq!(
+            card_hosted_connection(&json!({"action": {"pins": {}}})),
+            None
+        );
+    }
+
     /// No registry action opts in during P0, so the payload reader says no for
     /// every real, unknown and absent id.
     #[test]
@@ -6331,6 +6544,7 @@ mod tests {
             claude_subscription_agents_enabled: false,
             operator_scope: false,
             deliver_secret_to_agent: false,
+            keep_allowing: false,
             expression_choice: None,
             expression_choices: None,
             expression_link: None,

@@ -109,6 +109,8 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             Some(momo_mcp::TOOL_ACTION_PROPOSE) => Some(momo_mcp::TOOL_ACTION_PROPOSE),
             Some(momo_mcp::TOOL_EXPRESSION_ASSEMBLE) => Some(momo_mcp::TOOL_EXPRESSION_ASSEMBLE),
             Some(momo_mcp::TOOL_EXPRESSION_REGISTER) => Some(momo_mcp::TOOL_EXPRESSION_REGISTER),
+            // #6137: an unasked emoticon card (one picture, 2 MiB) — only once its door is open.
+            Some(momo_mcp::TOOL_ACTION_INITIATE) => Some(momo_mcp::TOOL_ACTION_INITIATE),
             _ => None,
         }
     } else {
@@ -132,7 +134,32 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                 .await
                 {
                     Ok(AgentPortAdmission::Allowed(principal)) => {
-                        if principal.kind == momo_auth::PrincipalKind::Agent
+                        if declared_large_tool == Some(momo_mcp::TOOL_ACTION_INITIATE) {
+                            // ADR-0186 v9 X9-2 · ADR-0218 §19 Y2.2 (#6137): 2 MiB, and only for an
+                            // agent holding `workspace:initiate` whose unasked-emoticon door is open
+                            // — the connection and the scope on both halves, the two switches —
+                            // judged before a byte of the big body is read. Every other initiate
+                            // call keeps the standard limit.
+                            let open = principal.kind == momo_auth::PrincipalKind::Agent
+                                && principal
+                                    .scopes
+                                    .iter()
+                                    .any(|scope| scope == momo_auth::SCOPE_WORKSPACE_INITIATE)
+                                && match crate::routes::agent_port_tools::HostedCaller::from_principal(
+                                    &principal,
+                                ) {
+                                    Some(caller) => {
+                                        crate::routes::agent_initiative::expression_door_open(
+                                            &state, caller,
+                                        )
+                                        .await
+                                    }
+                                    None => false,
+                                };
+                            if open {
+                                body_cap = momo_mcp::MAX_REGISTER_REQUEST_BYTES;
+                            }
+                        } else if principal.kind == momo_auth::PrincipalKind::Agent
                             && principal
                                 .scopes
                                 .iter()

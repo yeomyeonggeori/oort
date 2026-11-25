@@ -40,6 +40,14 @@ pub const CALL_RETENTION_DAYS: i32 = 45;
 pub const REQUEST_BYTES: usize = 2 * 1024 * 1024;
 /// Y2.3: a generated picture, decoded from base64.
 pub const PICTURE_BYTES: usize = 1024 * 1024;
+/// A `pending` call row is the attempt of a call that reached the decoder and has not settled. A call
+/// lives seconds (the 15-second body deadline, then [`crate::action::PREPARE_DEADLINE`]); a row still
+/// `pending` once the attempt window (24 hours) is over belongs to a call that died between its two
+/// transactions (a process that stopped, a request dropped mid-decode). It counts for nothing any more,
+/// so [`begin_in_tx`] deletes it and its `clientRequestId` can be used again. Inside the window it
+/// stays and keeps counting as the attempt it was: deleting it sooner would let a caller that drops its
+/// own requests mid-decode buy decodes the attempt ceiling is there to bound.
+pub const DEAD_PENDING_HOURS: i32 = 24;
 /// Y3 워크스페이스 스위치 (absent = on, a non-boolean = off). Spelled the same in `momo-settings`.
 pub const SWITCH_SETTING: &str = "agent_self_expressions";
 
@@ -403,17 +411,25 @@ async fn settle_in_tx(
         Ok(id) => ("registered", None, Some(id)),
         Err(refusal) => ("refused", Some(refusal.recorded()), None),
     };
-    sqlx::query(
+    let settled = sqlx::query(
         "UPDATE expression_agent_call SET outcome = $3, reason = $4, expression_id = $5, settled_at = clock_timestamp() \
-          WHERE workspace_id = $1 AND id = $2 AND outcome = 'pending'",
+          WHERE workspace_id = $1 AND agent_member_id = $6 AND id = $2 AND outcome = 'pending'",
     )
     .bind(caller.workspace)
     .bind(call)
     .bind(word)
     .bind(reason)
     .bind(expression)
+    .bind(caller.agent)
     .execute(&mut *conn)
-    .await?;
+    .await?
+    .rows_affected();
+    // The row this call began is the one it settles: a row that is gone or already settled (swept, or
+    // settled by someone else) means this registration would stand uncounted, so the whole transaction
+    // rolls back instead (review L6).
+    if settled != 1 {
+        return Err(Error::from(sqlx::Error::RowNotFound));
+    }
     Ok(())
 }
 
@@ -451,6 +467,18 @@ pub async fn begin_in_tx(
     )
     .bind(caller.workspace)
     .bind(CALL_RETENTION_DAYS)
+    .execute(&mut *conn)
+    .await?;
+    // A call that died between its two transactions (#6137, review L1): once the attempt window is over
+    // its `pending` row counts for nothing, so it goes and its `clientRequestId` is free again
+    // ([`DEAD_PENDING_HOURS`]).
+    sqlx::query(
+        "DELETE FROM expression_agent_call WHERE workspace_id = $1 AND agent_member_id = $2 \
+            AND outcome = 'pending' AND created_at < clock_timestamp() - make_interval(hours => $3)",
+    )
+    .bind(caller.workspace)
+    .bind(caller.agent)
+    .bind(DEAD_PENDING_HOURS)
     .execute(&mut *conn)
     .await?;
     let earlier = sqlx::query(
@@ -533,14 +561,28 @@ pub struct Prepared {
 /// The second half: the same standing and ceilings again under the same lock (Y2.4 「디코드 뒤 등록 tx에서
 /// 1~7을 다시 본다」), the registration through the rules every road shares, and the row settled. A
 /// refusal is settled and audited here too; the caller commits either way.
+///
+/// `credential_stands` is the caller's proof, **in this transaction**, that the calling credential and
+/// its connection still stand (Y2.4 5: active, proved, not revoked, and still the connection the first
+/// transaction proved — review M2): the decode sits between the two transactions, and a connection cut
+/// while the picture was decoded closes this registration like any other closed door.
 pub async fn finish_in_tx(
     conn: &mut PgConnection,
     caller: Caller,
     call: Uuid,
     server_setting_on: bool,
+    credential_stands: bool,
     picture: Result<Prepared, Refusal>,
 ) -> Result<Result<Value, Refusal>, Error> {
-    let outcome = register_in_tx(conn, caller, call, server_setting_on, picture).await?;
+    let outcome = register_in_tx(
+        conn,
+        caller,
+        call,
+        server_setting_on,
+        credential_stands,
+        picture,
+    )
+    .await?;
     match outcome {
         Ok((id, value)) => {
             settle_in_tx(conn, caller, call, Ok(id)).await?;
@@ -559,25 +601,32 @@ async fn register_in_tx(
     caller: Caller,
     call: Uuid,
     server_setting_on: bool,
+    credential_stands: bool,
     picture: Result<Prepared, Refusal>,
 ) -> Result<Result<(Uuid, Value), Refusal>, Error> {
     let standing = match standing_in_tx(conn, caller, server_setting_on).await? {
         Ok(standing) => standing,
         Err(closed) => return Ok(Err(Refusal::NotAllowed(closed))),
     };
+    if !credential_stands {
+        return Ok(Err(Refusal::NotAllowed(Closed::ConnectionMismatch)));
+    }
     let prepared = match picture {
         Ok(prepared) => prepared,
         Err(refusal) => return Ok(Err(refusal)),
     };
+    let ws = caller.workspace;
+    // The same catalog lock, name rule, permanent name and quota as every other registration (D1 · D2).
+    // Taken **before** the ceilings are counted (review M3): the workspace total of 200 is shared by
+    // every agent, and only this lock serialises two agents' registrations — counted before it, two
+    // agents that finish together would both read 199 and both register.
+    catalog(conn, ws).await?;
     if let Some(refusal) = ceiling(
         counts_in_tx(conn, caller.workspace, caller.agent).await?,
         false,
     ) {
         return Ok(Err(refusal));
     }
-    let ws = caller.workspace;
-    // The same catalog lock, name rule, permanent name and quota as every other registration (D1 · D2).
-    catalog(conn, ws).await?;
     match prepared.meta.validate() {
         Ok(()) => {}
         Err(Error::NameReserved) => return Ok(Err(Refusal::NameReserved)),
@@ -740,18 +789,56 @@ pub async fn give_in_tx(
         .bind(agent)
         .execute(&mut *conn)
         .await?;
-    if live_grant_in_tx(conn, workspace, agent).await?.is_none() {
-        let id: Uuid = sqlx::query_scalar(
-            "INSERT INTO expression_agent_grant(workspace_id, agent_member_id, granted_by, connection_id, granted_via) \
-             VALUES($1, $2, $3, $4, $5) RETURNING id",
-        )
-        .bind(workspace)
-        .bind(agent)
-        .bind(admin)
-        .bind(connection)
-        .bind(via.word())
-        .fetch_one(&mut *conn)
-        .await?;
+    insert_grant_in_tx(conn, workspace, admin, agent, connection, via).await?;
+    grant_json_in_tx(conn, workspace, agent).await
+}
+
+/// 「승인하고 계속 허용」 (Y2.1 ②, #6137): the grant a person gives by approving that agent's
+/// `expression.create` card with `keepAllowing: true`, in the decision's own transaction, after the
+/// picture was registered. `admin` must be an active human administrator **now** ([`Error::Role`]
+/// otherwise); `connection` is the connection the card was raised through (the card's pin). Takes no
+/// lock on the agent's row — the decision has already share-locked rows an agent's own calls wait on, so
+/// the one live grant is kept by the partial unique index instead — and answers whether a new grant was
+/// written (`false`: one was already live and stays as it is).
+pub async fn give_on_card_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    admin: Uuid,
+    agent: Uuid,
+    connection: Uuid,
+) -> Result<bool, Error> {
+    if !active_admin_in_tx(conn, workspace, admin).await? {
+        return Err(Error::Role);
+    }
+    if !is_agent_in_tx(conn, workspace, agent).await? {
+        return Err(Error::NotFound);
+    }
+    insert_grant_in_tx(conn, workspace, admin, agent, connection, Via::Card).await
+}
+
+/// Write one live grant unless one is live already (the partial unique index decides), with its
+/// `expression.grant.given` row. `true` when a row was written.
+async fn insert_grant_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    admin: Uuid,
+    agent: Uuid,
+    connection: Uuid,
+    via: Via,
+) -> Result<bool, Error> {
+    let written: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO expression_agent_grant(workspace_id, agent_member_id, granted_by, connection_id, granted_via) \
+         VALUES($1, $2, $3, $4, $5) \
+         ON CONFLICT (workspace_id, agent_member_id) WHERE revoked_at IS NULL DO NOTHING RETURNING id",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .bind(admin)
+    .bind(connection)
+    .bind(via.word())
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(id) = written {
         write_audit(
             conn,
             &AuditEntry::new(workspace, "expression.grant.given")
@@ -766,7 +853,7 @@ pub async fn give_in_tx(
         )
         .await?;
     }
-    grant_json_in_tx(conn, workspace, agent).await
+    Ok(written.is_some())
 }
 
 /// Revoke (Y2.1 「거두기」): any administrator, the person who gave it, or the agent's owner. A person who

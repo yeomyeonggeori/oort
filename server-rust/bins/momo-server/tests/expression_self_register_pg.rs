@@ -207,7 +207,8 @@ async fn exec(su: &PgPool, sql: &str, ids: &[Uuid]) {
         .unwrap_or_else(|error| panic!("{sql}: {error}"));
 }
 
-const SCOPES: &str = "ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write','workspace:propose']::text[]";
+// `workspace:initiate` too (#6137): the unasked-emoticon tests raise cards through `oort_action_initiate`.
+const SCOPES: &str = "ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write','workspace:propose','workspace:initiate']::text[]";
 
 async fn seed_connection(
     su: &PgPool,
@@ -417,17 +418,21 @@ fn modern_body(method: &str, extra: Value) -> Value {
 }
 
 async fn call(w: &World, bearer: &str, arguments: Value) -> (u16, Value) {
+    call_tool(w, bearer, TOOL, arguments).await
+}
+
+async fn call_tool(w: &World, bearer: &str, tool: &str, arguments: Value) -> (u16, Value) {
     let response = client()
         .post(format!("{}{MCP_PATH}", w.base))
         .header("content-type", "application/json")
         .header("accept", "application/json, text/event-stream")
         .header("mcp-protocol-version", MODERN_VERSION)
         .header("mcp-method", "tools/call")
-        .header("mcp-name", TOOL)
+        .header("mcp-name", tool)
         .bearer_auth(bearer)
         .json(&modern_body(
             "tools/call",
-            json!({"name": TOOL, "arguments": arguments}),
+            json!({"name": tool, "arguments": arguments}),
         ))
         .send()
         .await
@@ -1319,4 +1324,1164 @@ async fn the_big_body_is_read_only_through_an_open_door() {
     )
     .await;
     assert_eq!(waited, None, "an open door waits for the body it may read");
+}
+
+// --- #6137: the unasked emoticon (door 가), 「계속 허용」 and the review's merge conditions ------------
+
+const INITIATE: &str = "oort_action_initiate";
+
+fn emoticon_args(name: &str) -> Value {
+    json!({
+        "clientRequestId": Uuid::new_v4(),
+        "actionId": "expression.create",
+        "args": {"candidates": [{
+            "name": name,
+            "displayName": "웃는 별",
+            "tags": ["별"],
+            "subjectMemberId": null,
+            "image": {
+                "source": "generated",
+                "mime": "image/png",
+                "dataBase64": base64::engine::general_purpose::STANDARD.encode(png(96, 96)),
+                "prompt": format!("{PROMPT_MARK} 웃는 별"),
+            }
+        }]}
+    })
+}
+
+async fn initiate(w: &World, bearer: &str, arguments: Value) -> (u16, Value) {
+    call_tool(w, bearer, INITIATE, arguments).await
+}
+
+fn approval_of(body: &Value) -> Uuid {
+    body["result"]["structuredContent"]["approvalId"]
+        .as_str()
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .unwrap_or_else(|| panic!("an approval id: {body}"))
+}
+
+async fn card_props(w: &World, approval: Uuid) -> Value {
+    sqlx::query_scalar(
+        "SELECT m.props FROM message m JOIN approval a ON a.request_message_id = m.id WHERE a.id = $1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .expect("the card")
+}
+
+fn choice_of(props: &Value) -> Value {
+    let draft = &props["action"]["expression"]["candidates"][0];
+    json!({"draftId": draft["draftId"], "revision": draft["revision"], "sha256": draft["media"]["large"]["sha256"]})
+}
+
+async fn decide(
+    w: &World,
+    t: &Tenant,
+    jwt: &str,
+    approval: Uuid,
+    approve: bool,
+    choice: Option<Value>,
+    keep_allowing: Option<bool>,
+) -> (u16, Value) {
+    let mut body =
+        json!({"approvalId": approval, "approve": approve, "clientDecisionId": Uuid::new_v4()});
+    if let Some(choice) = choice {
+        body["expressionChoice"] = choice;
+    }
+    if let Some(keep) = keep_allowing {
+        body["keepAllowing"] = json!(keep);
+    }
+    let response = client()
+        .post(format!(
+            "{}/v1/workspaces/{}/approvals/{approval}/decision",
+            w.base, t.ws
+        ))
+        .bearer_auth(jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("decision");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn approval_status(w: &World, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id = $1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .expect("approval")
+}
+
+async fn live_grants(w: &World, t: &Tenant, agent: Uuid) -> i64 {
+    count(
+        w,
+        "SELECT count(*) FROM expression_agent_grant WHERE workspace_id = $1 AND agent_member_id = $2 \
+            AND revoked_at IS NULL",
+        &[t.ws, agent],
+    )
+    .await
+}
+
+async fn set_self_switch(w: &World, t: &Tenant, on: bool) {
+    sqlx::query(
+        "UPDATE workspace SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{agent_self_expressions}', to_jsonb($2)) \
+          WHERE id = $1",
+    )
+    .bind(t.ws)
+    .bind(on)
+    .execute(&w.su)
+    .await
+    .expect("switch");
+}
+
+/// YA10 (ADR-0186 v9 X9-2): the closed list holds five and an unasked emoticon is ONE picture the agent
+/// made, with nobody's face. The card stands in the owner's direct message with the stored picture, its
+/// stored arguments are the one draft and nothing is registered before a person approves. A link, two
+/// candidates, a face, an attachment and a set id are each refused with no card.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn an_unasked_emoticon_is_one_generated_picture_a_person_still_looks_at() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("unasked-star")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    assert_eq!(
+        expressions(&w, &t).await,
+        0,
+        "nothing before a person approves"
+    );
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id = $1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(payload["origin"], json!("agent_initiated"));
+    let drafts = payload["action"]["args"]["drafts"]
+        .as_array()
+        .expect("drafts");
+    assert_eq!(drafts.len(), 1, "{payload}");
+    assert!(
+        !payload.to_string().contains(PROMPT_MARK),
+        "the stored arguments hold no prompt or bytes"
+    );
+    let props = card_props(&w, approval).await;
+    assert_eq!(props["origin"], json!("agent_initiated"));
+    assert_eq!(
+        props["action"]["expression"]["candidates"]
+            .as_array()
+            .map(Vec::len),
+        Some(1),
+        "{props}"
+    );
+    let dm_kind: String = sqlx::query_scalar(
+        "SELECT c.kind::text FROM approval a JOIN channel c ON c.id = a.channel_id WHERE a.id = $1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        dm_kind, "dm",
+        "the card stands in the owner's direct message"
+    );
+
+    let approvals_before = count(
+        &w,
+        "SELECT count(*) FROM approval WHERE workspace_id = $1",
+        &[t.ws],
+    )
+    .await;
+    let mut two = emoticon_args("two-pictures");
+    let first = two["args"]["candidates"][0].clone();
+    two["args"]["candidates"] = json!([first.clone(), first.clone()]);
+    let mut link = emoticon_args("a-link");
+    link["args"]["candidates"][0]["image"] =
+        json!({"source": "url", "url": "https://example.com/a.png"});
+    let mut face = emoticon_args("a-face");
+    face["args"]["candidates"][0]["subjectMemberId"] = json!(t.admin.member);
+    let mut attachment = emoticon_args("an-attachment");
+    attachment["args"]["candidates"][0]["image"] =
+        json!({"source": "attachment", "attachmentId": Uuid::new_v4()});
+    let set =
+        json!({"clientRequestId": Uuid::new_v4(), "actionId": "expression.set.create", "args": {}});
+    for refused in [two, link, face, attachment, set] {
+        let (status, body) = initiate(&w, &t.a.bearer, refused.clone()).await;
+        assert_ne!(status, 200, "{refused}: {body}");
+        assert!(
+            body["result"]["structuredContent"]["approvalId"].is_null(),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM approval WHERE workspace_id = $1",
+            &[t.ws]
+        )
+        .await,
+        approvals_before,
+        "no card for any of them"
+    );
+
+    // The person looks at the stored picture and approves (「이번만」 — no field): one registration,
+    // proposed by the agent, decided by the person, and no standing grant (YA11's second half).
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.admin.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (created_by, proposed_by, grant): (Uuid, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT created_by, proposed_by, grant_id FROM expression WHERE workspace_id = $1 AND name = 'unasked-star'",
+    )
+    .bind(t.ws)
+    .fetch_one(&w.su)
+    .await
+    .expect("registered");
+    assert_eq!(
+        (created_by, proposed_by, grant),
+        (t.admin.member, Some(t.a.member), None)
+    );
+    assert_eq!(
+        live_grants(&w, &t, t.a.member).await,
+        0,
+        "이번만 writes no grant"
+    );
+}
+
+/// YA11: 「계속 허용」 — only \`keepAllowing: true\` from an administrator writes the grant (with the
+/// registration, pinned to the card's connection); a non-administrator decider who sends it is refused and
+/// the approval stays pending (the same person's 「이번만」 then registers, with no grant); the field on a
+/// rejection or on another action is a 400 that spends nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn keep_allowing_gives_the_grant_only_when_an_admin_asks_for_it() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+
+    // An administrator's 「승인하고 계속 허용」.
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("keep-one")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    let props = card_props(&w, approval).await;
+    // On a rejection the field means nothing: 400, nothing spent.
+    let (status, body) = decide(&w, &t, &t.admin.jwt, approval, false, None, Some(true)).await;
+    assert_eq!(
+        (status, body["status"].as_str()),
+        (400, Some("keep_allowing_not_supported")),
+        "{body}"
+    );
+    assert_eq!(approval_status(&w, approval).await, "pending");
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.admin.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        Some(true),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(expressions(&w, &t).await, 1);
+    let (granted_by, connection, via): (Uuid, Uuid, String) = sqlx::query_as(
+        "SELECT granted_by, connection_id, granted_via FROM expression_agent_grant \
+          WHERE workspace_id = $1 AND agent_member_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(t.ws)
+    .bind(t.a.member)
+    .fetch_one(&w.su)
+    .await
+    .expect("one live grant");
+    assert_eq!(
+        (granted_by, connection, via.as_str()),
+        (t.admin.member, t.a.connection, "card")
+    );
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'expression.grant.given' \
+                AND detail->>'via' = 'card'",
+            &[t.ws]
+        )
+        .await,
+        1
+    );
+    // The grant opens 문 나 for that agent (its next registration needs no card).
+    let (status, body) = call(&w, &t.a.bearer, args("after-keep")).await;
+    assert_eq!(status, 200, "{body}");
+
+    // A non-administrator owner: the field is refused, nothing is registered, the card stays pending.
+    let channel: Uuid = sqlx::query_scalar(
+        "SELECT channel_id FROM membership WHERE workspace_id = $1 AND member_id = $2 LIMIT 1",
+    )
+    .bind(t.ws)
+    .bind(t.a.member)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let b = seed_agent(&w.su, t.ws, t.member.member, channel).await;
+    let (status, body) = initiate(&w, &b.bearer, emoticon_args("member-owned")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    let props = card_props(&w, approval).await;
+    let before = expressions(&w, &t).await;
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.member.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        Some(true),
+    )
+    .await;
+    assert_eq!(
+        (status, body["status"].as_str()),
+        (403, Some("keep_allowing_requires_admin")),
+        "{body}"
+    );
+    assert_eq!(approval_status(&w, approval).await, "pending");
+    assert_eq!(expressions(&w, &t).await, before);
+    assert_eq!(live_grants(&w, &t, b.member).await, 0);
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.member.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "「이번만」 still works: {body}");
+    assert_eq!(expressions(&w, &t).await, before + 1);
+    assert_eq!(live_grants(&w, &t, b.member).await, 0);
+}
+
+/// YA17 and the switch at both halves (Y3): with \`agent_self_expressions\` off, an unasked emoticon is
+/// refused at the call (no card) and a card already standing is not run when approved (the approval stays
+/// pending, nothing is registered, no grant); a rejection still goes through. Turned back on, the card runs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_switch_closes_the_unasked_emoticon_at_the_call_and_at_the_decision() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+
+    set_self_switch(&w, &t, false).await;
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("switched-off")).await;
+    assert_ne!(status, 200, "{body}");
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM approval WHERE workspace_id = $1",
+            &[t.ws]
+        )
+        .await,
+        0
+    );
+    let children = media::decoder_children_started();
+    let (status, _) = initiate(&w, &t.a.bearer, emoticon_args("switched-off-2")).await;
+    assert_ne!(status, 200);
+    assert_eq!(
+        media::decoder_children_started(),
+        children,
+        "a closed door never reaches the decoder"
+    );
+
+    set_self_switch(&w, &t, true).await;
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("standing-card")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    let props = card_props(&w, approval).await;
+    set_self_switch(&w, &t, false).await;
+    for keep in [None, Some(true)] {
+        let (status, body) = decide(
+            &w,
+            &t,
+            &t.admin.jwt,
+            approval,
+            true,
+            Some(choice_of(&props)),
+            keep,
+        )
+        .await;
+        assert_eq!(status, 409, "{keep:?}: {body}");
+        assert_eq!(approval_status(&w, approval).await, "pending");
+    }
+    assert_eq!(expressions(&w, &t).await, 0);
+    assert_eq!(live_grants(&w, &t, t.a.member).await, 0);
+    set_self_switch(&w, &t, true).await;
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.admin.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(expressions(&w, &t).await, 1);
+
+    // A rejection always goes through, switch or not.
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("to-reject")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    set_self_switch(&w, &t, false).await;
+    let (status, body) = decide(&w, &t, &t.admin.jwt, approval, false, None, None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(approval_status(&w, approval).await, "rejected");
+}
+
+/// YA2 「먼저 제안 이모티콘 카드와 합쳐 센다」 (review M4): the day's two are shared by the two doors — one
+/// registration and one unasked card fill it, and then both doors refuse (the register door's
+/// \`daily_cap\`, the card door's conflict), with nothing written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_days_two_are_counted_over_both_doors() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let (status, body) = call(&w, &t.a.bearer, args("door-na")).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("door-ga")).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = call(&w, &t.a.bearer, args("door-na-2")).await;
+    assert_eq!(
+        (status, code(&body).as_deref()),
+        (409, Some("daily_cap")),
+        "the card counts on the register door's day: {body}"
+    );
+    let approvals = count(
+        &w,
+        "SELECT count(*) FROM approval WHERE workspace_id = $1",
+        &[t.ws],
+    )
+    .await;
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("door-ga-2")).await;
+    assert_eq!(
+        status, 409,
+        "the registration counts on the card door's day: {body}"
+    );
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM approval WHERE workspace_id = $1",
+            &[t.ws]
+        )
+        .await,
+        approvals
+    );
+    assert_eq!(expressions(&w, &t).await, 1);
+}
+
+/// Review M2 (Y2.4 5): the credential is proved again in the registering transaction. The call passes its
+/// first transaction, waits for a decoder slot the test holds, the credential is revoked meanwhile — and
+/// the registration that follows is refused, with nothing registered and the reason for the operator.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_credential_revoked_during_the_decode_registers_nothing() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let held = media::decoder_slots()
+        .acquire_many_owned(2)
+        .await
+        .expect("both decoder slots");
+    let base = w.base.clone();
+    let bearer = t.a.bearer.clone();
+    let call_task = tokio::spawn(async move {
+        let probe = World {
+            base,
+            addr: "127.0.0.1:0".parse().unwrap(),
+            su: PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url())
+                .await
+                .unwrap(),
+        };
+        call(&probe, &bearer, args("cut-mid-decode")).await
+    });
+    // The first transaction has committed (its pending row is there) and the call waits for a slot.
+    let mut pending = 0;
+    for _ in 0..200 {
+        pending = count(
+            &w,
+            "SELECT count(*) FROM expression_agent_call WHERE workspace_id = $1 AND outcome = 'pending'",
+            &[t.ws],
+        )
+        .await;
+        if pending == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        pending, 1,
+        "the call passed its first transaction and is waiting to decode"
+    );
+    exec(
+        &w.su,
+        "UPDATE token SET revoked_at = now() WHERE workspace_id = $1 AND hosted_connection_id = $2",
+        &[t.ws, t.a.connection],
+    )
+    .await;
+    drop(held);
+    let (status, body) = call_task.await.expect("the call");
+    assert_eq!(
+        (status, code(&body).as_deref()),
+        (403, Some("not_allowed")),
+        "{body}"
+    );
+    assert_eq!(expressions(&w, &t).await, 0);
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM expression_agent_call WHERE workspace_id = $1 AND outcome = 'refused' \
+                AND reason = 'not_allowed'",
+            &[t.ws]
+        )
+        .await,
+        1
+    );
+    assert!(audit_reasons(&w, &t)
+        .await
+        .contains(&"connection_mismatch".to_string()));
+}
+
+/// Review M3 (Y3 합계 200): two agents finishing together at 199 cannot both register. Both wait on the
+/// catalogue lock the test holds, so with the total counted before that lock both would read 199; counted
+/// under it, exactly one registers and the other is \`store_cap\`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn two_agents_finishing_together_never_pass_the_workspace_total() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let channel: Uuid = sqlx::query_scalar(
+        "SELECT channel_id FROM membership WHERE workspace_id = $1 AND member_id = $2 LIMIT 1",
+    )
+    .bind(t.ws)
+    .bind(t.a.member)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let c = seed_agent(&w.su, t.ws, t.admin.member, channel).await;
+    let (status, body) = rest(
+        &w,
+        reqwest::Method::PUT,
+        &t.admin.jwt,
+        &format!(
+            "/v1/workspaces/{}/agents/{}/expression-grant",
+            t.ws, c.member
+        ),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    // 199 self-registered expressions of a third agent (its own store cap is not what is measured).
+    let filler = seed_agent(&w.su, t.ws, t.admin.member, channel).await;
+    let filler_grant: Uuid = sqlx::query_scalar(
+        "INSERT INTO expression_agent_grant(workspace_id, agent_member_id, granted_by, connection_id, granted_via) \
+         VALUES($1, $2, $3, $4, 'settings') RETURNING id",
+    )
+    .bind(t.ws)
+    .bind(filler.member)
+    .bind(t.admin.member)
+    .bind(filler.connection)
+    .fetch_one(&w.su)
+    .await
+    .expect("filler grant");
+    for n in 0..199 {
+        sqlx::query(
+            "INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, proposed_by, grant_id, version, kind, status) \
+             VALUES($1, $2, '별', '[]'::jsonb, '{\"kind\":\"generated\",\"sourceUrl\":null,\"prompt\":null}'::jsonb, $3, $4, $5, $6, 'emoji', 'active')",
+        )
+        .bind(t.ws)
+        .bind(format!("filler-{n}"))
+        .bind(t.admin.member)
+        .bind(filler.member)
+        .bind(filler_grant)
+        .bind(n as i64 + 1)
+        .execute(&w.su)
+        .await
+        .expect("seed expression");
+    }
+    // Hold the catalogue row; both registrations will queue on it.
+    exec(
+        &w.su,
+        "INSERT INTO expression_catalog(workspace_id) VALUES ($1) ON CONFLICT DO NOTHING",
+        &[t.ws],
+    )
+    .await;
+    let mut holder = w.su.begin().await.expect("holder");
+    sqlx::query("SELECT 1 FROM expression_catalog WHERE workspace_id = $1 FOR UPDATE")
+        .bind(t.ws)
+        .execute(&mut *holder)
+        .await
+        .expect("hold the catalogue");
+    let spawn_call = |bearer: String, name: &'static str| {
+        let base = w.base.clone();
+        tokio::spawn(async move {
+            let probe = World {
+                base,
+                addr: "127.0.0.1:0".parse().unwrap(),
+                su: PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&database_url())
+                    .await
+                    .unwrap(),
+            };
+            call(&probe, &bearer, args(name)).await
+        })
+    };
+    let first = spawn_call(t.a.bearer.clone(), "race-a");
+    let second = spawn_call(c.bearer.clone(), "race-c");
+    // Both are waiting on the held row before it is released.
+    let mut waiting = 0;
+    for _ in 0..400 {
+        waiting = count(
+            &w,
+            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' \
+                AND query LIKE '%expression_catalog%FOR UPDATE%'",
+            &[],
+        )
+        .await;
+        if waiting >= 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(waiting, 2, "both registrations queue on the catalogue lock");
+    holder.commit().await.expect("release");
+    let outcomes = [first.await.expect("a"), second.await.expect("c")];
+    let passed = outcomes.iter().filter(|(status, _)| *status == 200).count();
+    let capped = outcomes
+        .iter()
+        .filter(|(status, body)| *status == 409 && code(body).as_deref() == Some("store_cap"))
+        .count();
+    assert_eq!((passed, capped), (1, 1), "{outcomes:?}");
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM expression WHERE workspace_id = $1 AND grant_id IS NOT NULL \
+                AND status IN ('active', 'hidden')",
+            &[t.ws]
+        )
+        .await,
+        200
+    );
+}
+
+/// Review L1 · L6: a call that died between its two transactions keeps counting as the attempt it was
+/// while the attempt window lasts (its id answers \`in_flight\`), and once the window is over its row is
+/// gone and the id can be used again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_dead_pending_call_is_cleared_once_its_window_is_over() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let grant: Uuid = sqlx::query_scalar(
+        "SELECT id FROM expression_agent_grant WHERE workspace_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(t.ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let request = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO expression_agent_call(workspace_id, agent_member_id, grant_id, client_request_id, created_at, decoded) \
+         VALUES($1, $2, $3, $4, clock_timestamp() - interval '2 hours', true)",
+    )
+    .bind(t.ws)
+    .bind(t.a.member)
+    .bind(grant)
+    .bind(request)
+    .execute(&w.su)
+    .await
+    .expect("a dead pending row");
+    let mut again = args("revived");
+    again["clientRequestId"] = json!(request);
+    let (status, body) = call(&w, &t.a.bearer, again.clone()).await;
+    assert_eq!(
+        (status, code(&body).as_deref()),
+        (409, Some("in_flight")),
+        "inside the window: {body}"
+    );
+    age_calls(&w, &t, "clock_timestamp() - interval '25 hours'").await;
+    let (status, body) = call(&w, &t.a.bearer, again).await;
+    assert_eq!(status, 200, "the id is free again: {body}");
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM expression_agent_call WHERE workspace_id = $1 AND outcome = 'pending'",
+            &[t.ws]
+        )
+        .await,
+        0
+    );
+}
+
+/// Review M1 (YA5 · YA20): the handler's own checks, reached directly — past every outer door — with each
+/// credential the routes must refuse: an agent bearer (\`require_human\`), and a person's credential that is
+/// not a full app session (a developer token, the two push tokens, the human MCP all arrive without the
+/// marker). Each refusal is the handler's own answer, so dropping the check turns it red; the full app
+/// session of the same administrator is the control that passes. The switch over agents' own expressions
+/// is held the same way on the settings route.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_grant_handlers_refuse_every_credential_but_a_persons_app_session() {
+    use axum::extract::{Path, Query, State};
+    use axum::response::IntoResponse;
+    use axum::{Extension, Json};
+    use momo_auth::{Principal, PrincipalKind};
+    use momo_server::auth::FullPersonSession;
+    use momo_server::routes::{expression_grants, workspace_settings};
+
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    let state = AppState::new(
+        pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw", 4).await,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    );
+    let person = Principal {
+        member_id: t.admin.member,
+        workspace_id: t.ws,
+        token_id: None,
+        scopes: Vec::new(),
+        kind: PrincipalKind::Human,
+    };
+    let agent = Principal {
+        member_id: t.a.member,
+        workspace_id: t.ws,
+        token_id: None,
+        scopes: vec!["workspace:propose".into()],
+        kind: PrincipalKind::Agent,
+    };
+    async fn answer(result: Result<Json<Value>, momo_server::error::ApiError>) -> (u16, String) {
+        let response = match result {
+            Ok(json) => json.into_response(),
+            Err(error) => error.into_response(),
+        };
+        let status = response.status().as_u16();
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap_or_default();
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+    let ws = t.ws.to_string();
+    let target = t.a.member.to_string();
+    const HUMAN_ONLY: &str = "a person's app session";
+    // (credential, principal, the full-session marker)
+    let cases: [(&str, &Principal, bool); 5] = [
+        ("agent bearer", &agent, true),
+        ("developer token", &person, false),
+        ("push fetch token", &person, false),
+        ("push action token", &person, false),
+        ("human MCP", &person, false),
+    ];
+    for (credential, principal, marked) in cases {
+        let full = || marked.then_some(Extension(FullPersonSession));
+        let outcomes = [
+            (
+                "PUT",
+                answer(
+                    expression_grants::put(
+                        State(state.clone()),
+                        Extension(principal.clone()),
+                        full(),
+                        Path((ws.clone(), target.clone())),
+                    )
+                    .await,
+                )
+                .await,
+            ),
+            (
+                "DELETE",
+                answer(
+                    expression_grants::delete(
+                        State(state.clone()),
+                        Extension(principal.clone()),
+                        full(),
+                        Path((ws.clone(), target.clone())),
+                    )
+                    .await,
+                )
+                .await,
+            ),
+            (
+                "GET",
+                answer(
+                    expression_grants::get(
+                        State(state.clone()),
+                        Extension(principal.clone()),
+                        full(),
+                        Path((ws.clone(), target.clone())),
+                    )
+                    .await,
+                )
+                .await,
+            ),
+            (
+                "LIST",
+                answer(
+                    expression_grants::list(
+                        State(state.clone()),
+                        Extension(principal.clone()),
+                        full(),
+                        Path(ws.clone()),
+                    )
+                    .await,
+                )
+                .await,
+            ),
+        ];
+        for (route, (status, body)) in outcomes {
+            assert_eq!(status, 403, "{credential} {route}: {body}");
+            assert!(
+                body.contains(HUMAN_ONLY),
+                "{credential} {route}: the handler's own refusal, not a later one: {body}"
+            );
+        }
+        assert_eq!(live_grants(&w, &t, t.a.member).await, 0, "{credential}");
+        // The settings switch (Y3): only a person's full app session moves it. An agent principal is
+        // refused by the route's own `require_human`, a person without the marker by the switch's check.
+        if principal.kind == PrincipalKind::Agent {
+            let (status, body) = answer(
+                workspace_settings::patch(
+                    State(state.clone()),
+                    Extension(principal.clone()),
+                    full(),
+                    Path(ws.clone()),
+                    Query(serde_json::from_value(json!({})).unwrap()),
+                    Json(json!({"agent_self_expressions": false})),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(status, 403, "{credential} settings: {body}");
+        }
+        if principal.kind == PrincipalKind::Human {
+            let (status, body) = answer(
+                workspace_settings::patch(
+                    State(state.clone()),
+                    Extension(principal.clone()),
+                    full(),
+                    Path(ws.clone()),
+                    Query(serde_json::from_value(json!({})).unwrap()),
+                    Json(json!({"agent_self_expressions": false})),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(status, 403, "{credential} settings: {body}");
+            assert!(body.contains("agent_self_expressions"), "{body}");
+        }
+    }
+    let switch: Option<Value> = sqlx::query_scalar(
+        "SELECT settings->'agent_self_expressions' FROM workspace WHERE id = $1",
+    )
+    .bind(t.ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(switch, None, "the switch never moved");
+
+    // The control: the same administrator's full app session passes both.
+    let (status, body) = answer(
+        expression_grants::put(
+            State(state.clone()),
+            Extension(person.clone()),
+            Some(Extension(FullPersonSession)),
+            Path((ws.clone(), target.clone())),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = answer(
+        workspace_settings::patch(
+            State(state.clone()),
+            Extension(person.clone()),
+            Some(Extension(FullPersonSession)),
+            Path(ws.clone()),
+            Query(serde_json::from_value(json!({})).unwrap()),
+            Json(json!({"agent_self_expressions": false})),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+
+    // YA20's missing rows: the agent's owner who is not an administrator reads and revokes its own
+    // agent's grant; an administrator of another workspace reaches nothing of this one.
+    let channel: Uuid = sqlx::query_scalar(
+        "SELECT channel_id FROM membership WHERE workspace_id = $1 AND member_id = $2 LIMIT 1",
+    )
+    .bind(t.ws)
+    .bind(t.a.member)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let owned = seed_agent(&w.su, t.ws, t.member.member, channel).await;
+    let owned_path = format!(
+        "/v1/workspaces/{}/agents/{}/expression-grant",
+        t.ws, owned.member
+    );
+    let (status, body) = rest(&w, reqwest::Method::PUT, &t.admin.jwt, &owned_path).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = rest(&w, reqwest::Method::GET, &t.member.jwt, &owned_path).await;
+    assert_eq!((status, &body["granted"]), (200, &json!(true)), "{body}");
+    let (status, body) = rest(
+        &w,
+        reqwest::Method::GET,
+        &t.member.jwt,
+        &format!("/v1/workspaces/{}/expression-grants", t.ws),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let listed: Vec<String> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|item| {
+            item["agentMemberId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        vec![owned.member.to_string()],
+        "the owner's own agents only"
+    );
+    let (status, body) = rest(&w, reqwest::Method::DELETE, &t.member.jwt, &owned_path).await;
+    assert_eq!((status, &body["granted"]), (200, &json!(false)), "{body}");
+    let other = seed(&w.su).await;
+    for method in [
+        reqwest::Method::GET,
+        reqwest::Method::PUT,
+        reqwest::Method::DELETE,
+    ] {
+        let (status, body) = rest(&w, method.clone(), &other.admin.jwt, &grant_path(&t)).await;
+        assert!(
+            status == 403 || status == 404,
+            "another workspace's admin {method}: {status} {body}"
+        );
+    }
+    assert_eq!(
+        live_grants(&w, &t, t.a.member).await,
+        1,
+        "untouched by the other workspace"
+    );
+}
+
+async fn post_raw(w: &World, bearer: &str, tool: &str, body: Vec<u8>) -> u16 {
+    client()
+        .post(format!("{}{MCP_PATH}", w.base))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .header("mcp-name", tool)
+        .bearer_auth(bearer)
+        .body(body)
+        .send()
+        .await
+        .expect("tools/call")
+        .status()
+        .as_u16()
+}
+
+/// Y2.2 · X9-2 「2 MiB」 for door 가: a real picture past 64 KiB raises its card through an open door; the
+/// same body is 413 with no card while the switch over agents' own expressions is off, and for a
+/// credential without \`workspace:initiate\`; a body past 2 MiB is 413 even through an open door (the
+/// proposal's 6 MiB is not this door's).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_unasked_emoticons_big_body_is_read_only_through_its_open_door() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    let picture = noise_png(300);
+    let big = |name: &str| {
+        let mut arguments = emoticon_args(name);
+        arguments["args"]["candidates"][0]["image"]["dataBase64"] =
+            json!(base64::engine::general_purpose::STANDARD.encode(&picture));
+        serde_json::to_vec(&modern_body(
+            "tools/call",
+            json!({"name": INITIATE, "arguments": arguments}),
+        ))
+        .unwrap()
+    };
+    let approvals = |w: &World| {
+        let su = w.su.clone();
+        let ws = t.ws;
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id = $1")
+                .bind(ws)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    let body = big("big-unasked");
+    assert!(
+        body.len() > 64 * 1024 && body.len() < 2 * 1024 * 1024,
+        "{}",
+        body.len()
+    );
+    assert_eq!(post_raw(&w, &t.a.bearer, INITIATE, body).await, 200);
+    assert_eq!(approvals(&w).await, 1, "the card stands");
+
+    set_self_switch(&w, &t, false).await;
+    assert_eq!(
+        post_raw(&w, &t.a.bearer, INITIATE, big("big-off")).await,
+        413
+    );
+    assert_eq!(approvals(&w).await, 1, "no card through a closed door");
+    set_self_switch(&w, &t, true).await;
+
+    let mut over = big("big-over");
+    over.extend(vec![b' '; 2 * 1024 * 1024 + 16 - over.len()]);
+    assert_eq!(post_raw(&w, &t.a.bearer, INITIATE, over).await, 413);
+    assert_eq!(approvals(&w).await, 1, "past 2 MiB is not this door's");
+
+    exec(
+        &w.su,
+        "UPDATE token SET scopes = array_remove(scopes, 'workspace:initiate') \
+          WHERE workspace_id = $1 AND hosted_connection_id = $2",
+        &[t.ws, t.a.connection],
+    )
+    .await;
+    assert_eq!(
+        post_raw(&w, &t.a.bearer, INITIATE, big("big-unscoped")).await,
+        413
+    );
+    assert_eq!(approvals(&w).await, 1);
+}
+
+/// 「같은 에이전트 잠금」 (#6137): the register tool queues behind the agent's advisory key — the one the
+/// unasked-card door and a person's proposal take first — before it reads or writes anything; released, it
+/// goes on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_register_tool_queues_behind_the_agents_own_lock() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let mut holder = w.su.begin().await.expect("holder");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(momo_agent::initiative::initiative_lock_key(
+            t.ws, t.a.member,
+        ))
+        .execute(&mut *holder)
+        .await
+        .expect("hold the agent's key");
+    let base = w.base.clone();
+    let bearer = t.a.bearer.clone();
+    let task = tokio::spawn(async move {
+        let probe = World {
+            base,
+            addr: "127.0.0.1:0".parse().unwrap(),
+            su: PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url())
+                .await
+                .unwrap(),
+        };
+        call(&probe, &bearer, args("behind-the-lock")).await
+    });
+    let mut waiting = 0;
+    for _ in 0..200 {
+        waiting = count(
+            &w,
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+            &[],
+        )
+        .await;
+        if waiting >= 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(waiting, 1, "the call waits on the agent's key");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM expression_agent_call WHERE workspace_id = $1",
+            &[t.ws]
+        )
+        .await,
+        0,
+        "nothing is read or written past the lock"
+    );
+    holder.commit().await.expect("release");
+    let (status, body) = task.await.expect("the call");
+    assert_eq!(status, 200, "{body}");
+}
+
+/// X9-2 at the decision: the stored draft is proved again — a draft whose origin is no longer the agent's
+/// own picture (tampered as the superuser) is not registered; the approval stays pending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_decision_proves_the_unasked_draft_is_still_one_generated_picture() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("tampered")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    let props = card_props(&w, approval).await;
+    let mut tamper = w.su.begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tamper)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE expression_draft SET origin = jsonb_set(origin, '{kind}', '\"attachment\"') \
+          WHERE workspace_id = $1 AND approval_id = $2",
+    )
+    .bind(t.ws)
+    .bind(approval)
+    .execute(&mut *tamper)
+    .await
+    .expect("tamper");
+    tamper.commit().await.unwrap();
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.admin.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        None,
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(approval_status(&w, approval).await, "pending");
+    assert_eq!(expressions(&w, &t).await, 0);
 }

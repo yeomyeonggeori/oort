@@ -6500,6 +6500,14 @@ pub struct ApprovalDecisionRequest {
         alias = "deliverSecretToAgent"
     )]
     pub deliver_secret_to_agent: Option<bool>,
+    /// ADR-0218 증보 13 §19 Y2.1 ② · ADR-0186 v9 X9-3 (#6137) — 「승인하고 계속 허용」. Only an explicit
+    /// `true` asks for it: approving that agent's `expression.create` card then also gives the agent
+    /// the standing grant to register its own expressions without a card, in the same transaction. A
+    /// decision without it is 「이번만」 (one picture, no grant) — so an older client's approval is never a
+    /// standing one. Refused (and nothing spent) on anything but approving an agent's `expression.create`
+    /// card by an active administrator. Not part of the idempotency key, like `host_id`.
+    #[serde(default, rename = "keepAllowing", alias = "keep_allowing")]
+    pub keep_allowing: Option<bool>,
 }
 
 /// Swift `ApprovalDecisionReceiptDTO` — the body every decision outcome returns,
