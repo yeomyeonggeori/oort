@@ -38,7 +38,6 @@ const ALLOWED: readonly Allowed[] = [
   { file: "features/auth/ConnectPage.tsx", includes: "오프라인입니다", why: DEVICE_CERTAIN },
   { file: "features/auth/ConnectPage.tsx", includes: "오프라인 상태에서는", why: DEVICE_CERTAIN },
   { file: "features/downloads/downloadsCopy.ts", includes: "연결이 끊겨 받지 못했어요", why: "내려받기 한 건의 네트워크 실패 분류다: 연결 상태 모델의 게이트가 아니다" },
-  { file: "features/settings/DevAccessCreateForm.tsx", includes: "저절로 끊겨요", why: NOT_APP_SERVER },
   { file: "features/settings/DevAccessList.tsx", includes: "만든 연결이 없어요", why: NOT_APP_SERVER },
   { file: "features/settings/ThisMacHostBlock.tsx", includes: "등록됨, 오프라인", why: NOT_APP_SERVER },
   { file: "features/work/WorkPanel.tsx", includes: "연결이 끊긴 세션", why: NOT_APP_SERVER },

@@ -1,22 +1,47 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import {
-  CALM_BADGE,
+  CALM_BADGE_KEYS,
   agentHandleProblem,
-  attachInstrument,
-  calmDetail,
-  calmLine,
+  instrumentForm,
+  calmDetail as calmDetailMessage,
+  calmLine as calmLineMessage,
   classifyRegisterFailure,
-  confirmBullets,
-  confirmCreateLabel,
-  confirmTitle,
+  confirmBullets as confirmBulletsMessages,
+  confirmCreateLabel as confirmCreateLabelMessage,
+  confirmTitle as confirmTitleMessage,
   defaultAgentHandle,
-  doneDetail,
+  doneDetail as doneDetailMessage,
   handleToSend,
   isCalmRefusal,
-  manualDetail,
+  manualDetail as manualDetailMessage,
   registerRequestBody,
+  type RegisterMessage,
 } from "./subscriptionRegister";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+
+// 문장은 사전(`onboarding.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 문장을 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const say = (message: RegisterMessage): string =>
+  formatMessage(message.key, message.values as never);
+type Harness = Parameters<typeof confirmTitleMessage>[0];
+const calmLine = (...args: Parameters<typeof calmLineMessage>) => say(calmLineMessage(...args));
+const calmDetail = (...args: Parameters<typeof calmDetailMessage>) => say(calmDetailMessage(...args));
+const confirmTitle = (harness: Harness, handle: string) => say(confirmTitleMessage(harness, handle));
+const confirmCreateLabel = (handle: string) => say(confirmCreateLabelMessage(handle));
+const confirmBullets = (harness: Harness) => confirmBulletsMessages(harness).map(say);
+const doneDetail = (harness: Harness, handle: string) => say(doneDetailMessage(harness, handle));
+const manualDetail = (...args: Parameters<typeof manualDetailMessage>) => say(manualDetailMessage(...args));
+// 「으로/로」는 한국어 틀이 고르고 값은 `instrumentForm`이 준다: 이름 뒤에 붙은 모양을 같은 문장으로 본다.
+const attachInstrument = (word: string) => `${word}${instrumentForm(word) === "euro" ? "으로" : "로"}`;
+const CALM_BADGE = {
+  paused: formatMessage(CALM_BADGE_KEYS.paused),
+  disabled: formatMessage(CALM_BADGE_KEYS.disabled),
+};
 
 describe("거절 분류는 문장이 아니라 error.code다", () => {
   it("Claude 기본 꺼짐과 킬 스위치를 코드로 가른다", () => {
@@ -119,6 +144,8 @@ describe("이름", () => {
 
   it("이름 칸 검사는 서버 is_valid_handle과 같다", () => {
     expect(agentHandleProblem("ok_name-1")).toBeNull();
+    expect(formatMessage(agentHandleProblem("a")!)).toBe("두 글자 이상으로 적어 주세요.");
+    expect(formatMessage(agentHandleProblem("")!)).toBe("이름을 적어 주세요.");
     expect(agentHandleProblem("")).not.toBeNull();
     expect(agentHandleProblem("a")).not.toBeNull();
     expect(agentHandleProblem("a".repeat(33))).not.toBeNull();

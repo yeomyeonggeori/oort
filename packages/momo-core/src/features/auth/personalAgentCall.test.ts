@@ -13,10 +13,10 @@ vi.mock("../../lib/api", async (importOriginal) => {
 
 import { ApiError, type HumanSignatureRequest, type Message } from "../../lib/api";
 import {
-  CALL_MAC_OFF_LINE,
-  CALL_NEEDS_APP_LINE,
-  CALL_NOTHING_TO_ASK_LINE,
-  callFailureLine,
+  CALL_MAC_OFF_KEY,
+  CALL_NEEDS_APP_KEY,
+  CALL_NOTHING_TO_ASK_KEY,
+  callFailureMessage,
   callPersonalAgent,
   labelFromPrompt,
   toolKeyForHarness,
@@ -25,6 +25,19 @@ import {
   type CallPersonalAgentInput,
 } from "./personalAgentCall";
 import { SignerRefusal, type ControlToSign, type HumanControlSigner } from "./signedControl";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+import { failureMessageText, type FailureMessage } from "./failureMessage";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const say = (message: FailureMessage): string => failureMessageText(formatMessage, message);
+const CALL_NEEDS_APP_LINE = formatMessage(CALL_NEEDS_APP_KEY);
+const CALL_MAC_OFF_LINE = formatMessage(CALL_MAC_OFF_KEY);
+const callFailureLine = (error: unknown): string => say(callFailureMessage(error));
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CH = "00000000-0000-7000-8000-00000000cc01";
@@ -143,14 +156,23 @@ describe("calling a personal agent (#3592)", () => {
     const result = await callPersonalAgent(input({ signer: null }));
     expect(api.sendMessage).toHaveBeenCalledOnce();
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
-    expect(result.call).toEqual({ state: "message_only", reason: "no_signer", text: CALL_NEEDS_APP_LINE });
+    expect(result.call).toEqual({
+      state: "message_only",
+      reason: "no_signer",
+      message: { key: CALL_NEEDS_APP_KEY },
+    });
     expect(CALL_NEEDS_APP_LINE).toBe("데스크탑·폰에서 불러 주세요");
   });
 
   it("an alias with nothing after it sends the message and calls nothing", async () => {
     const { signer, signed } = recordingSigner();
     const result = await callPersonalAgent(input({ signer, text: "@gu-claude  " }));
-    expect(result.call).toEqual({ state: "message_only", reason: "nothing_to_ask", text: CALL_NOTHING_TO_ASK_LINE });
+    expect(result.call).toEqual({
+      state: "message_only",
+      reason: "nothing_to_ask",
+      message: { key: CALL_NOTHING_TO_ASK_KEY },
+    });
+    expect(formatMessage(CALL_NOTHING_TO_ASK_KEY)).toBe("무엇을 시킬지 적어 주세요. 별칭만 보내면 에이전트가 할 일이 없어요.");
     expect(signed).toHaveLength(0);
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
   });
@@ -163,7 +185,12 @@ describe("calling a personal agent (#3592)", () => {
     };
     const result = await callPersonalAgent(input({ signer }));
     expect(result.message.id).toBe(MSG);
-    expect(result.call).toMatchObject({ state: "not_delivered", stage: "sign", text: "Face ID를 취소해서 보내지 않았어요.", signed: null });
+    expect(result.call).toMatchObject({
+      state: "not_delivered",
+      stage: "sign",
+      message: { raw: "Face ID를 취소해서 보내지 않았어요." },
+      signed: null,
+    });
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
   });
 
@@ -171,7 +198,7 @@ describe("calling a personal agent (#3592)", () => {
     const { signer } = recordingSigner();
     api.postWorkSpawn.mockRejectedValueOnce(new ApiError(409, "offline", "work_host_offline"));
     const result = await callPersonalAgent(input({ signer }));
-    expect(result.call).toMatchObject({ state: "not_delivered", stage: "server", text: CALL_MAC_OFF_LINE });
+    expect(result.call).toMatchObject({ state: "not_delivered", stage: "server", message: { key: CALL_MAC_OFF_KEY } });
     expect(CALL_MAC_OFF_LINE).toContain("내 맥이 꺼져 있어요");
     const call = result.call;
     if (call.state !== "not_delivered" || call.signed === null) throw new Error("expected a resendable call");

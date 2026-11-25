@@ -19,15 +19,16 @@ import {
 } from "@momo/core/features/hostedAgents/api";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import {
-  AI_CONNECT_BOUNDARY_NOTE,
-  AI_CONNECT_DESKTOP_ONLY_NOTE,
-  AI_CONNECT_NON_ADMIN_LINE,
-  PERSONAL_UNAVAILABLE_LINE,
-  AI_CONNECT_QUESTION,
-  AI_CONNECT_SERVER_OFF_NOTE,
-  AI_CONNECT_SKIPPED_LINE,
+  AI_CONNECT_BOUNDARY_NOTE_KEY,
+  AI_CONNECT_DESKTOP_ONLY_NOTE_KEY,
+  AI_CONNECT_NON_ADMIN_LINE_KEY,
+  PERSONAL_UNAVAILABLE_KEY,
+  AI_CONNECT_QUESTION_KEY,
+  AI_CONNECT_SERVER_OFF_NOTE_KEY,
+  AI_CONNECT_SKIPPED_KEY,
   LOGIN_POLL_WINDOW_MS,
 } from "@momo/core/features/onboarding/aiConnect";
+import type { PlainMessageKey } from "@momo/core/i18n";
 import { LOGIN_ACTION_KEYS } from "@momo/core/features/onboarding/harnessLogin";
 import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -58,6 +59,8 @@ import { createMessageCopy } from "@momo/core/testkit";
 // 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
 const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 const koLocale = await koreanLocale();
+// 문장은 사전에 있다(#6064): 한국어 언어 객체로 풀어 예전 한국어를 그대로 단정한다.
+const koText = (key: PlainMessageKey): string => koLocale.service.formatMessage(key);
 
 
 const poseSlot = vi.hoisted(() => ({ current: null as string | null }));
@@ -525,7 +528,7 @@ describe("구독 줄 노출 (ADR-0193 D6, #2814)", () => {
     expect(q(host, "first-agent-server-off")).toBeNull();
     expect(q(host, "first-agent-desktop-only")).toBeNull();
     expect(vi.mocked(detectLocalHarnesses)).not.toHaveBeenCalled();
-    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_QUESTION);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(koText(AI_CONNECT_QUESTION_KEY));
   });
 
   it("데스크탑 + 플래그 + 서버 켬이면 에이전트 줄 아래에 내 도구 두 줄이 선다", async () => {
@@ -537,7 +540,7 @@ describe("구독 줄 노출 (ADR-0193 D6, #2814)", () => {
     expect(q(host, "ai-connect-group-agents")?.textContent).toBe("에이전트");
     expect(q(host, "ai-connect-group-tools")?.textContent).toBe("내 도구");
     expect(host.querySelector("#ai-connect-claude-detail")?.closest("[data-testid=ai-connect-row]")?.textContent).toContain("Claude Code · 내 도구");
-    expect(host.textContent).toContain(AI_CONNECT_BOUNDARY_NOTE);
+    expect(host.textContent).toContain(koText(AI_CONNECT_BOUNDARY_NOTE_KEY));
   });
 
   it("서버 킬 스위치가 꺼지면 구독 줄을 숨기고 API 키 줄이 맨 위, 이유 한 줄", async () => {
@@ -546,7 +549,7 @@ describe("구독 줄 노출 (ADR-0193 D6, #2814)", () => {
     const host = mountStage();
     await waitFor(() => q(host, "first-agent-server-off") !== null, "server-off");
     expect(rowIds(host)).toEqual(["api-key", "grok"]);
-    expect(q(host, "first-agent-server-off")?.textContent).toBe(AI_CONNECT_SERVER_OFF_NOTE);
+    expect(q(host, "first-agent-server-off")?.textContent).toBe(koText(AI_CONNECT_SERVER_OFF_NOTE_KEY));
     expect(host.querySelector("#ai-connect-claude")).toBeNull();
   });
 
@@ -565,7 +568,7 @@ describe("구독 줄 노출 (ADR-0193 D6, #2814)", () => {
     vi.mocked(fetchWorkspace).mockResolvedValue(workspaceIdentity(true));
     const host = mountStage();
     await waitFor(() => q(host, "first-agent-desktop-only") !== null, "desktop-only");
-    expect(q(host, "first-agent-desktop-only")?.textContent).toBe(AI_CONNECT_DESKTOP_ONLY_NOTE);
+    expect(q(host, "first-agent-desktop-only")?.textContent).toBe(koText(AI_CONNECT_DESKTOP_ONLY_NOTE_KEY));
     expect(rowIds(host)).toEqual(["api-key", "grok"]);
     expect(vi.mocked(detectLocalHarnesses)).not.toHaveBeenCalled();
   });
@@ -607,7 +610,7 @@ describe("알약과 선택", () => {
     );
     expect(q(host, "ai-connect-pill-claude")?.textContent).toBe("설치 필요");
     expect(host.querySelector<HTMLInputElement>("#ai-connect-claude")?.disabled).toBe(true);
-    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_QUESTION);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(koText(AI_CONNECT_QUESTION_KEY));
   });
 
   it("감지가 끝나기 전에는 확인 중… 이고 코메토는 생각하며, 로그인 명령 줄은 없다", async () => {
@@ -842,7 +845,7 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
       () => q(host, "ai-connect-pill-claude")?.getAttribute("data-pill") === "server-closed",
       "closed"
     );
-    expect(q(host, "first-agent-heading")?.textContent).toBe(PERSONAL_UNAVAILABLE_LINE);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(koText(PERSONAL_UNAVAILABLE_KEY));
     expect(host.querySelector("#ai-connect-claude-detail")?.textContent).toBe(
       "이 서버에서는 아직 켤 수 없어요"
     );
@@ -1067,7 +1070,7 @@ describe("[지금은 건너뛰기] → 코메토 졸림 + 재진입 위치", () 
     expect(q(host, "first-agent-skip")?.textContent).toBe("지금은 건너뛰기");
     click(q(host, "first-agent-skip"));
     await waitFor(() => q(host, "first-agent-skipped") !== null, "skipped");
-    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_SKIPPED_LINE);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(koText(AI_CONNECT_SKIPPED_KEY));
     expect(q(host, "kometto-guide")?.getAttribute("data-expression")).toBe("sleepy");
     expect(readFirstAgentMarker(WS)).toBeNull();
     expect(continued).toBe(0);
@@ -1091,7 +1094,7 @@ describe("관리자가 아닌 멤버 (#3697)", () => {
     vi.mocked(fetchRoster).mockResolvedValue([{ ...human, role: "member" }]);
     const host = mountStage();
     await waitFor(() => q(host, "first-agent-non-admin") !== null, "non-admin");
-    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_NON_ADMIN_LINE);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(koText(AI_CONNECT_NON_ADMIN_LINE_KEY));
     expect(q(host, "ai-connect-list")).toBeNull();
     expect(q(host, "first-agent-error")).toBeNull();
     click(q(host, "first-agent-non-admin-continue"));
@@ -1107,7 +1110,7 @@ describe("관리자가 아닌 멤버 (#3697)", () => {
     const host = mountStage();
     await waitFor(() => q(host, "first-agent-non-admin") !== null, "non-admin");
     expect(q(host, "first-agent-error")).toBeNull();
-    expect(q(host, "first-agent-heading")?.textContent).toBe(AI_CONNECT_NON_ADMIN_LINE);
+    expect(q(host, "first-agent-heading")?.textContent).toBe(koText(AI_CONNECT_NON_ADMIN_LINE_KEY));
   });
 
   it("관리자는 그대로 목록이 선다", async () => {

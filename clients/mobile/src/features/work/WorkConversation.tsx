@@ -1,4 +1,5 @@
-import {NOT_DELIVERED} from '@momo/core/features/auth/signedControl';
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import type {WorkSession} from '@momo/core/lib/api';
 import type {WorkSessionEvent} from '@momo/core/features/work/workSessionModel';
 import {ROW_STATE_LABEL} from '@momo/core/features/work/workSessionModel';
@@ -666,6 +667,7 @@ export function WorkConversation({
   /** 대화 사이 카드의 막힘 문장이 말하는 답할 곳(#5593 수리 3회차 M2, `workRunnerPlace`). */
   hostName?: string;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const queryClient = useQueryClient();
   const surface = useSignedWorkSurface(workspaceId, memberId, session, events, hostName);
   const [pending, setPending] = useState<PendingSend[]>([]);
@@ -717,7 +719,10 @@ export function WorkConversation({
     async (text: string, mode: 'queue' | 'interrupt'): Promise<SendOutcome> => {
       const actions = surface.actions;
       if (actions === null) {
-        return {ok: false, text: `${NOT_DELIVERED} · ${SIGNING_LOADING_NOTICE}`};
+        return {
+          ok: false,
+          text: formatMessage('auth.signedControl.notDeliveredWith', {reason: SIGNING_LOADING_NOTICE}),
+        };
       }
       counter.current += 1;
       const localId = `pending-${counter.current}`;
@@ -728,7 +733,12 @@ export function WorkConversation({
       const out = await actions.instruct(text, mode);
       if (out.state === 'not_delivered') {
         if (alive.current) setPending(list => list.filter(p => p.localId !== localId));
-        return {ok: false, text: `${NOT_DELIVERED} · ${out.text}`};
+        return {
+          ok: false,
+          text: formatMessage('auth.signedControl.notDeliveredWith', {
+            reason: failureMessageText(formatMessage, out.message),
+          }),
+        };
       }
       if (alive.current) {
         setPending(list =>
@@ -743,7 +753,7 @@ export function WorkConversation({
       });
       return {ok: true};
     },
-    [surface.actions, queryClient, eventsKey],
+    [surface.actions, queryClient, eventsKey, formatMessage],
   );
 
   const renderPermission = useCallback(

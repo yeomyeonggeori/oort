@@ -13,15 +13,29 @@ import {
 } from "@momo/core/features/workbench/agentPane";
 import { CONFIRM_GUARD_MS } from "@/features/timeline/ApprovalActions";
 import {
-  ALLOW_IN_APP_LINE,
   AgentProgressView,
   DECIDE_UNAVAILABLE,
-  REPLY_IN_APP_HINT,
   REPLY_IN_APP_PLACEHOLDER,
   REPLY_UNAVAILABLE,
   type AgentPaneActions,
 } from "./AgentProgressView";
-import { humanSignatureRefusal, type InstructFrom } from "@momo/core/features/auth/humanSignature";
+import {
+  ALLOW_IN_APP_KEY,
+  REPLY_IN_APP_KEY,
+  humanSignatureRefusal as humanSignatureRefusalModel,
+  type InstructFrom,
+} from "@momo/core/features/auth/humanSignature";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 한국어 언어 객체 아래에서 예전 한국어를 그대로 단정한다.
+const koLocale = await koreanLocale();
+const ALLOW_IN_APP_LINE = koLocale.service.formatMessage(ALLOW_IN_APP_KEY);
+const REPLY_IN_APP_HINT = koLocale.service.formatMessage(REPLY_IN_APP_KEY);
+const humanSignatureRefusal = (error: unknown) => {
+  const refusal = humanSignatureRefusalModel(error);
+  return refusal === null ? null : { fix: refusal.fix, text: koLocale.service.formatMessage(refusal.key) };
+};
 import vectorsV3 from "../../../../../../docs/api/human-control-signing-v3.vectors.json";
 import {
   PERMISSION_PREVIEW_BLOCK_LINE,
@@ -114,7 +128,12 @@ function render(
     root = createRoot(host);
   }
   act(() => {
-    root!.render(createElement(AgentProgressView, { model: m, ownerName, actions, offline, instructFrom }));
+    root!.render(
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: createElement(AgentProgressView, { model: m, ownerName, actions, offline, instructFrom }),
+      })
+    );
   });
   return host;
 }
@@ -351,7 +370,7 @@ describe("decision outcomes (#3013)", () => {
     expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
     expect((q('[data-testid="agent-permission-allow"]') as HTMLButtonElement).disabled).toBe(true);
     expect((q('[data-testid="agent-permission-reject"]') as HTMLButtonElement).disabled).toBe(true);
-    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("You're offline, so you can't decide right now. You can press it once you're connected again.");
+    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요.");
     expect(decide).not.toHaveBeenCalled();
   });
 
@@ -508,7 +527,7 @@ describe("browser instructs from the app (#3029)", () => {
   it("offline or cramped reasons win over the app line (one reason at a time)", () => {
     render(model(events()), { decide: async () => undefined, reply: null }, "한지후", true, "app");
     expect(q('[data-testid="agent-permission-in-app"]')).toBeNull();
-    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("You're offline, so you can't decide right now. You can press it once you're connected again.");
+    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 누를 수 있어요.");
   });
 
   it.each([
@@ -640,7 +659,7 @@ describe("signed surface (#3028)", () => {
   it("an undelivered 「거부 + 지시」 is added after a draft already in the reply box, never dropped", async () => {
     const rejectWithInstruction = vi.fn(async () => ({
       state: "rejected" as const,
-      instruction: { state: "not_delivered" as const, stage: "server" as const, text: "호스트", error: null },
+      instruction: { state: "not_delivered" as const, stage: "server" as const, message: { raw: "호스트" }, error: null },
     }));
     render(model(events()), { decide: vi.fn(async () => undefined), reply: vi.fn(), sessionScope: true, rejectWithInstruction });
     typeInto('[data-testid="agent-pane-reply-input"]', "쓰던 글");
@@ -653,7 +672,7 @@ describe("signed surface (#3028)", () => {
   it("a cancelled signature on 「거부 + 지시」 keeps the card and says 「전달 안 됨」", async () => {
     const rejectWithInstruction = vi.fn(async () => ({
       state: "not_sent" as const,
-      text: "서명을 취소해서 보내지 않았어요.",
+      message: { raw: "서명을 취소해서 보내지 않았어요." },
       error: null,
     }));
     render(model(events()), { decide: vi.fn(async () => undefined), reply: null, sessionScope: true, rejectWithInstruction });
@@ -670,7 +689,7 @@ describe("signed surface (#3028)", () => {
       instruction: {
         state: "not_delivered" as const,
         stage: "server" as const,
-        text: "호스트가 90초 넘게 응답하지 않아 보내지 않았어요.",
+        message: { raw: "호스트가 90초 넘게 응답하지 않아 보내지 않았어요." },
         error: null,
       },
     }));
@@ -693,7 +712,7 @@ describe("signed surface (#3028)", () => {
     const reply = vi.fn(async () => ({
       state: "not_delivered" as const,
       stage: "sign" as const,
-      text: "서명을 취소해서 보내지 않았어요.",
+      message: { raw: "서명을 취소해서 보내지 않았어요." },
       error: null,
     }));
     render(model([tool("bash")]), { decide: null, reply });
@@ -746,7 +765,15 @@ describe("signed preview gate (#3128)", () => {
     }
     act(() => {
       root!.render(
-        createElement(AgentProgressView, { model: model(events()), ownerName: "한지후", actions, previewGate: gate })
+        createElement(LocaleProvider, {
+          locale: koLocale,
+          children: createElement(AgentProgressView, {
+            model: model(events()),
+            ownerName: "한지후",
+            actions,
+            previewGate: gate,
+          }),
+        })
       );
     });
   }

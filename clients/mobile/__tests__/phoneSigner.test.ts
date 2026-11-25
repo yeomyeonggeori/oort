@@ -5,7 +5,17 @@ jest.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: () => null,
 }));
 
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
 import {SignerRefusal, type ControlToSign} from '@momo/core/features/auth/signedControl';
+import {createLocaleService, resolveLocaleContext} from '@momo/core/i18n';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+
+// 거절 문장은 사전에 있거나 서명자가 지은 글이다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const {formatMessage} = createLocaleService({
+  ...resolveLocaleContext('ko-KR', {languages: ['ko-KR']}),
+  catalog: koCatalog,
+});
+const sentence = (refusal: SignerRefusal): string => failureMessageText(formatMessage, refusal.refusal);
 
 import {humanControlPayload, signHumanControl as humanSign, type SignHumanControlInput} from '../src/deviceKey/humanControl';
 import {DeviceKeyError} from '../src/deviceKey/native';
@@ -200,7 +210,7 @@ describe('phoneSigner', () => {
       .sign({...allow, content: bare as ControlToSign['content']})
       .catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(SignerRefusal);
-    expect((error as SignerRefusal).message).toContain('미리보기');
+    expect(sentence(error as SignerRefusal)).toContain('미리보기');
     expect(native).not.toHaveBeenCalled();
   });
 
@@ -243,8 +253,8 @@ describe('phoneSigner', () => {
     const error = (await signer.sign(control).catch((x: unknown) => x)) as SignerRefusal;
     expect(error).toBeInstanceOf(SignerRefusal);
     expect(error.cancelled).toBe(cancelled);
-    expect(error.message).not.toContain('DEVICE_KEY');
-    expect(error.message).toMatch(/요\.$/);
-    expect(phoneSignerRefusal(new DeviceKeyError(code, 'x')).message).toBe(error.message);
+    expect(sentence(error)).not.toContain('DEVICE_KEY');
+    expect(sentence(error)).toMatch(/요\.$/);
+    expect(sentence(phoneSignerRefusal(new DeviceKeyError(code, 'x')))).toBe(sentence(error));
   });
 });

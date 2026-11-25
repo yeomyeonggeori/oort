@@ -7,7 +7,7 @@ import type {
 } from "@momo/core/features/hostedAgents/detect";
 import {
   AI_CONNECT_ROW_COPY,
-  AI_CONNECT_SERVER_OFF_NOTE,
+  AI_CONNECT_SERVER_OFF_NOTE_KEY,
   harnessPill,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
@@ -24,6 +24,7 @@ import {
   type MyAccountRow,
 } from "@momo/core/features/settings/harnessProfiles";
 import { Button } from "@/design/ui/button";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -120,6 +121,7 @@ export function AiMyAccountsSection({
   title?: string;
   scope?: string;
 }) {
+  const formatMessage = useFormatMessage();
   const state = useSubscriptionEntryState();
   const browserTab = myAccountsBrowserTab(state, IS_TAURI);
   useReentryFocusReturn();
@@ -149,7 +151,7 @@ export function AiMyAccountsSection({
               className="text-meta text-ink-muted"
               data-testid="subscription-entry-detail"
             >
-              {AI_CONNECT_SERVER_OFF_NOTE}
+              {formatMessage(AI_CONNECT_SERVER_OFF_NOTE_KEY)}
             </span>
           )}
           {state === "denied" && (
@@ -595,7 +597,8 @@ function MyAccountRowView({
   onDestructive: (opener: HTMLElement | null) => void;
 }) {
   // 판정은 코어 한 곳(#2941): 채팅 연결 카드의 같은 줄과 같은 알약이다.
-  const view = harnessPillView(pill);
+  const formatMessage = useFormatMessage();
+  const view = harnessPillView(formatMessage, pill);
   const title = myAccountRowTitle(row);
   const moreRef = useRef<HTMLButtonElement>(null);
   const testId =
@@ -613,7 +616,7 @@ function MyAccountRowView({
       data-kind={row.kind}
     >
       <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
-        <AiLogo mark={AI_CONNECT_ROW_COPY[row.harness].mark} />
+        <AiLogo mark={formatMessage(AI_CONNECT_ROW_COPY[row.harness].markKey)} />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="break-keep text-body font-semibold text-ink [overflow-wrap:anywhere]">
             {title}

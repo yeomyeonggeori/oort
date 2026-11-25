@@ -3,9 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { devAccessError } from "@momo/core/features/auth/devAccess";
 import {
   DEV_NOTICES,
-  devAccessErrorText,
+  devAccessErrorMessage,
   devAccessGate,
 } from "@momo/core/features/auth/devAccessModel";
+import type { DevMessage } from "@momo/core/features/auth/devAccessModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { DevAccessCreateForm } from "./DevAccessCreateForm";
 import { DevAccessList } from "./DevAccessList";
@@ -32,7 +34,7 @@ const INTRO =
   "터미널이나 Claude Code, Codex 같은 도구가 내 계정으로 oort를 읽고 쓸 수 있게 연결을 만들어요. 연결마다 값이 한 번만 보여요.";
 
 /** 안내 카드에 서는 코어의 사실들. `revokeWarning`은 지우기 확인 문장이라 목록 쪽에 선다. */
-const NOTICE_LINES: readonly string[] = [
+const NOTICE_MESSAGES: readonly DevMessage[] = [
   DEV_NOTICES.passwordChangeEndsAll,
   DEV_NOTICES.logoutKeepsConnections,
   DEV_NOTICES.toolIsOnlyALabel,
@@ -51,6 +53,7 @@ export function DevAccessSection({
   memberId: string;
   offline: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const policy = useQuery(devAccessPolicyQuery(workspaceId));
   // 만든 직후 스크린리더에 알린다. 이름만 담고 값은 절대 담지 않는다.
   const [announce, setAnnounce] = useState("");
@@ -65,6 +68,12 @@ export function DevAccessSection({
   // (절전 복귀·Wi-Fi 재연결이 부르는 재조회) 쿼리는 지난 답을 쥔 채 오류 상태가 되는데, 그때 폼을 거두면
   // 값이 말없이 사라진다. 스위치가 닫혔다고 읽혀도 값 화면이 떠 있는 동안은 폼이 남는다(`revealUp`).
   const gate = policy.data !== undefined ? devAccessGate(policy.data) : null;
+  const gateText =
+    gate === null ? "" : formatMessage(gate.message.key, gate.message.values as never);
+  const policyError =
+    policy.isError && policy.data === undefined
+      ? devAccessErrorMessage(devAccessError(policy.error), "policy")
+      : null;
   const canStart = gate?.state === "open";
   const showForm = canStart || revealUp;
 
@@ -73,9 +82,9 @@ export function DevAccessSection({
       <SettingsSection title="연결 안내" description={INTRO} testId="dev-access-notes">
         <CardBody>
           <ul className="flex list-outside list-disc flex-col gap-1 ps-4">
-            {NOTICE_LINES.map((line) => (
-              <li key={line} className="break-keep text-body text-ink-muted">
-                {line}
+            {NOTICE_MESSAGES.map((notice) => (
+              <li key={notice.key} className="break-keep text-body text-ink-muted">
+                {formatMessage(notice.key, notice.values as never)}
               </li>
             ))}
           </ul>
@@ -97,7 +106,11 @@ export function DevAccessSection({
         <SettingsSection title="새 연결 만들기" testId="dev-access-create-card">
           <CardBody>
             <InlineBanner
-              message={devAccessErrorText(devAccessError(policy.error), "policy")}
+              message={
+                policyError === null
+                  ? ""
+                  : formatMessage(policyError.key, policyError.values as never)
+              }
               actionLabel="다시 시도"
               onAction={() => void policy.refetch()}
               className="px-0"
@@ -117,7 +130,7 @@ export function DevAccessSection({
               data-testid="dev-access-gate"
               data-gate-state={gate.state}
             >
-              {gate.text}
+              {gateText}
             </p>
           </CardBody>
         </SettingsSection>
@@ -128,7 +141,7 @@ export function DevAccessSection({
           workspaceId={workspaceId}
           memberId={memberId}
           offline={offline}
-          gateText={gate?.state === "open" ? gate.text : ""}
+          gateText={gate?.state === "open" ? gateText : ""}
           nameFieldId={NAME_FIELD_ID}
           onSaved={onSaved}
           onRevealChange={setRevealUp}

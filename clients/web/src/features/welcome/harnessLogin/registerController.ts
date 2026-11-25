@@ -16,6 +16,7 @@
 // =============================================================================
 
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
+import type { PlainMessageKey } from "@momo/core/i18n";
 import {
   parseRegisteredSubscriptionAgent,
   type RegisteredSubscriptionAgent,
@@ -25,9 +26,9 @@ import {
   type SubscriptionConnectPlan,
 } from "@momo/core/features/onboarding/aiConnect";
 import {
-  FAILED_REASON_DEFAULT,
-  HANDLE_TAKEN_PROBLEM,
-  NAME_INVALID_PROBLEM,
+  FAILED_REASON_DEFAULT_KEY,
+  HANDLE_TAKEN_KEY,
+  NAME_INVALID_KEY,
   agentHandleProblem,
   classifyRegisterFailure,
   registerRequestBody,
@@ -62,7 +63,7 @@ export interface RegisterState {
   /** 서버가 정한 에이전트(등록 뒤). */
   agent: { id: string; handle: string; displayName: string } | null;
   /** 서버 오류의 분류가 `failed`일 때 한 줄 까닭(영어 서버 문장이 아니다). */
-  reason: string | null;
+  reason: PlainMessageKey | null;
 }
 
 function manualWhyFor(outcome: Extract<AgentPortConnectOutcome, { outcome: "manual" }>): ManualWhy {
@@ -101,7 +102,7 @@ export function createRegisterController(
     listeners.forEach((listener) => listener());
   };
 
-  const toConfirm = (problem: string) =>
+  const toConfirm = (problem: PlainMessageKey) =>
     set({ step: { step: "confirm", problem }, plan: null, reason: null });
 
   async function run(): Promise<void> {
@@ -114,7 +115,7 @@ export function createRegisterController(
     const device = await deps.device();
     if (disposed) return;
     if (device === null) {
-      set({ step: { step: "failed" }, reason: FAILED_REASON_DEFAULT });
+      set({ step: { step: "failed" }, reason: FAILED_REASON_DEFAULT_KEY });
       return;
     }
     let registered: RegisteredSubscriptionAgent;
@@ -134,8 +135,8 @@ export function createRegisterController(
       // 오류 객체는 기록하지 않는다. 분류만 쓴다.
       const refusal = classifyRegisterFailure(error);
       if (disposed) return;
-      if (refusal === "handle-taken") return toConfirm(HANDLE_TAKEN_PROBLEM);
-      if (refusal === "invalid-name") return toConfirm(NAME_INVALID_PROBLEM);
+      if (refusal === "handle-taken") return toConfirm(HANDLE_TAKEN_KEY);
+      if (refusal === "invalid-name") return toConfirm(NAME_INVALID_KEY);
       if (
         refusal === "paused" ||
         refusal === "disabled" ||
@@ -146,7 +147,7 @@ export function createRegisterController(
         set({ step: { step: "calm", refusal }, plan: null });
         return;
       }
-      set({ step: { step: "failed" }, reason: FAILED_REASON_DEFAULT });
+      set({ step: { step: "failed" }, reason: FAILED_REASON_DEFAULT_KEY });
       return;
     }
     if (disposed) return;
@@ -160,7 +161,7 @@ export function createRegisterController(
     }
     const endpoint = deps.endpoint();
     if (endpoint === null) {
-      set({ step: { step: "failed" }, reason: FAILED_REASON_DEFAULT, plan: null });
+      set({ step: { step: "failed" }, reason: FAILED_REASON_DEFAULT_KEY, plan: null });
       return;
     }
     if (harness !== "claude") {

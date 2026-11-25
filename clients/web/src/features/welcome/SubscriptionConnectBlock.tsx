@@ -1,17 +1,19 @@
 import { useState } from "react";
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
+import type { PlainMessageKey } from "@momo/core/i18n";
 import {
-  CONNECT_COMMAND_ARIA,
-  CONNECT_CREDENTIAL_LABEL,
-  CONNECT_ENDPOINT_LABEL,
-  CONNECT_HANDED_OFF_STATUS,
-  COPIED_LABEL,
-  COPY_ACTION_LABEL,
+  CONNECT_COMMAND_ARIA_KEY,
+  CONNECT_CREDENTIAL_KEY,
+  CONNECT_ENDPOINT_KEY,
+  CONNECT_HANDED_OFF_STATUS_KEY,
+  COPIED_KEY,
+  COPY_ACTION_KEY,
   HARNESS_LABEL,
-  OPEN_TERMINAL_LABEL,
-  TERMINAL_OPEN_FAILED,
+  OPEN_TERMINAL_KEY,
+  TERMINAL_OPEN_FAILED_KEY,
   type SubscriptionConnectPlan,
 } from "@momo/core/features/onboarding/aiConnect";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { Button } from "@/design/ui/button";
@@ -45,20 +47,27 @@ export function SubscriptionConnectBlock({
   /** 복사 또는 터미널 열기 뒤. ① → ② 감지 대기로 넘어간다. */
   onHandedOff: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   if (plan.kind === "fields") {
     return (
       <div className="flex min-w-0 flex-col gap-2" data-testid="first-agent-connect-fields">
         <CopyField
-          label={CONNECT_ENDPOINT_LABEL}
+          label={formatMessage(CONNECT_ENDPOINT_KEY)}
           value={plan.endpoint}
-          subject={`${HARNESS_LABEL[harness]} ${CONNECT_ENDPOINT_LABEL}`}
+          subject={formatMessage("onboarding.aiConnectCopy.spaced", {
+            first: HARNESS_LABEL[harness],
+            second: formatMessage(CONNECT_ENDPOINT_KEY),
+          })}
           testId="first-agent-connect-endpoint"
           onCopied={onHandedOff}
         />
         <CopyField
-          label={CONNECT_CREDENTIAL_LABEL}
+          label={formatMessage(CONNECT_CREDENTIAL_KEY)}
           value={plan.credential}
-          subject={`${HARNESS_LABEL[harness]} ${CONNECT_CREDENTIAL_LABEL}`}
+          subject={formatMessage("onboarding.aiConnectCopy.spaced", {
+            first: HARNESS_LABEL[harness],
+            second: formatMessage(CONNECT_CREDENTIAL_KEY),
+          })}
           testId="first-agent-connect-credential"
           onCopied={onHandedOff}
         />
@@ -79,13 +88,15 @@ function CommandLine({
   openAsPrimary: boolean;
   onHandedOff: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { copied, copy } = useClipboardCopy(command);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<PlainMessageKey | null>(null);
 
   const handleOpen = async () => {
     const didCopy = await copy();
     const opened = await openTerminalApp();
-    setStatus(opened && didCopy ? CONNECT_HANDED_OFF_STATUS : TERMINAL_OPEN_FAILED);
+    // 서 있는 문장이 언어를 따라가도록 키를 들고 있다가 그릴 때 푼다.
+    setStatus(opened && didCopy ? CONNECT_HANDED_OFF_STATUS_KEY : TERMINAL_OPEN_FAILED_KEY);
     onHandedOff();
   };
 
@@ -98,7 +109,7 @@ function CommandLine({
       <div
         className="ai-connect-command"
         role="group"
-        aria-label={CONNECT_COMMAND_ARIA}
+        aria-label={formatMessage(CONNECT_COMMAND_ARIA_KEY)}
         data-testid="first-agent-connect-command"
       >
         <code className="ai-connect-command-text" data-testid="first-agent-connect-command-text">
@@ -110,11 +121,14 @@ function CommandLine({
             type="button"
             variant="ghost"
             size="sm"
-            aria-label={`${CONNECT_COMMAND_ARIA} ${copied ? COPIED_LABEL : COPY_ACTION_LABEL}`}
+            aria-label={formatMessage("onboarding.aiConnectCopy.spaced", {
+              first: formatMessage(CONNECT_COMMAND_ARIA_KEY),
+              second: formatMessage(copied ? COPIED_KEY : COPY_ACTION_KEY),
+            })}
             onClick={() => void handleCopy()}
             data-testid="first-agent-connect-copy"
           >
-            {copied ? COPIED_LABEL : COPY_ACTION_LABEL}
+            {formatMessage(copied ? COPIED_KEY : COPY_ACTION_KEY)}
           </Button>
         </div>
       </div>
@@ -129,14 +143,14 @@ function CommandLine({
         onClick={() => void handleOpen()}
         data-testid="first-agent-connect-open"
       >
-        {OPEN_TERMINAL_LABEL}
+        {formatMessage(OPEN_TERMINAL_KEY)}
       </Button>
       <p
         role="status"
         className={cn("break-keep text-meta text-ink-muted", status === null && "sr-only")}
         data-testid="first-agent-connect-status"
       >
-        {status ?? ""}
+        {status === null ? "" : formatMessage(status)}
       </p>
     </div>
   );
@@ -155,6 +169,7 @@ function CopyField({
   testId: string;
   onCopied: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { copied, copy } = useClipboardCopy(value);
   return (
     <div className="onboarding-field-block">
@@ -166,7 +181,10 @@ function CopyField({
             type="button"
             variant="ghost"
             size="sm"
-            aria-label={`${subject} ${copied ? COPIED_LABEL : COPY_ACTION_LABEL}`}
+            aria-label={formatMessage("onboarding.aiConnectCopy.spaced", {
+              first: subject,
+              second: formatMessage(copied ? COPIED_KEY : COPY_ACTION_KEY),
+            })}
             onClick={() => {
               void copy().then((ok) => {
                 if (ok) onCopied();
@@ -174,7 +192,7 @@ function CopyField({
             }}
             data-testid={`${testId}-copy`}
           >
-            {copied ? COPIED_LABEL : COPY_ACTION_LABEL}
+            {formatMessage(copied ? COPIED_KEY : COPY_ACTION_KEY)}
           </Button>
         </div>
       </div>

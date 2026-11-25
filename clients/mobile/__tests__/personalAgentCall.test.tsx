@@ -2,7 +2,10 @@ jest.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: () => null,
 }));
 
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
 import {callPersonalAgent} from '@momo/core/features/auth/personalAgentCall';
+import {createLocaleService, resolveLocaleContext} from '@momo/core/i18n';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {
   SignerRefusal,
   type ControlToSign,
@@ -34,6 +37,12 @@ import {
   type CallDeps,
 } from '../src/features/conversation/personalAgentCallModel';
 import {KEY_NOT_READY_DETAIL} from '../src/features/work/ask/model';
+
+// 사유의 문장은 사전에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const {formatMessage} = createLocaleService({
+  ...resolveLocaleContext('ko-KR', {languages: ['ko-KR']}),
+  catalog: koCatalog,
+});
 import {
   __resetSpawnPort,
   registerSpawnPort,
@@ -178,18 +187,17 @@ describe('목적지 — 내 켜진 맥의 질문용 폴더', () => {
   });
 
   it('맥 없음·꺼짐·질문용 폴더 없음은 서명 없이 사람 말로 멈춘다', () => {
-    expect(pickDestination([], ME, 'claude')).toEqual({
-      kind: 'none',
-      sentence: '연결된 내 맥을 찾지 못했어요. 데스크탑 앱에서 내 맥을 연결해 주세요.',
-    });
-    expect(pickDestination([mac({online: false})], ME, 'claude')).toEqual({
-      kind: 'none',
-      sentence: '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.',
-    });
-    expect(pickDestination([mac({defaultFolderId: undefined})], ME, 'claude')).toEqual({
-      kind: 'none',
-      sentence: '내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요.',
-    });
+    const none = (pick: ReturnType<typeof pickDestination>): string | null =>
+      pick.kind === 'none' ? failureMessageText(formatMessage, pick.message) : null;
+    expect(none(pickDestination([], ME, 'claude'))).toBe(
+      '연결된 내 맥을 찾지 못했어요. 데스크탑 앱에서 내 맥을 연결해 주세요.',
+    );
+    expect(none(pickDestination([mac({online: false})], ME, 'claude'))).toBe(
+      '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.',
+    );
+    expect(none(pickDestination([mac({defaultFolderId: undefined})], ME, 'claude'))).toBe(
+      '내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요.',
+    );
   });
 
   it('남의 맥·팀 맥은 후보가 아니다', () => {
@@ -352,9 +360,12 @@ describe('runPersonalAgentCall — 메시지 → 서명 → /work-spawns', () =>
     const run = await runWith(signer, deps({}, [mac({online: false})]));
     expect(run).toEqual({
       kind: 'plain',
-      sentence: '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.',
+      message: {key: 'auth.personalCall.macOff'},
       clientMsgId: 'client-msg-1',
     });
+    expect(formatMessage('auth.personalCall.macOff')).toBe(
+      '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.',
+    );
     expect(signer.seen).toEqual([]);
     expect(wire).toEqual([]);
   });
@@ -366,19 +377,23 @@ describe('runPersonalAgentCall — 메시지 → 서명 → /work-spawns', () =>
     expect(run).toMatchObject({
       kind: 'sent',
       wait: null,
-      call: {state: 'not_delivered', stage: 'sign', text: KEY_NOT_READY_DETAIL},
+      call: {state: 'not_delivered', stage: 'sign', message: {raw: KEY_NOT_READY_DETAIL}},
     });
   });
 
   it.each([
-    ['work_host_offline', 409, '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.'],
-    ['signed_spawn_disabled', 403, '이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요.'],
-    ['spawn_agent_not_allowed', 403, '이 개인 에이전트는 지금 부를 수 없어요. 켜져 있는지 확인해 주세요.'],
-    ['pool_exhausted', 429, '지금 돌릴 수 있는 작업이 가득 찼어요. 끝난 작업이 있으면 다시 불러 주세요.'],
-  ])('서버가 %s로 거절하면 코어의 문장 그대로다', async (code, status, text) => {
+    ['work_host_offline', 409, 'auth.personalCall.macOff', '내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.'],
+    ['signed_spawn_disabled', 403, 'auth.personalCall.spawnDisabled', '이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요.'],
+    ['spawn_agent_not_allowed', 403, 'auth.personalCall.agentNotAllowed', '이 개인 에이전트는 지금 부를 수 없어요. 켜져 있는지 확인해 주세요.'],
+    ['pool_exhausted', 429, 'auth.personalCall.poolFull', '지금 돌릴 수 있는 작업이 가득 찼어요. 끝난 작업이 있으면 다시 불러 주세요.'],
+  ] as const)('서버가 %s로 거절하면 코어의 문장 그대로다', async (code, status, key, text) => {
     spawnReply = {status, body: {error: {code, message: 'x'}}};
     const run = await runWith(fakeSigner(), deps());
-    expect(run).toMatchObject({kind: 'sent', call: {state: 'not_delivered', stage: 'server', text}});
+    expect(run).toMatchObject({
+      kind: 'sent',
+      call: {state: 'not_delivered', stage: 'server', message: {key}},
+    });
+    expect(failureMessageText(formatMessage, {key})).toBe(text);
   });
 
   it('Face ID를 접으면 메시지만 남고 취소 문장이 나온다', async () => {
@@ -386,7 +401,7 @@ describe('runPersonalAgentCall — 메시지 → 서명 → /work-spawns', () =>
     const run = await runWith(fakeSigner({error: cancel}), deps());
     expect(run).toMatchObject({
       kind: 'sent',
-      call: {state: 'not_delivered', text: 'Face ID를 취소해서 보내지 않았어요.'},
+      call: {state: 'not_delivered', message: {raw: 'Face ID를 취소해서 보내지 않았어요.'}},
     });
     expect(spawnPosts()).toHaveLength(0);
   });

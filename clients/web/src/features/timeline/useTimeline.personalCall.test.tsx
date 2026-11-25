@@ -173,7 +173,7 @@ describe("useTimeline.send with a personal call", () => {
       await out.send!("@my-claude 빌드를 봐 줘", options);
     });
     const result = (onResult as ReturnType<typeof vi.fn>).mock.calls[0]![0] as PersonalAgentCallResult;
-    expect(result.call).toMatchObject({ state: "not_delivered", text: "내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요." });
+    expect(result.call).toMatchObject({ state: "not_delivered", message: { key: "auth.personalCall.macOff" } });
     expect(out.pending).toBe(0);
   });
 });

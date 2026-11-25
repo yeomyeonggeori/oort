@@ -23,8 +23,8 @@ import {
 } from "@momo/core/features/auth/deviceKeys";
 import {
   agentMemberIdFromEvents,
-  ALLOW_NEEDS_PREVIEW_LINE,
-  RESUME_AGENT_UNKNOWN_LINE,
+  ALLOW_NEEDS_PREVIEW_KEY,
+  RESUME_AGENT_UNKNOWN_KEY,
   signedResume,
   SignerRefusal,
   type ControlToSign,
@@ -177,7 +177,7 @@ function shellContent(control: ControlToSign): DesktopControlRequest["content"] 
     case "permission":
       // #3128: no preview, no allow (the shell refuses too; this is earlier).
       if (!control.permissionPreview || !content.previewSha256) {
-        throw new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
+        throw new SignerRefusal({ key: ALLOW_NEEDS_PREVIEW_KEY });
       }
       return {
         kind: "permission",
@@ -317,10 +317,10 @@ export function useResumeWorkSession(workspaceId: string, signed: boolean) {
         typeof source === "string"
           ? (await fetchWorkSessions(workspaceId)).find((s) => uuidEq(s.id, source))
           : source;
-      if (!session) throw new SignerRefusal(RESUME_AGENT_UNKNOWN_LINE);
+      if (!session) throw new SignerRefusal({ key: RESUME_AGENT_UNKNOWN_KEY });
       const page = await fetchSessionEvents(workspaceId, session.channelId, session.rootMessageId);
       const agent = agentMemberIdFromEvents(page.events);
-      if (!agent) throw new SignerRefusal(RESUME_AGENT_UNKNOWN_LINE);
+      if (!agent) throw new SignerRefusal({ key: RESUME_AGENT_UNKNOWN_KEY });
       return signedResume({
         workspaceId,
         session,

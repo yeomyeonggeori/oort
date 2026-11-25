@@ -30,7 +30,9 @@ import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { FirstAgentStage } from "./FirstAgentStage";
-import { AI_CONNECT_QUESTION } from "@momo/core/features/onboarding/aiConnect";
+import { AI_CONNECT_QUESTION_KEY } from "@momo/core/features/onboarding/aiConnect";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 import {
   clearAllFirstAgentMarkers,
@@ -254,20 +256,26 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+// 첫 에이전트 화면의 문장은 사전에 있다(#6064): 한국어 언어 객체 아래에서 예전 한국어를 그대로 단정한다.
+const koLocale = await koreanLocale();
+
 function wrap(node: ReactElement, client: QueryClient): ReactElement {
-  return createElement(
-    HashRouter,
-    null,
-    createElement(
-      SessionProvider,
-      { value: sessionValue() },
+  return createElement(LocaleProvider, {
+    locale: koLocale,
+    children: createElement(
+      HashRouter,
+      null,
       createElement(
-        OpenMemberProfileContext.Provider,
-        { value: () => undefined },
-        createElement(QueryClientProvider, { client }, node)
+        SessionProvider,
+        { value: sessionValue() },
+        createElement(
+          OpenMemberProfileContext.Provider,
+          { value: () => undefined },
+          createElement(QueryClientProvider, { client }, node)
+        )
       )
-    )
-  );
+    ),
+  });
 }
 
 function WelcomeTimeline(props: {
@@ -517,7 +525,7 @@ describe("no-active-agent hold (#2335)", () => {
     await settle();
 
     expect(root.querySelector("[data-testid='first-agent-stage']")).not.toBeNull();
-    expect(root.textContent).toContain(AI_CONNECT_QUESTION);
+    expect(root.textContent).toContain(koLocale.service.formatMessage(AI_CONNECT_QUESTION_KEY));
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     expect(root.querySelectorAll("[data-testid='welcome-kickoff-backstop']")).toHaveLength(
       0

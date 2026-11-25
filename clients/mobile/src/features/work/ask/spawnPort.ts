@@ -1,3 +1,5 @@
+import type {FailureMessage} from '@momo/core/features/auth/failureMessage';
+
 import {NOT_WIRED_SENTENCE} from './model';
 
 // =============================================================================
@@ -36,8 +38,8 @@ export type SpawnOutcome =
   | {kind: 'sent'; controlId: string; replayed: boolean}
   | {kind: 'mac_off'}
   | {kind: 'flag_off'}
-  | {kind: 'cancelled'; sentence: string}
-  | {kind: 'refused'; sentence: string}
+  | {kind: 'cancelled'; message: FailureMessage}
+  | {kind: 'refused'; message: FailureMessage}
   | {kind: 'not_wired'; sentence: string};
 
 export interface SpawnPort {

@@ -28,7 +28,10 @@ vi.mock("@momo/core/features/auth/deviceKeys", async (importOriginal) => {
 import { OpenAgentProfileContext } from "@/features/routing/useAgentProfile";
 import { Composer } from "./Composer";
 import { usePersonalCall } from "./usePersonalCall";
-import { CALL_NEEDS_APP_LINE } from "@momo/core/features/auth/personalAgentCall";
+import { CALL_NEEDS_APP_KEY } from "@momo/core/features/auth/personalAgentCall";
+
+// 웹의 막힘 문장에 그대로 들어 있는 한 줄(사전의 `CALL_NEEDS_APP_KEY`와 같은 글).
+const CALL_NEEDS_APP_LINE = "데스크탑·폰에서 불러 주세요";
 
 const ME = "00000000-0000-7000-8000-00000000000a";
 const OTHER = "00000000-0000-7000-8000-00000000000b";
@@ -207,7 +210,7 @@ describe("composer: calling my personal agent (#3653)", () => {
 
   it("a result that lands after the person changed rooms is not shown in the new room", async () => {
     const root = await mount(createElement(Harness));
-    const call = { state: "message_only", reason: "no_signer", text: "데스크탑·폰에서 불러 주세요" } as const;
+    const call = { state: "message_only", reason: "no_signer", message: { key: CALL_NEEDS_APP_KEY } } as const;
     const spec = controller!.planFor("@my-claude 빌드")!;
     await act(async () => {
       spec.onResult({ message: { channelId: "other-room" } as never, call });

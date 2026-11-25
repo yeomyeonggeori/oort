@@ -3,7 +3,7 @@ import {
   type SigningContext,
 } from '@momo/core/features/auth/deviceKeys';
 import {
-  ALLOW_NEEDS_PREVIEW_LINE,
+  ALLOW_NEEDS_PREVIEW_KEY,
   SignerRefusal,
   type ControlToSign,
   type HumanControlSigner,
@@ -102,7 +102,7 @@ export function phoneSignerRefusal(error: unknown): SignerRefusal {
     );
   }
   if (error instanceof HumanControlInputError && /preview/.test(error.message)) {
-    return new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
+    return new SignerRefusal({key: ALLOW_NEEDS_PREVIEW_KEY});
   }
   if (error instanceof HumanControlInputError) {
     return new SignerRefusal(

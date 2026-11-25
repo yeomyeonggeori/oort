@@ -855,6 +855,924 @@ export const catalog: MessageCatalog = {
       "value": "이 링크는 이미 사용되었습니다. 로그인하세요."
     }
   ],
+  "auth.devAccessCommand.envClaude": [
+    {
+      "type": 0,
+      "value": "프로젝트 폴더의 "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 아래 내용을 넣어요. 이 파일에는 값이 없지만 서버 주소가 들어 있으니 저장소에 올리지 말아 주세요."
+    }
+  ],
+  "auth.devAccessCommand.envClaudeRun": [
+    {
+      "type": 0,
+      "value": "값을 넣은 같은 터미널에서 Claude Code를 실행해요."
+    }
+  ],
+  "auth.devAccessCommand.envCli": [
+    {
+      "type": 0,
+      "value": "아래 명령은 값을 명령 인자에 싣지 않고 curl 설정으로 넘겨요. 그래서 프로세스 목록에도 값이 보이지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.envCliDone": [
+    {
+      "type": 0,
+      "value": "이 연결의 이름과 범위가 응답으로 나오면 잘 연결된 거예요."
+    }
+  ],
+  "auth.devAccessCommand.envCodex": [
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 아래 내용을 더해요. 이 파일에는 값이 없지만 서버 주소가 들어 있으니 저장소에 올리지 말아 주세요."
+    }
+  ],
+  "auth.devAccessCommand.envCodexRun": [
+    {
+      "type": 0,
+      "value": "값을 넣은 같은 터미널에서 Codex를 실행해요."
+    }
+  ],
+  "auth.devAccessCommand.environmentCaveat": [
+    {
+      "type": 0,
+      "value": "환경 변수는 이 터미널에서 실행하는 다른 프로그램에도 전달돼요. 다 쓰고 나면 터미널을 닫아 주세요."
+    }
+  ],
+  "auth.devAccessCommand.envTitle": [
+    {
+      "type": 0,
+      "value": "환경 변수로 연결하기"
+    }
+  ],
+  "auth.devAccessCommand.helperClaude": [
+    {
+      "type": 0,
+      "value": "프로젝트 폴더의 "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "을 헤더 도우미로 적어요."
+    }
+  ],
+  "auth.devAccessCommand.helperCli": [
+    {
+      "type": 0,
+      "value": "값은 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "이 그때그때 꺼내 줘요. curl에는 설정으로 넘겨서 명령 인자에 값이 실리지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.helperCodex": [
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "을 헤더 도우미로 적어요."
+    }
+  ],
+  "auth.devAccessCommand.helperLogin": [
+    {
+      "type": 0,
+      "value": "oort 명령줄 도구에 값을 한 번 저장해요. 값은 입력으로만 받아요."
+    }
+  ],
+  "auth.devAccessCommand.helperTitle": [
+    {
+      "type": 0,
+      "value": "oort token으로 연결하기"
+    }
+  ],
+  "auth.devAccessCommand.pasteAndEnter": [
+    {
+      "type": 0,
+      "value": "붙여넣고 Enter를 누르면 돼요. 입력한 값은 화면에 보이지 않아요. bash와 zsh 기준이에요."
+    }
+  ],
+  "auth.devAccessCommand.readIntoEnv": [
+    {
+      "type": 0,
+      "value": "복사한 값을 환경 변수 "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "에 넣어요. 값은 명령이 아니라 입력으로만 받아서 터미널 기록에 남지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.stdioClaude": [
+    {
+      "type": 0,
+      "value": "그다음 Claude Code에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "를 붙여요."
+    }
+  ],
+  "auth.devAccessCommand.stdioCodex": [
+    {
+      "type": 0,
+      "value": "그다음 "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "를 더해요."
+    }
+  ],
+  "auth.devAccessCommand.stdioLogin": [
+    {
+      "type": 0,
+      "value": "oort 명령줄 도구에 값을 한 번 저장해요. 값은 입력으로만 받고, 설정 파일에는 값이 들어가지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.stdioTitle": [
+    {
+      "type": 0,
+      "value": "oort mcp로 연결하기"
+    }
+  ],
+  "auth.devAccessCommand.terminal": [
+    {
+      "type": 0,
+      "value": "터미널"
+    }
+  ],
+  "auth.devAccessCommand.unavailable": [
+    {
+      "type": 0,
+      "value": "서버 주소를 확인하지 못해서 설정 조각을 만들 수 없어요. 앱을 다시 열고 시도해 주세요."
+    }
+  ],
+  "auth.devAccessCreate.expiryHint": [
+    {
+      "type": 0,
+      "value": "만료일이 지나면 이 연결은 저절로 끊겨요. 만든 뒤에는 범위, 채널, 만료를 바꿀 수 없어요. 바꾸려면 새로 만들고 옛것을 지워요."
+    }
+  ],
+  "auth.devAccessError.accessDenied": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서는 내 권한으로 이 기능을 쓸 수 없어요. 관리자에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessError.accessDeniedCreate": [
+    {
+      "type": 0,
+      "value": "지금은 내 권한으로 연결을 만들 수 없어요. 관리자에게 켜 달라고 요청해 주세요."
+    }
+  ],
+  "auth.devAccessError.busy": [
+    {
+      "type": 0,
+      "value": "팀 구성을 바꾸는 중이라 바로 처리하지 못했어요. "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "잠시 뒤"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "초 뒤"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "분 뒤"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "시간 뒤"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 다시 해 주세요."
+    }
+  ],
+  "auth.devAccessError.forbidden": [
+    {
+      "type": 0,
+      "value": "이 작업은 내 권한으로 할 수 없어요. 관리자에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessError.forbiddenRevoke": [
+    {
+      "type": 0,
+      "value": "이 연결은 내 권한으로 지울 수 없어요. 소유자나 만든 사람에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessError.invalid": [
+    {
+      "type": 0,
+      "value": "요청을 서버가 받아들이지 못했어요. 화면을 새로 열고 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.invalidCreate": [
+    {
+      "type": 0,
+      "value": "입력한 값을 서버가 받아들이지 못했어요. 이름, 채널, 만료 기간을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "auth.devAccessError.limit": [
+    {
+      "type": 0,
+      "value": "카드 토큰은 한 사람이 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 만들 수 있어요. 안 쓰는 연결을 지운 뒤에 다시 만들어 주세요."
+    }
+  ],
+  "auth.devAccessError.network": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 네트워크를 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.networkCreate": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결이 만들어졌는지 알 수 없으니 목록을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.notFound": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 명령줄·AI 도구 연결을 지원하지 않아요. 서버를 업데이트한 뒤에 다시 열어 주세요."
+    }
+  ],
+  "auth.devAccessError.notFoundRevoke": [
+    {
+      "type": 0,
+      "value": "이미 지워졌거나 찾을 수 없는 연결이에요. 목록을 새로 불러와 확인해 주세요."
+    }
+  ],
+  "auth.devAccessError.passwordIncorrect": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호가 맞지 않아요. 다시 입력해 주세요."
+    }
+  ],
+  "auth.devAccessError.passwordUnavailable": [
+    {
+      "type": 0,
+      "value": "이 계정에는 확인할 비밀번호가 없어요. 비밀번호를 만든 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.rateLimited": [
+    {
+      "type": 0,
+      "value": "너무 자주 시도해서 잠시 막았어요. "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "잠시 뒤"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "초 뒤"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "분 뒤"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "시간 뒤"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 다시 해 주세요."
+    }
+  ],
+  "auth.devAccessError.unauthorized": [
+    {
+      "type": 0,
+      "value": "로그인이 끝났어요. 다시 로그인한 뒤에 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.unknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 문제가 생겼어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.unknownCreate": [
+    {
+      "type": 0,
+      "value": "알 수 없는 문제가 생겼어요. 연결이 만들어졌는지 알 수 없으니 목록을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessExpiry.days": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "일"
+    }
+  ],
+  "auth.devAccessExpiry.daysAway": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "일 뒤"
+    }
+  ],
+  "auth.devAccessExpiry.passed": [
+    {
+      "type": 0,
+      "value": "만료 시각이 지났어요"
+    }
+  ],
+  "auth.devAccessExpiry.today": [
+    {
+      "type": 0,
+      "value": "오늘"
+    }
+  ],
+  "auth.devAccessGate.adminsOnly": [
+    {
+      "type": 0,
+      "value": "관리자가 켜 줘야 해요. 지금은 소유자와 관리자만 연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessGate.adminsOpen": [
+    {
+      "type": 0,
+      "value": "지금은 소유자와 관리자가 연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessGate.membersDenied": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 연결을 만들 수 없어요. 자세한 내용은 관리자에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessGate.membersOpen": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스의 팀원은 모두 연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessGate.off": [
+    {
+      "type": 0,
+      "value": "명령줄·AI 도구 연결이 꺼져 있어요. 다시 켜기 전에는 새로 만들 수 없어요."
+    }
+  ],
+  "auth.devAccessGate.open": [
+    {
+      "type": 0,
+      "value": "연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessKind.card": [
+    {
+      "type": 0,
+      "value": "카드 토큰"
+    }
+  ],
+  "auth.devAccessKind.session": [
+    {
+      "type": 0,
+      "value": "로그인 세션"
+    }
+  ],
+  "auth.devAccessList.all": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "auth.devAccessList.mine": [
+    {
+      "type": 0,
+      "value": "내 연결"
+    }
+  ],
+  "auth.devAccessNotice.cardLimit": [
+    {
+      "type": 0,
+      "value": "카드 토큰은 한 사람이 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessNotice.fixedAfterIssue": [
+    {
+      "type": 0,
+      "value": "만든 뒤에는 범위, 채널, 만료를 바꿀 수 없어요. 바꾸려면 새로 만들고 옛것을 지워요."
+    }
+  ],
+  "auth.devAccessNotice.logoutKeepsConnections": [
+    {
+      "type": 0,
+      "value": "앱에서 로그아웃해도 연결은 끊기지 않아요. 여기서 따로 지워요."
+    }
+  ],
+  "auth.devAccessNotice.passwordChangeEndsAll": [
+    {
+      "type": 0,
+      "value": "비밀번호를 바꾸면 모든 연결이 끊겨요."
+    }
+  ],
+  "auth.devAccessNotice.revokeWarning": [
+    {
+      "type": 0,
+      "value": "지우면 되돌릴 수 없어요. 이 연결을 쓰던 도구는 바로 끊겨요."
+    }
+  ],
+  "auth.devAccessNotice.toolIsOnlyALabel": [
+    {
+      "type": 0,
+      "value": "쓰는 도구는 만든 사람이 고른 값이에요. 확인된 사실은 아니에요."
+    }
+  ],
+  "auth.devAccessOneTime.caution": [
+    {
+      "type": 0,
+      "value": "이 값을 아는 사람은 누구나 내 이름으로 이 연결이 허락한 일을 할 수 있어요. 다른 사람에게 보내지 마세요."
+    }
+  ],
+  "auth.devAccessOneTime.confirm": [
+    {
+      "type": 0,
+      "value": "저장했어요"
+    }
+  ],
+  "auth.devAccessOneTime.warning": [
+    {
+      "type": 0,
+      "value": "이 화면을 닫으면 다시 볼 수 없어요. 지금 복사해서 안전한 곳에 넣어 두세요."
+    }
+  ],
+  "auth.devAccessPhone.passwordAndToolNote": [
+    {
+      "type": 0,
+      "value": "비밀번호를 바꾸면 모든 연결이 끊겨요. 쓰는 도구는 만든 사람이 고른 값이에요. 확인된 사실은 아니에요."
+    }
+  ],
+  "auth.devAccessPreset.readDescription": [
+    {
+      "type": 0,
+      "value": "채널 목록, 메시지, 인박스를 읽기만 해요. 아무것도 보내지 못해요."
+    }
+  ],
+  "auth.devAccessPreset.readLabel": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "auth.devAccessPreset.readWriteDescription": [
+    {
+      "type": 0,
+      "value": "읽기에 더해 내 이름으로 메시지를 바로 보내요. 보내기 전에 따로 확인하지 않아요."
+    }
+  ],
+  "auth.devAccessPreset.readWriteLabel": [
+    {
+      "type": 0,
+      "value": "읽기 + 보내기"
+    }
+  ],
+  "auth.devAccessRestriction.help": [
+    {
+      "type": 0,
+      "value": "고른 채널 안에서만 읽고 보내요. 내가 들어가 있는 채널만 고를 수 있고, 채널에서 나가면 이 연결도 그 채널을 쓸 수 없어요."
+    }
+  ],
+  "auth.devAccessRestriction.label": [
+    {
+      "type": 0,
+      "value": "고른 채널만 쓰기"
+    }
+  ],
+  "auth.devAccessReveal.expiryWithDate": [
+    {
+      "type": 1,
+      "value": "expiry"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessReveal.scopeWithDetail": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessRow.neverUsed": [
+    {
+      "type": 0,
+      "value": "아직 안 썼어요"
+    }
+  ],
+  "auth.devAccessScope.channelsRead": [
+    {
+      "type": 0,
+      "value": "채널 목록 읽기"
+    }
+  ],
+  "auth.devAccessScope.identity": [
+    {
+      "type": 0,
+      "value": "내 정보 확인"
+    }
+  ],
+  "auth.devAccessScope.inboxRead": [
+    {
+      "type": 0,
+      "value": "인박스 읽기"
+    }
+  ],
+  "auth.devAccessScope.messagesRead": [
+    {
+      "type": 0,
+      "value": "메시지 읽기"
+    }
+  ],
+  "auth.devAccessScope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "auth.devAccessScope.unknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 범위"
+    }
+  ],
+  "auth.devAccessScopeLabel.custom": [
+    {
+      "type": 0,
+      "value": "직접 정한 범위"
+    }
+  ],
+  "auth.devAccessScopeLabel.customChannelOnly": [
+    {
+      "type": 0,
+      "value": "직접 정한 범위 · 고른 채널만"
+    }
+  ],
+  "auth.devAccessScopeLabel.read": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "auth.devAccessScopeLabel.readChannelOnly": [
+    {
+      "type": 0,
+      "value": "읽기만 · 고른 채널만"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWrite": [
+    {
+      "type": 0,
+      "value": "읽기 + 보내기"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWriteChannelOnly": [
+    {
+      "type": 0,
+      "value": "읽기 + 보내기 · 고른 채널만"
+    }
+  ],
+  "auth.devAccessTool.claudeCode": [
+    {
+      "type": 0,
+      "value": "Claude Code"
+    }
+  ],
+  "auth.devAccessTool.cli": [
+    {
+      "type": 0,
+      "value": "직접 명령"
+    }
+  ],
+  "auth.devAccessTool.codex": [
+    {
+      "type": 0,
+      "value": "Codex"
+    }
+  ],
+  "auth.devAccessTool.other": [
+    {
+      "type": 0,
+      "value": "기타"
+    }
+  ],
+  "auth.devAccessValidation.channelsRequired": [
+    {
+      "type": 0,
+      "value": "채널을 1개 이상 골라 주세요. 채널을 가리지 않으려면 「고른 채널만 쓰기」를 꺼 주세요."
+    }
+  ],
+  "auth.devAccessValidation.channelsTooMany": [
+    {
+      "type": 0,
+      "value": "채널은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 고를 수 있어요. 지금 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 골랐으니 "
+    },
+    {
+      "type": 2,
+      "value": "excess",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 빼 주세요."
+    }
+  ],
+  "auth.devAccessValidation.expiryNotInteger": [
+    {
+      "type": 0,
+      "value": "만료 기간은 1일부터 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일까지 정수로 입력해 주세요."
+    }
+  ],
+  "auth.devAccessValidation.expiryRequired": [
+    {
+      "type": 0,
+      "value": "만료 기간을 입력해 주세요. 1일부터 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일까지 정할 수 있어요."
+    }
+  ],
+  "auth.devAccessValidation.expiryTooLong": [
+    {
+      "type": 0,
+      "value": "만료 기간은 최대 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일이에요. 더 오래 쓰려면 만료 전에 새로 만들어 주세요."
+    }
+  ],
+  "auth.devAccessValidation.nameControl": [
+    {
+      "type": 0,
+      "value": "이름에는 줄바꿈 같은 제어 문자를 쓸 수 없어요. 글자만 남기고 다시 입력해 주세요."
+    }
+  ],
+  "auth.devAccessValidation.nameEnvelope": [
+    {
+      "type": 0,
+      "value": "이름에 토큰 값이 들어 있어요. 이름 칸에는 알아보기 쉬운 말만 넣어 주세요."
+    }
+  ],
+  "auth.devAccessValidation.nameRequired": [
+    {
+      "type": 0,
+      "value": "이름을 입력해 주세요. 목록에서 이 연결을 알아볼 수 있는 이름이면 돼요."
+    }
+  ],
+  "auth.devAccessValidation.nameTooLong": [
+    {
+      "type": 0,
+      "value": "이름은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지 쓸 수 있어요. 지금 "
+    },
+    {
+      "type": 2,
+      "value": "length",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자예요. 조금 줄여 주세요."
+    }
+  ],
+  "auth.devAccessValidation.passwordRequired": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호를 입력해 주세요. 연결을 만들 때마다 한 번 더 확인해요."
+    }
+  ],
+  "auth.devAccessValidation.passwordTooLong": [
+    {
+      "type": 0,
+      "value": "비밀번호는 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "자까지 입력할 수 있어요. 입력한 내용을 다시 확인해 주세요."
+    }
+  ],
   "auth.deviceKey.authFailed": [
     {
       "type": 0,
@@ -1131,6 +2049,24 @@ export const catalog: MessageCatalog = {
       "value": "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요."
     }
   ],
+  "auth.humanSignatureInApp.allow": [
+    {
+      "type": 0,
+      "value": "이번 한 번 허락은 폰이나 데스크탑 앱에서 보내 주세요. 거부는 여기서도 할 수 있어요."
+    }
+  ],
+  "auth.humanSignatureInApp.instruct": [
+    {
+      "type": 0,
+      "value": "폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
+  "auth.humanSignatureInApp.reply": [
+    {
+      "type": 0,
+      "value": "지시는 폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
   "auth.join.alreadyRedeemed": [
     {
       "type": 0,
@@ -1239,6 +2175,232 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "자 이상으로 입력하세요."
+    }
+  ],
+  "auth.personalCall.agentNotAllowed": [
+    {
+      "type": 0,
+      "value": "이 개인 에이전트는 지금 부를 수 없어요. 켜져 있는지 확인해 주세요."
+    }
+  ],
+  "auth.personalCall.callDefault": [
+    {
+      "type": 0,
+      "value": "내 맥을 부르지 못했어요. 연결을 확인한 뒤 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 부를 수 있어요."
+    }
+  ],
+  "auth.personalCall.folderNotFound": [
+    {
+      "type": 0,
+      "value": "내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요."
+    }
+  ],
+  "auth.personalCall.hostAmbiguous": [
+    {
+      "type": 0,
+      "value": "연결된 맥이 여러 대라 어느 맥인지 정하지 못했어요. 맥을 골라 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.hostNotFound": [
+    {
+      "type": 0,
+      "value": "연결된 내 맥을 찾지 못했어요. 데스크탑 앱에서 내 맥을 연결해 주세요."
+    }
+  ],
+  "auth.personalCall.inputInvalid": [
+    {
+      "type": 0,
+      "value": "보낼 내용이 올바르지 않아 서명하지 않았어요. 내용을 고친 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.personalCall.macOff": [
+    {
+      "type": 0,
+      "value": "내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.needsApp": [
+    {
+      "type": 0,
+      "value": "데스크탑·폰에서 불러 주세요"
+    }
+  ],
+  "auth.personalCall.nonceReused": [
+    {
+      "type": 0,
+      "value": "보낸 호출과 서명이 맞지 않아 서버가 받지 않았어요. 다시 부르면 새로 서명해요."
+    }
+  ],
+  "auth.personalCall.nothingToAsk": [
+    {
+      "type": 0,
+      "value": "무엇을 시킬지 적어 주세요. 별칭만 보내면 에이전트가 할 일이 없어요."
+    }
+  ],
+  "auth.personalCall.originInvalid": [
+    {
+      "type": 0,
+      "value": "부른 메시지를 찾지 못했어요. 메시지를 다시 보낸 뒤 불러 주세요."
+    }
+  ],
+  "auth.personalCall.poolFull": [
+    {
+      "type": 0,
+      "value": "지금 돌릴 수 있는 작업이 가득 찼어요. 끝난 작업이 있으면 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.promptInvalid": [
+    {
+      "type": 0,
+      "value": "보낼 내용이 올바르지 않아 보내지 않았어요. 내용을 고친 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.personalCall.spawnDisabled": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요."
+    }
+  ],
+  "auth.signatureRefusal.expired": [
+    {
+      "type": 0,
+      "value": "서명한 시각이 서버 시각과 5분 넘게 어긋나 받지 않았어요. 기기 시계를 자동 맞춤으로 바꾼 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signatureRefusal.instanceUnconfigured": [
+    {
+      "type": 0,
+      "value": "서버에 인스턴스 id가 설정되지 않아 서명을 확인할 수 없어요. 서버 관리자에게 알려 주세요."
+    }
+  ],
+  "auth.signatureRefusal.invalid": [
+    {
+      "type": 0,
+      "value": "기기 서명이 이 요청과 맞지 않아 서버가 받지 않았어요. 앱을 최신으로 올린 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signatureRefusal.keyNotEndorsed": [
+    {
+      "type": 0,
+      "value": "이 기기는 아직 지시 승인을 받지 않았어요. 호스트가 있는 맥의 oort 앱에서 설정 › 기기 › 지시 서명으로 이 기기를 승인해 주세요."
+    }
+  ],
+  "auth.signatureRefusal.keyRevoked": [
+    {
+      "type": 0,
+      "value": "이 기기의 서명 키가 해제되어 보낼 수 없어요. 설정 › 기기 › 지시 서명에서 이 기기를 다시 등록해 주세요."
+    }
+  ],
+  "auth.signatureRefusal.nonceReplayed": [
+    {
+      "type": 0,
+      "value": "같은 서명이 이미 한 번 쓰였어요. 먼저 보낸 것이 닿았을 수 있으니 진행을 확인하고, 필요하면 다시 눌러 새로 서명해 주세요."
+    }
+  ],
+  "auth.signatureRefusal.required": [
+    {
+      "type": 0,
+      "value": "이 서버는 허락과 지시에 기기 서명을 받아요. 폰이나 데스크탑 앱에서 보내 주세요."
+    }
+  ],
+  "auth.signedControl.allowNeedsPreview": [
+    {
+      "type": 0,
+      "value": "미리보기를 확인하지 못해 허락에 서명하지 않았어요. 거부하거나 호스트에서 결정해 주세요."
+    }
+  ],
+  "auth.signedControl.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "이 세션의 채널에서 나가 있어 지시할 수 없어요. 채널에 다시 들어간 뒤 보내 주세요."
+    }
+  ],
+  "auth.signedControl.hostOffline": [
+    {
+      "type": 0,
+      "value": "호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signedControl.hostRevoked": [
+    {
+      "type": 0,
+      "value": "이 호스트는 해제되어 지시를 받을 수 없어요."
+    }
+  ],
+  "auth.signedControl.instructionDefault": [
+    {
+      "type": 0,
+      "value": "지시를 보내지 못했어요. 연결을 확인한 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signedControl.instructionsDisabled": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 서명한 지시를 받지 않아요. 서버가 열리면 여기서 보낼 수 있어요."
+    }
+  ],
+  "auth.signedControl.nonceReused": [
+    {
+      "type": 0,
+      "value": "보낸 지시와 서명이 맞지 않아 서버가 받지 않았어요. 다시 보내면 새로 서명해요."
+    }
+  ],
+  "auth.signedControl.notDelivered": [
+    {
+      "type": 0,
+      "value": "전달 안 됨"
+    }
+  ],
+  "auth.signedControl.notDeliveredWith": [
+    {
+      "type": 0,
+      "value": "전달 안 됨 · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "auth.signedControl.ownerOnly": [
+    {
+      "type": 0,
+      "value": "이 세션의 소유자만 자기 호스트에 지시할 수 있어요."
+    }
+  ],
+  "auth.signedControl.resumeAgentUnknown": [
+    {
+      "type": 0,
+      "value": "이 세션의 에이전트를 기록에서 찾지 못해 서명한 인수를 만들 수 없어요. 원래 호스트에서 이어 가세요."
+    }
+  ],
+  "auth.signedControl.scopeUnsupported": [
+    {
+      "type": 0,
+      "value": "이 호스트는 세션 허락을 받지 않아요. 「이번 한 번 허락」으로 보내 주세요."
+    }
+  ],
+  "auth.signedControl.sessionNotAccepting": [
+    {
+      "type": 0,
+      "value": "세션이 끝나 지시를 받지 않아요."
+    }
+  ],
+  "auth.signedControl.slashCommand": [
+    {
+      "type": 0,
+      "value": "「/」로 시작하는 명령은 지시로 보낼 수 없어요."
+    }
+  ],
+  "auth.signedControl.textInvalid": [
+    {
+      "type": 0,
+      "value": "지시가 비었거나 너무 길어요. 32,768자 안으로 적어 주세요."
     }
   ],
   "auth.signIn.invalidCredentials": [
@@ -9376,6 +10538,508 @@ export const catalog: MessageCatalog = {
       "value": "초대 링크를 올렸어요"
     }
   ],
+  "onboarding.aiConnectCopy.commandAria": [
+    {
+      "type": 0,
+      "value": "연결 명령"
+    }
+  ],
+  "onboarding.aiConnectCopy.copied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "onboarding.aiConnectCopy.copy": [
+    {
+      "type": 0,
+      "value": "복사"
+    }
+  ],
+  "onboarding.aiConnectCopy.credential": [
+    {
+      "type": 0,
+      "value": "연결 값"
+    }
+  ],
+  "onboarding.aiConnectCopy.endpoint": [
+    {
+      "type": 0,
+      "value": "주소"
+    }
+  ],
+  "onboarding.aiConnectCopy.handedOffStatus": [
+    {
+      "type": 0,
+      "value": "명령을 복사했어요. 터미널에 붙여 넣어 실행하세요."
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code 로그인 명령"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaCodex": [
+    {
+      "type": 0,
+      "value": "Codex 로그인 명령"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginOpenedStatus": [
+    {
+      "type": 0,
+      "value": "명령을 복사했어요. 터미널에 붙여 넣고 로그인을 마치면 이 줄이 바뀌어요."
+    }
+  ],
+  "onboarding.aiConnectCopy.openTerminal": [
+    {
+      "type": 0,
+      "value": "터미널에서 열기"
+    }
+  ],
+  "onboarding.aiConnectCopy.spaced": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "onboarding.aiConnectCopy.terminalOpenFailed": [
+    {
+      "type": 0,
+      "value": "터미널을 열지 못했어요. 명령을 복사해 직접 여세요."
+    }
+  ],
+  "onboarding.aiConnectEntry.action": [
+    {
+      "type": 0,
+      "value": "내 구독으로 에이전트 만들기"
+    }
+  ],
+  "onboarding.aiConnectEntry.detail": [
+    {
+      "type": 0,
+      "value": "이 맥의 Claude Code·Codex 로그인으로 생각하는 개인 에이전트예요. 나만 부를 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectEntry.title": [
+    {
+      "type": 0,
+      "value": "내 구독으로 쓰는 에이전트"
+    }
+  ],
+  "onboarding.aiConnectGroup.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "onboarding.aiConnectGroup.tools": [
+    {
+      "type": 0,
+      "value": "내 도구"
+    }
+  ],
+  "onboarding.aiConnectHarness.grok": [
+    {
+      "type": 0,
+      "value": "그록봇"
+    }
+  ],
+  "onboarding.aiConnectJoin.back": [
+    {
+      "type": 0,
+      "value": "다른 AI 고르기"
+    }
+  ],
+  "onboarding.aiConnectJoin.cap": [
+    {
+      "type": 0,
+      "value": "5분 동안 들어오지 않았어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.capDetail": [
+    {
+      "type": 0,
+      "value": "명령을 실행했는지 확인하고 다시 확인을 눌러 주세요."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePaused": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 Claude Code로 에이전트를 만들 수 없어요. Codex나 API 키로는 이어갈 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedDetail": [
+    {
+      "type": 0,
+      "value": "이 서버에서 꺼져 있어요"
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedPill": [
+    {
+      "type": 0,
+      "value": "꺼짐"
+    }
+  ],
+  "onboarding.aiConnectJoin.connectClaude": [
+    {
+      "type": 0,
+      "value": "터미널에서 이 명령을 한 번 실행해 주세요."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectCodex": [
+    {
+      "type": 0,
+      "value": "Codex의 MCP 서버에 이 주소와 연결 값을 넣어 주세요."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code가 이 연결로 oort에 들어와요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailCodex": [
+    {
+      "type": 0,
+      "value": "Codex가 이 연결로 oort에 들어와요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.aiConnectJoin.creating": [
+    {
+      "type": 0,
+      "value": "연결을 준비하고 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.error": [
+    {
+      "type": 0,
+      "value": "연결을 만들지 못했어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.joined": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어왔어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedDetail": [
+    {
+      "type": 0,
+      "value": "나만 부를 수 있는 개인 에이전트예요."
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedPersonalDetail": [
+    {
+      "type": 0,
+      "value": "나만 부를 수 있는 개인 에이전트예요. 내 맥이 켜져 있을 때만 답해요."
+    }
+  ],
+  "onboarding.aiConnectJoin.off": [
+    {
+      "type": 0,
+      "value": "지금은 이 서버에서 구독으로 쓰는 에이전트를 쓸 수 없어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code가 oort에 들어오기를 기다리고 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingCodex": [
+    {
+      "type": 0,
+      "value": "Codex가 oort에 들어오기를 기다리고 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingGrok": [
+    {
+      "type": 0,
+      "value": "그록봇이 oort에 들어오기를 기다리고 있어요."
+    }
+  ],
+  "onboarding.aiConnectList.error": [
+    {
+      "type": 0,
+      "value": "연결 목록을 불러오지 못했어요."
+    }
+  ],
+  "onboarding.aiConnectList.offline": [
+    {
+      "type": 0,
+      "value": "지금은 서버에 닿지 않아요."
+    }
+  ],
+  "onboarding.aiConnectPersonal.enabling": [
+    {
+      "type": 0,
+      "value": "개인 에이전트를 켜고 있어요."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailable": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailableDetail": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 아직 켤 수 없어요"
+    }
+  ],
+  "onboarding.aiConnectPill.checking": [
+    {
+      "type": 0,
+      "value": "확인 중…"
+    }
+  ],
+  "onboarding.aiConnectPill.install": [
+    {
+      "type": 0,
+      "value": "설치 필요"
+    }
+  ],
+  "onboarding.aiConnectPill.login": [
+    {
+      "type": 0,
+      "value": "로그인 필요"
+    }
+  ],
+  "onboarding.aiConnectPill.ready": [
+    {
+      "type": 0,
+      "value": "준비됨"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyDetail": [
+    {
+      "type": 0,
+      "value": "OpenAI 호환 API 키 · 팀 누구나 부를 수 있어요"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyMark": [
+    {
+      "type": 0,
+      "value": "키"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyTitle": [
+    {
+      "type": 0,
+      "value": "API 키 · 팀 에이전트"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeMark": [
+    {
+      "type": 0,
+      "value": "C"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeTitle": [
+    {
+      "type": 0,
+      "value": "Claude Code · 내 도구"
+    }
+  ],
+  "onboarding.aiConnectRow.cliDetail": [
+    {
+      "type": 0,
+      "value": "이 맥의 공식 CLI · 나만 부르는 개인 에이전트"
+    }
+  ],
+  "onboarding.aiConnectRow.codexMark": [
+    {
+      "type": 0,
+      "value": "X"
+    }
+  ],
+  "onboarding.aiConnectRow.codexTitle": [
+    {
+      "type": 0,
+      "value": "Codex · 내 도구"
+    }
+  ],
+  "onboarding.aiConnectRow.grokDetail": [
+    {
+      "type": 0,
+      "value": "그록봇 앱을 팀에 초대해요"
+    }
+  ],
+  "onboarding.aiConnectRow.grokMark": [
+    {
+      "type": 0,
+      "value": "G"
+    }
+  ],
+  "onboarding.aiConnectRow.grokTitle": [
+    {
+      "type": 0,
+      "value": "그록봇"
+    }
+  ],
+  "onboarding.aiConnectStage.apiKeyPill": [
+    {
+      "type": 0,
+      "value": "설정"
+    }
+  ],
+  "onboarding.aiConnectStage.back": [
+    {
+      "type": 0,
+      "value": "뒤로"
+    }
+  ],
+  "onboarding.aiConnectStage.boundaryNote": [
+    {
+      "type": 0,
+      "value": "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 내 도구는 나만 쓸 수 있고, 팀 모두가 부를 에이전트는 그록봇이나 API 키로 붙여요."
+    }
+  ],
+  "onboarding.aiConnectStage.continue": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "onboarding.aiConnectStage.desktopOnlyNote": [
+    {
+      "type": 0,
+      "value": "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.foundClaude": [
+    {
+      "type": 0,
+      "value": "이 맥에서 Claude Code를 찾았어요."
+    }
+  ],
+  "onboarding.aiConnectStage.foundCodex": [
+    {
+      "type": 0,
+      "value": "이 맥에서 Codex를 찾았어요."
+    }
+  ],
+  "onboarding.aiConnectStage.grokNotInstalledPill": [
+    {
+      "type": 0,
+      "value": "설치 안 됨"
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminDetail": [
+    {
+      "type": 0,
+      "value": "에이전트가 필요하면 워크스페이스 관리자에게 부탁해 주세요. 그동안 대화는 바로 시작할 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminLine": [
+    {
+      "type": 0,
+      "value": "에이전트 연결은 관리자가 해요."
+    }
+  ],
+  "onboarding.aiConnectStage.primaryApiKey": [
+    {
+      "type": 0,
+      "value": "API 키로 연결하기"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code를 개인 에이전트로"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryCodex": [
+    {
+      "type": 0,
+      "value": "Codex를 개인 에이전트로"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryGrok": [
+    {
+      "type": 0,
+      "value": "그록봇 초대하기"
+    }
+  ],
+  "onboarding.aiConnectStage.probing": [
+    {
+      "type": 0,
+      "value": "이 맥의 CLI를 확인하고 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.question": [
+    {
+      "type": 0,
+      "value": "누구의 AI로 생각할까요?"
+    }
+  ],
+  "onboarding.aiConnectStage.questionDetail": [
+    {
+      "type": 0,
+      "value": "에이전트가 누구의 AI로 생각할지 골라요."
+    }
+  ],
+  "onboarding.aiConnectStage.reentry": [
+    {
+      "type": 0,
+      "value": "나중에 AI 화면에서 이어갈 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.serverOffNote": [
+    {
+      "type": 0,
+      "value": "이 서버는 지금 구독으로 쓰는 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요."
+    }
+  ],
+  "onboarding.aiConnectStage.skip": [
+    {
+      "type": 0,
+      "value": "지금은 건너뛰기"
+    }
+  ],
+  "onboarding.aiConnectStage.skippedLine": [
+    {
+      "type": 0,
+      "value": "AI 화면에서 언제든 이어서 할 수 있어요."
+    }
+  ],
   "onboarding.guide.expressionFlustered": [
     {
       "type": 0,
@@ -9644,6 +11308,698 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": [
+    {
+      "type": 0,
+      "value": "꺼짐 · 서버 설정"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.badgePaused": [
+    {
+      "type": 0,
+      "value": "회색 · 문의 중"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailCleanup": [
+    {
+      "type": 0,
+      "value": "에이전트 화면에서 끊기를 마무리해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailDisabled": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 켜면 쓸 수 있어요. 로그인은 그대로 되어 있고, 내 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "는 터미널에서 직접 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailForbidden": [
+    {
+      "type": 0,
+      "value": "로그인은 됐어요. 내 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "는 터미널에서 직접 쓸 수 있어요. 에이전트로 부르려면 관리자에게 부탁해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailLimit": [
+    {
+      "type": 0,
+      "value": "쓰지 않는 에이전트를 먼저 정리해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailPaused": [
+    {
+      "type": 0,
+      "value": "서비스 제공자에게 사용 범위를 문의하는 동안 서버 운영자가 닫아 둔 기능이에요. 로그인은 그대로 되어 있고, 내 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "는 터미널에서 직접 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineCleanup": [
+    {
+      "type": 0,
+      "value": "이 에이전트는 연결을 마저 끊은 뒤에 다시 만들 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineDisabled": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 구독으로 쓰는 에이전트가 꺼져 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineForbidden": [
+    {
+      "type": 0,
+      "value": "에이전트로 만드는 건 워크스페이스 관리자가 해요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineLimit": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " 구독으로 쓰는 에이전트가 이미 다섯 개예요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.linePaused": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " 구독으로 쓰는 에이전트가 잠시 멈춰 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletCost": [
+    {
+      "type": 0,
+      "value": "비용은 내 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " 구독에서 나가요. 팀 키는 쓰지 않아요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": [
+    {
+      "type": 0,
+      "value": "이 맥이 켜져 있고 oort가 열려 있을 때만 답해요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": [
+    {
+      "type": 0,
+      "value": "나만 부를 수 있어요. 다른 멤버가 부르면 안내 문구가 나가요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.create": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": " 만들기"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameHint": [
+    {
+      "type": 0,
+      "value": "채널에서 @이름으로 불러요. 영문 소문자, 숫자, - 와 _ 를 써요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameLabel": [
+    {
+      "type": 0,
+      "value": "에이전트 이름"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.noStore": [
+    {
+      "type": 0,
+      "value": "로그인 정보는 oort에 저장하지 않아요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.title": [
+    {
+      "type": 0,
+      "value": "이 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": [
+            {
+              "type": 0,
+              "value": "으로"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "로"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 부를 수 있게 할까요?"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.agents": [
+    {
+      "type": 0,
+      "value": "에이전트 보기"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.close": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.detail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 15분 안에 한 번 열면 연결돼요. 그 뒤 채널에서 @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": [
+            {
+              "type": 0,
+              "value": "으로"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "로"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 불러 보세요. 15분이 지나면 여기서 다시 눌러 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existing": [
+    {
+      "type": 0,
+      "value": "이미 @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existingDetail": [
+    {
+      "type": 0,
+      "value": "이 맥의 에이전트라서 새로 만들지 않았어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.line": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 만들었어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.line": [
+    {
+      "type": 0,
+      "value": "만들지 못했어요: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonDefault": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonName": [
+    {
+      "type": 0,
+      "value": "이름을 쓸 수 없어요"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliFailed": [
+    {
+      "type": 0,
+      "value": "앱이 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 연결하지 못했어요. 아래 명령을 터미널에서 한 번 실행해 주세요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliMissing": [
+    {
+      "type": 0,
+      "value": "이 맥에서 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "를 찾지 못해 앱이 연결하지 못했어요. 아래 명령을 터미널에서 한 번 실행해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCodex": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 쓰려면 MCP 서버에 이 주소와 연결 값을 넣어 주세요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailUnsupported": [
+    {
+      "type": 0,
+      "value": "이 환경에서는 앱이 연결을 걸 수 없어요. 아래 명령을 터미널에서 한 번 실행해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.disclosure": [
+    {
+      "type": 0,
+      "value": "직접 하려면"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.hide": [
+    {
+      "type": 0,
+      "value": "접기"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.lineYourself": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 만들었어요. 연결만 직접 해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.charset": [
+    {
+      "type": 0,
+      "value": "영문 소문자, 숫자, - 와 _ 만 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.invalid": [
+    {
+      "type": 0,
+      "value": "이 이름은 쓸 수 없어요. 영문 소문자, 숫자, - 와 _ 로 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.required": [
+    {
+      "type": 0,
+      "value": "이름을 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.taken": [
+    {
+      "type": 0,
+      "value": "이미 쓰는 이름이에요. 다른 이름을 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooLong": [
+    {
+      "type": 0,
+      "value": "32자까지 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooShort": [
+    {
+      "type": 0,
+      "value": "두 글자 이상으로 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.cliStage": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "에 연결 걸기"
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.loggedIn": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 로그인됐어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.registering": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 만들고 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.serverStage": [
+    {
+      "type": 0,
+      "value": "에이전트 만들기"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.create": [
+    {
+      "type": 0,
+      "value": "에이전트로 만들기"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.detail": [
+    {
+      "type": 0,
+      "value": "이 맥에서 로그인한 Claude Code나 Codex를 채널에서 @로 부를 수 있게 해요. 나만 부를 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.install": [
+    {
+      "type": 0,
+      "value": "설치 안내"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.title": [
+    {
+      "type": 0,
+      "value": "내 구독으로 에이전트 만들기"
     }
   ],
   "presence.dnd.hint": [

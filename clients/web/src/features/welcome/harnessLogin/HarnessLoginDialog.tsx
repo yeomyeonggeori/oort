@@ -3,11 +3,11 @@ import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import type { LocaleService } from "@momo/core/i18n";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
-  COPIED_LABEL,
-  COPY_ACTION_LABEL,
+  COPIED_KEY,
+  COPY_ACTION_KEY,
   HARNESS_LOGIN_COMMAND,
-  OPEN_TERMINAL_LABEL,
-  loginCommandAria,
+  OPEN_TERMINAL_KEY,
+  loginCommandAriaKey,
 } from "@momo/core/features/onboarding/aiConnect";
 import { expressionForState } from "@momo/core/features/onboarding/guide";
 import {
@@ -672,13 +672,14 @@ function FallbackRow({
   harness: LocalHarnessId;
   onStarted: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const command = HARNESS_LOGIN_COMMAND[harness];
   const { copied, copy } = useClipboardCopy(command);
   return (
     <div
       className="ai-connect-term"
       role="group"
-      aria-label={loginCommandAria(harness)}
+      aria-label={formatMessage(loginCommandAriaKey(harness))}
       data-testid="harness-login-fallback"
     >
       <code className="min-w-0 flex-1 truncate">
@@ -699,17 +700,20 @@ function FallbackRow({
         }}
         data-testid="harness-login-fallback-open"
       >
-        {OPEN_TERMINAL_LABEL}
+        {formatMessage(OPEN_TERMINAL_KEY)}
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         className="ai-connect-term-action"
-        aria-label={`${loginCommandAria(harness)} ${copied ? COPIED_LABEL : COPY_ACTION_LABEL}`}
+        aria-label={formatMessage("onboarding.aiConnectCopy.spaced", {
+          first: formatMessage(loginCommandAriaKey(harness)),
+          second: formatMessage(copied ? COPIED_KEY : COPY_ACTION_KEY),
+        })}
         onClick={() => void copy()}
       >
-        {copied ? COPIED_LABEL : COPY_ACTION_LABEL}
+        {formatMessage(copied ? COPIED_KEY : COPY_ACTION_KEY)}
       </Button>
     </div>
   );

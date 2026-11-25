@@ -7,6 +7,15 @@ import vectorsV4 from "../../../../../docs/api/human-control-signing-v4.vectors.
 import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import instructionGolden from "../../../../../docs/api/work-instruction.golden.json";
 import { SignerRefusal, type ControlToSign } from "@momo/core/features/auth/signedControl";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+
+// 서명 거부의 문장이 사전의 키일 때는 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다(#6064).
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
 import { humanSignatureRequestBody } from "@momo/core/lib/api";
 import {
   desktopSigner,
@@ -187,7 +196,7 @@ describe("desktopSigner", () => {
     const bare = { ...perm, permissionPreview: undefined };
     const error = await signer.sign(bare).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SignerRefusal);
-    expect((error as SignerRefusal).message).toContain("미리보기");
+    expect(failureMessageText(formatMessage, (error as SignerRefusal).refusal)).toContain("미리보기");
     expect(sign).not.toHaveBeenCalled();
   });
 

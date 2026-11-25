@@ -100,6 +100,106 @@ export const messageKeys = [
   "auth.claim.passwordRecheck",
   "auth.claim.unmapped",
   "auth.claim.used",
+  "auth.devAccessCommand.envClaude",
+  "auth.devAccessCommand.envClaudeRun",
+  "auth.devAccessCommand.envCli",
+  "auth.devAccessCommand.envCliDone",
+  "auth.devAccessCommand.envCodex",
+  "auth.devAccessCommand.envCodexRun",
+  "auth.devAccessCommand.environmentCaveat",
+  "auth.devAccessCommand.envTitle",
+  "auth.devAccessCommand.helperClaude",
+  "auth.devAccessCommand.helperCli",
+  "auth.devAccessCommand.helperCodex",
+  "auth.devAccessCommand.helperLogin",
+  "auth.devAccessCommand.helperTitle",
+  "auth.devAccessCommand.pasteAndEnter",
+  "auth.devAccessCommand.readIntoEnv",
+  "auth.devAccessCommand.stdioClaude",
+  "auth.devAccessCommand.stdioCodex",
+  "auth.devAccessCommand.stdioLogin",
+  "auth.devAccessCommand.stdioTitle",
+  "auth.devAccessCommand.terminal",
+  "auth.devAccessCommand.unavailable",
+  "auth.devAccessCreate.expiryHint",
+  "auth.devAccessError.accessDenied",
+  "auth.devAccessError.accessDeniedCreate",
+  "auth.devAccessError.busy",
+  "auth.devAccessError.forbidden",
+  "auth.devAccessError.forbiddenRevoke",
+  "auth.devAccessError.invalid",
+  "auth.devAccessError.invalidCreate",
+  "auth.devAccessError.limit",
+  "auth.devAccessError.network",
+  "auth.devAccessError.networkCreate",
+  "auth.devAccessError.notFound",
+  "auth.devAccessError.notFoundRevoke",
+  "auth.devAccessError.passwordIncorrect",
+  "auth.devAccessError.passwordUnavailable",
+  "auth.devAccessError.rateLimited",
+  "auth.devAccessError.unauthorized",
+  "auth.devAccessError.unknown",
+  "auth.devAccessError.unknownCreate",
+  "auth.devAccessExpiry.days",
+  "auth.devAccessExpiry.daysAway",
+  "auth.devAccessExpiry.passed",
+  "auth.devAccessExpiry.today",
+  "auth.devAccessGate.adminsOnly",
+  "auth.devAccessGate.adminsOpen",
+  "auth.devAccessGate.membersDenied",
+  "auth.devAccessGate.membersOpen",
+  "auth.devAccessGate.off",
+  "auth.devAccessGate.open",
+  "auth.devAccessKind.card",
+  "auth.devAccessKind.session",
+  "auth.devAccessList.all",
+  "auth.devAccessList.mine",
+  "auth.devAccessNotice.cardLimit",
+  "auth.devAccessNotice.fixedAfterIssue",
+  "auth.devAccessNotice.logoutKeepsConnections",
+  "auth.devAccessNotice.passwordChangeEndsAll",
+  "auth.devAccessNotice.revokeWarning",
+  "auth.devAccessNotice.toolIsOnlyALabel",
+  "auth.devAccessOneTime.caution",
+  "auth.devAccessOneTime.confirm",
+  "auth.devAccessOneTime.warning",
+  "auth.devAccessPhone.passwordAndToolNote",
+  "auth.devAccessPreset.readDescription",
+  "auth.devAccessPreset.readLabel",
+  "auth.devAccessPreset.readWriteDescription",
+  "auth.devAccessPreset.readWriteLabel",
+  "auth.devAccessRestriction.help",
+  "auth.devAccessRestriction.label",
+  "auth.devAccessReveal.expiryWithDate",
+  "auth.devAccessReveal.scopeWithDetail",
+  "auth.devAccessRow.neverUsed",
+  "auth.devAccessScope.channelsRead",
+  "auth.devAccessScope.identity",
+  "auth.devAccessScope.inboxRead",
+  "auth.devAccessScope.messagesRead",
+  "auth.devAccessScope.messagesWrite",
+  "auth.devAccessScope.unknown",
+  "auth.devAccessScopeLabel.custom",
+  "auth.devAccessScopeLabel.customChannelOnly",
+  "auth.devAccessScopeLabel.read",
+  "auth.devAccessScopeLabel.readChannelOnly",
+  "auth.devAccessScopeLabel.readWrite",
+  "auth.devAccessScopeLabel.readWriteChannelOnly",
+  "auth.devAccessTool.claudeCode",
+  "auth.devAccessTool.cli",
+  "auth.devAccessTool.codex",
+  "auth.devAccessTool.other",
+  "auth.devAccessValidation.channelsRequired",
+  "auth.devAccessValidation.channelsTooMany",
+  "auth.devAccessValidation.expiryNotInteger",
+  "auth.devAccessValidation.expiryRequired",
+  "auth.devAccessValidation.expiryTooLong",
+  "auth.devAccessValidation.nameControl",
+  "auth.devAccessValidation.nameEnvelope",
+  "auth.devAccessValidation.nameRequired",
+  "auth.devAccessValidation.nameTooLong",
+  "auth.devAccessValidation.passwordRequired",
+  "auth.devAccessValidation.passwordTooLong",
   "auth.deviceKey.authFailed",
   "auth.deviceKey.cancelled",
   "auth.deviceKey.changed",
@@ -146,6 +246,9 @@ export const messageKeys = [
   "auth.failure.serverError",
   "auth.failure.tooManyRequests",
   "auth.failure.unreadableResponse",
+  "auth.humanSignatureInApp.allow",
+  "auth.humanSignatureInApp.instruct",
+  "auth.humanSignatureInApp.reply",
   "auth.join.alreadyRedeemed",
   "auth.join.cannotJoin",
   "auth.join.exhausted",
@@ -159,6 +262,43 @@ export const messageKeys = [
   "auth.linkedDevice.platformWeb",
   "auth.passwordRule.tooLong",
   "auth.passwordRule.tooShort",
+  "auth.personalCall.agentNotAllowed",
+  "auth.personalCall.callDefault",
+  "auth.personalCall.channelMemberOnly",
+  "auth.personalCall.folderNotFound",
+  "auth.personalCall.hostAmbiguous",
+  "auth.personalCall.hostNotFound",
+  "auth.personalCall.inputInvalid",
+  "auth.personalCall.macOff",
+  "auth.personalCall.needsApp",
+  "auth.personalCall.nonceReused",
+  "auth.personalCall.nothingToAsk",
+  "auth.personalCall.originInvalid",
+  "auth.personalCall.poolFull",
+  "auth.personalCall.promptInvalid",
+  "auth.personalCall.spawnDisabled",
+  "auth.signatureRefusal.expired",
+  "auth.signatureRefusal.instanceUnconfigured",
+  "auth.signatureRefusal.invalid",
+  "auth.signatureRefusal.keyNotEndorsed",
+  "auth.signatureRefusal.keyRevoked",
+  "auth.signatureRefusal.nonceReplayed",
+  "auth.signatureRefusal.required",
+  "auth.signedControl.allowNeedsPreview",
+  "auth.signedControl.channelMemberOnly",
+  "auth.signedControl.hostOffline",
+  "auth.signedControl.hostRevoked",
+  "auth.signedControl.instructionDefault",
+  "auth.signedControl.instructionsDisabled",
+  "auth.signedControl.nonceReused",
+  "auth.signedControl.notDelivered",
+  "auth.signedControl.notDeliveredWith",
+  "auth.signedControl.ownerOnly",
+  "auth.signedControl.resumeAgentUnknown",
+  "auth.signedControl.scopeUnsupported",
+  "auth.signedControl.sessionNotAccepting",
+  "auth.signedControl.slashCommand",
+  "auth.signedControl.textInvalid",
   "auth.signIn.invalidCredentials",
   "auth.signIn.suspended",
   "auth.signIn.unmapped",
@@ -1314,6 +1454,84 @@ export const messageKeys = [
   "notifications.banner.code",
   "notifications.banner.secret",
   "notifications.inviteLink.fallback",
+  "onboarding.aiConnectCopy.commandAria",
+  "onboarding.aiConnectCopy.copied",
+  "onboarding.aiConnectCopy.copy",
+  "onboarding.aiConnectCopy.credential",
+  "onboarding.aiConnectCopy.endpoint",
+  "onboarding.aiConnectCopy.handedOffStatus",
+  "onboarding.aiConnectCopy.loginAriaClaude",
+  "onboarding.aiConnectCopy.loginAriaCodex",
+  "onboarding.aiConnectCopy.loginOpenedStatus",
+  "onboarding.aiConnectCopy.openTerminal",
+  "onboarding.aiConnectCopy.spaced",
+  "onboarding.aiConnectCopy.terminalOpenFailed",
+  "onboarding.aiConnectEntry.action",
+  "onboarding.aiConnectEntry.detail",
+  "onboarding.aiConnectEntry.title",
+  "onboarding.aiConnectGroup.agents",
+  "onboarding.aiConnectGroup.tools",
+  "onboarding.aiConnectHarness.grok",
+  "onboarding.aiConnectJoin.back",
+  "onboarding.aiConnectJoin.cap",
+  "onboarding.aiConnectJoin.capDetail",
+  "onboarding.aiConnectJoin.claudePaused",
+  "onboarding.aiConnectJoin.claudePausedDetail",
+  "onboarding.aiConnectJoin.claudePausedPill",
+  "onboarding.aiConnectJoin.connectClaude",
+  "onboarding.aiConnectJoin.connectCodex",
+  "onboarding.aiConnectJoin.connectDetailClaude",
+  "onboarding.aiConnectJoin.connectDetailCodex",
+  "onboarding.aiConnectJoin.creating",
+  "onboarding.aiConnectJoin.error",
+  "onboarding.aiConnectJoin.joined",
+  "onboarding.aiConnectJoin.joinedDetail",
+  "onboarding.aiConnectJoin.joinedPersonalDetail",
+  "onboarding.aiConnectJoin.off",
+  "onboarding.aiConnectJoin.waitingClaude",
+  "onboarding.aiConnectJoin.waitingCodex",
+  "onboarding.aiConnectJoin.waitingGrok",
+  "onboarding.aiConnectList.error",
+  "onboarding.aiConnectList.offline",
+  "onboarding.aiConnectPersonal.enabling",
+  "onboarding.aiConnectPersonal.unavailable",
+  "onboarding.aiConnectPersonal.unavailableDetail",
+  "onboarding.aiConnectPill.checking",
+  "onboarding.aiConnectPill.install",
+  "onboarding.aiConnectPill.login",
+  "onboarding.aiConnectPill.ready",
+  "onboarding.aiConnectRow.apiKeyDetail",
+  "onboarding.aiConnectRow.apiKeyMark",
+  "onboarding.aiConnectRow.apiKeyTitle",
+  "onboarding.aiConnectRow.claudeMark",
+  "onboarding.aiConnectRow.claudeTitle",
+  "onboarding.aiConnectRow.cliDetail",
+  "onboarding.aiConnectRow.codexMark",
+  "onboarding.aiConnectRow.codexTitle",
+  "onboarding.aiConnectRow.grokDetail",
+  "onboarding.aiConnectRow.grokMark",
+  "onboarding.aiConnectRow.grokTitle",
+  "onboarding.aiConnectStage.apiKeyPill",
+  "onboarding.aiConnectStage.back",
+  "onboarding.aiConnectStage.boundaryNote",
+  "onboarding.aiConnectStage.continue",
+  "onboarding.aiConnectStage.desktopOnlyNote",
+  "onboarding.aiConnectStage.foundClaude",
+  "onboarding.aiConnectStage.foundCodex",
+  "onboarding.aiConnectStage.grokNotInstalledPill",
+  "onboarding.aiConnectStage.nonAdminDetail",
+  "onboarding.aiConnectStage.nonAdminLine",
+  "onboarding.aiConnectStage.primaryApiKey",
+  "onboarding.aiConnectStage.primaryClaude",
+  "onboarding.aiConnectStage.primaryCodex",
+  "onboarding.aiConnectStage.primaryGrok",
+  "onboarding.aiConnectStage.probing",
+  "onboarding.aiConnectStage.question",
+  "onboarding.aiConnectStage.questionDetail",
+  "onboarding.aiConnectStage.reentry",
+  "onboarding.aiConnectStage.serverOffNote",
+  "onboarding.aiConnectStage.skip",
+  "onboarding.aiConnectStage.skippedLine",
   "onboarding.guide.expressionFlustered",
   "onboarding.guide.expressionHappy",
   "onboarding.guide.expressionIdle",
@@ -1353,6 +1571,57 @@ export const messageKeys = [
   "onboarding.harnessLogin.waitingBrowser",
   "onboarding.harnessLogin.waitingDetail",
   "onboarding.harnessLogin.waitingDevice",
+  "onboarding.subscriptionRegisterCalm.badgeDisabled",
+  "onboarding.subscriptionRegisterCalm.badgePaused",
+  "onboarding.subscriptionRegisterCalm.detailCleanup",
+  "onboarding.subscriptionRegisterCalm.detailDisabled",
+  "onboarding.subscriptionRegisterCalm.detailForbidden",
+  "onboarding.subscriptionRegisterCalm.detailLimit",
+  "onboarding.subscriptionRegisterCalm.detailPaused",
+  "onboarding.subscriptionRegisterCalm.lineCleanup",
+  "onboarding.subscriptionRegisterCalm.lineDisabled",
+  "onboarding.subscriptionRegisterCalm.lineForbidden",
+  "onboarding.subscriptionRegisterCalm.lineLimit",
+  "onboarding.subscriptionRegisterCalm.linePaused",
+  "onboarding.subscriptionRegisterConfirm.bulletCost",
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn",
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe",
+  "onboarding.subscriptionRegisterConfirm.create",
+  "onboarding.subscriptionRegisterConfirm.later",
+  "onboarding.subscriptionRegisterConfirm.nameHint",
+  "onboarding.subscriptionRegisterConfirm.nameLabel",
+  "onboarding.subscriptionRegisterConfirm.noStore",
+  "onboarding.subscriptionRegisterConfirm.title",
+  "onboarding.subscriptionRegisterDone.agents",
+  "onboarding.subscriptionRegisterDone.close",
+  "onboarding.subscriptionRegisterDone.detail",
+  "onboarding.subscriptionRegisterDone.existing",
+  "onboarding.subscriptionRegisterDone.existingDetail",
+  "onboarding.subscriptionRegisterDone.line",
+  "onboarding.subscriptionRegisterFailed.line",
+  "onboarding.subscriptionRegisterFailed.reasonDefault",
+  "onboarding.subscriptionRegisterFailed.reasonName",
+  "onboarding.subscriptionRegisterManual.detailCliFailed",
+  "onboarding.subscriptionRegisterManual.detailCliMissing",
+  "onboarding.subscriptionRegisterManual.detailCodex",
+  "onboarding.subscriptionRegisterManual.detailUnsupported",
+  "onboarding.subscriptionRegisterManual.disclosure",
+  "onboarding.subscriptionRegisterManual.hide",
+  "onboarding.subscriptionRegisterManual.lineYourself",
+  "onboarding.subscriptionRegisterName.charset",
+  "onboarding.subscriptionRegisterName.invalid",
+  "onboarding.subscriptionRegisterName.required",
+  "onboarding.subscriptionRegisterName.taken",
+  "onboarding.subscriptionRegisterName.tooLong",
+  "onboarding.subscriptionRegisterName.tooShort",
+  "onboarding.subscriptionRegisterProgress.cliStage",
+  "onboarding.subscriptionRegisterProgress.loggedIn",
+  "onboarding.subscriptionRegisterProgress.registering",
+  "onboarding.subscriptionRegisterProgress.serverStage",
+  "onboarding.subscriptionRegisterStart.create",
+  "onboarding.subscriptionRegisterStart.detail",
+  "onboarding.subscriptionRegisterStart.install",
+  "onboarding.subscriptionRegisterStart.title",
   "presence.dnd.hint",
   "presence.dnd.hintPick",
   "presence.menu.cardLabel",
@@ -3062,6 +3331,160 @@ export const argumentSpecs = {
   "auth.claim.passwordRecheck": {},
   "auth.claim.unmapped": {},
   "auth.claim.used": {},
+  "auth.devAccessCommand.envClaude": {
+    "path": "string"
+  },
+  "auth.devAccessCommand.envClaudeRun": {},
+  "auth.devAccessCommand.envCli": {},
+  "auth.devAccessCommand.envCliDone": {},
+  "auth.devAccessCommand.envCodex": {
+    "path": "string"
+  },
+  "auth.devAccessCommand.envCodexRun": {},
+  "auth.devAccessCommand.environmentCaveat": {},
+  "auth.devAccessCommand.envTitle": {},
+  "auth.devAccessCommand.helperClaude": {
+    "command": "string",
+    "path": "string"
+  },
+  "auth.devAccessCommand.helperCli": {
+    "command": "string"
+  },
+  "auth.devAccessCommand.helperCodex": {
+    "command": "string",
+    "path": "string"
+  },
+  "auth.devAccessCommand.helperLogin": {},
+  "auth.devAccessCommand.helperTitle": {},
+  "auth.devAccessCommand.pasteAndEnter": {},
+  "auth.devAccessCommand.readIntoEnv": {
+    "env": "string"
+  },
+  "auth.devAccessCommand.stdioClaude": {
+    "command": "string"
+  },
+  "auth.devAccessCommand.stdioCodex": {
+    "command": "string",
+    "path": "string"
+  },
+  "auth.devAccessCommand.stdioLogin": {},
+  "auth.devAccessCommand.stdioTitle": {},
+  "auth.devAccessCommand.terminal": {},
+  "auth.devAccessCommand.unavailable": {},
+  "auth.devAccessCreate.expiryHint": {},
+  "auth.devAccessError.accessDenied": {},
+  "auth.devAccessError.accessDeniedCreate": {},
+  "auth.devAccessError.busy": {
+    "amount": "number",
+    "unit": "string"
+  },
+  "auth.devAccessError.forbidden": {},
+  "auth.devAccessError.forbiddenRevoke": {},
+  "auth.devAccessError.invalid": {},
+  "auth.devAccessError.invalidCreate": {},
+  "auth.devAccessError.limit": {
+    "limit": "number"
+  },
+  "auth.devAccessError.network": {},
+  "auth.devAccessError.networkCreate": {},
+  "auth.devAccessError.notFound": {},
+  "auth.devAccessError.notFoundRevoke": {},
+  "auth.devAccessError.passwordIncorrect": {},
+  "auth.devAccessError.passwordUnavailable": {},
+  "auth.devAccessError.rateLimited": {
+    "amount": "number",
+    "unit": "string"
+  },
+  "auth.devAccessError.unauthorized": {},
+  "auth.devAccessError.unknown": {},
+  "auth.devAccessError.unknownCreate": {},
+  "auth.devAccessExpiry.days": {
+    "days": "number"
+  },
+  "auth.devAccessExpiry.daysAway": {
+    "days": "number"
+  },
+  "auth.devAccessExpiry.passed": {},
+  "auth.devAccessExpiry.today": {},
+  "auth.devAccessGate.adminsOnly": {},
+  "auth.devAccessGate.adminsOpen": {},
+  "auth.devAccessGate.membersDenied": {},
+  "auth.devAccessGate.membersOpen": {},
+  "auth.devAccessGate.off": {},
+  "auth.devAccessGate.open": {},
+  "auth.devAccessKind.card": {},
+  "auth.devAccessKind.session": {},
+  "auth.devAccessList.all": {},
+  "auth.devAccessList.mine": {},
+  "auth.devAccessNotice.cardLimit": {
+    "limit": "number"
+  },
+  "auth.devAccessNotice.fixedAfterIssue": {},
+  "auth.devAccessNotice.logoutKeepsConnections": {},
+  "auth.devAccessNotice.passwordChangeEndsAll": {},
+  "auth.devAccessNotice.revokeWarning": {},
+  "auth.devAccessNotice.toolIsOnlyALabel": {},
+  "auth.devAccessOneTime.caution": {},
+  "auth.devAccessOneTime.confirm": {},
+  "auth.devAccessOneTime.warning": {},
+  "auth.devAccessPhone.passwordAndToolNote": {},
+  "auth.devAccessPreset.readDescription": {},
+  "auth.devAccessPreset.readLabel": {},
+  "auth.devAccessPreset.readWriteDescription": {},
+  "auth.devAccessPreset.readWriteLabel": {},
+  "auth.devAccessRestriction.help": {},
+  "auth.devAccessRestriction.label": {},
+  "auth.devAccessReveal.expiryWithDate": {
+    "date": "string",
+    "expiry": "string"
+  },
+  "auth.devAccessReveal.scopeWithDetail": {
+    "detail": "string",
+    "label": "string"
+  },
+  "auth.devAccessRow.neverUsed": {},
+  "auth.devAccessScope.channelsRead": {},
+  "auth.devAccessScope.identity": {},
+  "auth.devAccessScope.inboxRead": {},
+  "auth.devAccessScope.messagesRead": {},
+  "auth.devAccessScope.messagesWrite": {},
+  "auth.devAccessScope.unknown": {},
+  "auth.devAccessScopeLabel.custom": {},
+  "auth.devAccessScopeLabel.customChannelOnly": {},
+  "auth.devAccessScopeLabel.read": {},
+  "auth.devAccessScopeLabel.readChannelOnly": {},
+  "auth.devAccessScopeLabel.readWrite": {},
+  "auth.devAccessScopeLabel.readWriteChannelOnly": {},
+  "auth.devAccessTool.claudeCode": {},
+  "auth.devAccessTool.cli": {},
+  "auth.devAccessTool.codex": {},
+  "auth.devAccessTool.other": {},
+  "auth.devAccessValidation.channelsRequired": {},
+  "auth.devAccessValidation.channelsTooMany": {
+    "count": "number",
+    "excess": "number",
+    "max": "number"
+  },
+  "auth.devAccessValidation.expiryNotInteger": {
+    "max": "number"
+  },
+  "auth.devAccessValidation.expiryRequired": {
+    "max": "number"
+  },
+  "auth.devAccessValidation.expiryTooLong": {
+    "max": "number"
+  },
+  "auth.devAccessValidation.nameControl": {},
+  "auth.devAccessValidation.nameEnvelope": {},
+  "auth.devAccessValidation.nameRequired": {},
+  "auth.devAccessValidation.nameTooLong": {
+    "length": "number",
+    "max": "number"
+  },
+  "auth.devAccessValidation.passwordRequired": {},
+  "auth.devAccessValidation.passwordTooLong": {
+    "max": "string"
+  },
   "auth.deviceKey.authFailed": {},
   "auth.deviceKey.cancelled": {},
   "auth.deviceKey.changed": {},
@@ -3108,6 +3531,9 @@ export const argumentSpecs = {
   "auth.failure.serverError": {},
   "auth.failure.tooManyRequests": {},
   "auth.failure.unreadableResponse": {},
+  "auth.humanSignatureInApp.allow": {},
+  "auth.humanSignatureInApp.instruct": {},
+  "auth.humanSignatureInApp.reply": {},
   "auth.join.alreadyRedeemed": {},
   "auth.join.cannotJoin": {},
   "auth.join.exhausted": {},
@@ -3127,6 +3553,45 @@ export const argumentSpecs = {
   "auth.passwordRule.tooShort": {
     "minChars": "number"
   },
+  "auth.personalCall.agentNotAllowed": {},
+  "auth.personalCall.callDefault": {},
+  "auth.personalCall.channelMemberOnly": {},
+  "auth.personalCall.folderNotFound": {},
+  "auth.personalCall.hostAmbiguous": {},
+  "auth.personalCall.hostNotFound": {},
+  "auth.personalCall.inputInvalid": {},
+  "auth.personalCall.macOff": {},
+  "auth.personalCall.needsApp": {},
+  "auth.personalCall.nonceReused": {},
+  "auth.personalCall.nothingToAsk": {},
+  "auth.personalCall.originInvalid": {},
+  "auth.personalCall.poolFull": {},
+  "auth.personalCall.promptInvalid": {},
+  "auth.personalCall.spawnDisabled": {},
+  "auth.signatureRefusal.expired": {},
+  "auth.signatureRefusal.instanceUnconfigured": {},
+  "auth.signatureRefusal.invalid": {},
+  "auth.signatureRefusal.keyNotEndorsed": {},
+  "auth.signatureRefusal.keyRevoked": {},
+  "auth.signatureRefusal.nonceReplayed": {},
+  "auth.signatureRefusal.required": {},
+  "auth.signedControl.allowNeedsPreview": {},
+  "auth.signedControl.channelMemberOnly": {},
+  "auth.signedControl.hostOffline": {},
+  "auth.signedControl.hostRevoked": {},
+  "auth.signedControl.instructionDefault": {},
+  "auth.signedControl.instructionsDisabled": {},
+  "auth.signedControl.nonceReused": {},
+  "auth.signedControl.notDelivered": {},
+  "auth.signedControl.notDeliveredWith": {
+    "reason": "string"
+  },
+  "auth.signedControl.ownerOnly": {},
+  "auth.signedControl.resumeAgentUnknown": {},
+  "auth.signedControl.scopeUnsupported": {},
+  "auth.signedControl.sessionNotAccepting": {},
+  "auth.signedControl.slashCommand": {},
+  "auth.signedControl.textInvalid": {},
   "auth.signIn.invalidCredentials": {},
   "auth.signIn.suspended": {},
   "auth.signIn.unmapped": {},
@@ -4642,6 +5107,90 @@ export const argumentSpecs = {
   "notifications.banner.code": {},
   "notifications.banner.secret": {},
   "notifications.inviteLink.fallback": {},
+  "onboarding.aiConnectCopy.commandAria": {},
+  "onboarding.aiConnectCopy.copied": {},
+  "onboarding.aiConnectCopy.copy": {},
+  "onboarding.aiConnectCopy.credential": {},
+  "onboarding.aiConnectCopy.endpoint": {},
+  "onboarding.aiConnectCopy.handedOffStatus": {},
+  "onboarding.aiConnectCopy.loginAriaClaude": {},
+  "onboarding.aiConnectCopy.loginAriaCodex": {},
+  "onboarding.aiConnectCopy.loginOpenedStatus": {},
+  "onboarding.aiConnectCopy.openTerminal": {},
+  "onboarding.aiConnectCopy.spaced": {
+    "first": "string",
+    "second": "string"
+  },
+  "onboarding.aiConnectCopy.terminalOpenFailed": {},
+  "onboarding.aiConnectEntry.action": {},
+  "onboarding.aiConnectEntry.detail": {},
+  "onboarding.aiConnectEntry.title": {},
+  "onboarding.aiConnectGroup.agents": {},
+  "onboarding.aiConnectGroup.tools": {},
+  "onboarding.aiConnectHarness.grok": {},
+  "onboarding.aiConnectJoin.back": {},
+  "onboarding.aiConnectJoin.cap": {},
+  "onboarding.aiConnectJoin.capDetail": {},
+  "onboarding.aiConnectJoin.claudePaused": {},
+  "onboarding.aiConnectJoin.claudePausedDetail": {},
+  "onboarding.aiConnectJoin.claudePausedPill": {},
+  "onboarding.aiConnectJoin.connectClaude": {},
+  "onboarding.aiConnectJoin.connectCodex": {},
+  "onboarding.aiConnectJoin.connectDetailClaude": {},
+  "onboarding.aiConnectJoin.connectDetailCodex": {},
+  "onboarding.aiConnectJoin.creating": {},
+  "onboarding.aiConnectJoin.error": {},
+  "onboarding.aiConnectJoin.joined": {
+    "josa": "string",
+    "name": "string"
+  },
+  "onboarding.aiConnectJoin.joinedDetail": {},
+  "onboarding.aiConnectJoin.joinedPersonalDetail": {},
+  "onboarding.aiConnectJoin.off": {},
+  "onboarding.aiConnectJoin.waitingClaude": {},
+  "onboarding.aiConnectJoin.waitingCodex": {},
+  "onboarding.aiConnectJoin.waitingGrok": {},
+  "onboarding.aiConnectList.error": {},
+  "onboarding.aiConnectList.offline": {},
+  "onboarding.aiConnectPersonal.enabling": {},
+  "onboarding.aiConnectPersonal.unavailable": {},
+  "onboarding.aiConnectPersonal.unavailableDetail": {},
+  "onboarding.aiConnectPill.checking": {},
+  "onboarding.aiConnectPill.install": {},
+  "onboarding.aiConnectPill.login": {},
+  "onboarding.aiConnectPill.ready": {},
+  "onboarding.aiConnectRow.apiKeyDetail": {},
+  "onboarding.aiConnectRow.apiKeyMark": {},
+  "onboarding.aiConnectRow.apiKeyTitle": {},
+  "onboarding.aiConnectRow.claudeMark": {},
+  "onboarding.aiConnectRow.claudeTitle": {},
+  "onboarding.aiConnectRow.cliDetail": {},
+  "onboarding.aiConnectRow.codexMark": {},
+  "onboarding.aiConnectRow.codexTitle": {},
+  "onboarding.aiConnectRow.grokDetail": {},
+  "onboarding.aiConnectRow.grokMark": {},
+  "onboarding.aiConnectRow.grokTitle": {},
+  "onboarding.aiConnectStage.apiKeyPill": {},
+  "onboarding.aiConnectStage.back": {},
+  "onboarding.aiConnectStage.boundaryNote": {},
+  "onboarding.aiConnectStage.continue": {},
+  "onboarding.aiConnectStage.desktopOnlyNote": {},
+  "onboarding.aiConnectStage.foundClaude": {},
+  "onboarding.aiConnectStage.foundCodex": {},
+  "onboarding.aiConnectStage.grokNotInstalledPill": {},
+  "onboarding.aiConnectStage.nonAdminDetail": {},
+  "onboarding.aiConnectStage.nonAdminLine": {},
+  "onboarding.aiConnectStage.primaryApiKey": {},
+  "onboarding.aiConnectStage.primaryClaude": {},
+  "onboarding.aiConnectStage.primaryCodex": {},
+  "onboarding.aiConnectStage.primaryGrok": {},
+  "onboarding.aiConnectStage.probing": {},
+  "onboarding.aiConnectStage.question": {},
+  "onboarding.aiConnectStage.questionDetail": {},
+  "onboarding.aiConnectStage.reentry": {},
+  "onboarding.aiConnectStage.serverOffNote": {},
+  "onboarding.aiConnectStage.skip": {},
+  "onboarding.aiConnectStage.skippedLine": {},
   "onboarding.guide.expressionFlustered": {},
   "onboarding.guide.expressionHappy": {},
   "onboarding.guide.expressionIdle": {},
@@ -4692,6 +5241,108 @@ export const argumentSpecs = {
     "cli": "string"
   },
   "onboarding.harnessLogin.waitingDevice": {},
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": {},
+  "onboarding.subscriptionRegisterCalm.badgePaused": {},
+  "onboarding.subscriptionRegisterCalm.detailCleanup": {},
+  "onboarding.subscriptionRegisterCalm.detailDisabled": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.detailForbidden": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.detailLimit": {},
+  "onboarding.subscriptionRegisterCalm.detailPaused": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.lineCleanup": {},
+  "onboarding.subscriptionRegisterCalm.lineDisabled": {},
+  "onboarding.subscriptionRegisterCalm.lineForbidden": {},
+  "onboarding.subscriptionRegisterCalm.lineLimit": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.linePaused": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterConfirm.bulletCost": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": {},
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": {},
+  "onboarding.subscriptionRegisterConfirm.create": {
+    "handle": "string"
+  },
+  "onboarding.subscriptionRegisterConfirm.later": {},
+  "onboarding.subscriptionRegisterConfirm.nameHint": {},
+  "onboarding.subscriptionRegisterConfirm.nameLabel": {},
+  "onboarding.subscriptionRegisterConfirm.noStore": {},
+  "onboarding.subscriptionRegisterConfirm.title": {
+    "cli": "string",
+    "cliJosa": "string",
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterDone.agents": {},
+  "onboarding.subscriptionRegisterDone.close": {},
+  "onboarding.subscriptionRegisterDone.detail": {
+    "cli": "string",
+    "cliJosa": "string",
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterDone.existing": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterDone.existingDetail": {},
+  "onboarding.subscriptionRegisterDone.line": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterFailed.line": {
+    "reason": "string"
+  },
+  "onboarding.subscriptionRegisterFailed.reasonDefault": {},
+  "onboarding.subscriptionRegisterFailed.reasonName": {},
+  "onboarding.subscriptionRegisterManual.detailCliFailed": {
+    "cli": "string",
+    "cliJosa": "string"
+  },
+  "onboarding.subscriptionRegisterManual.detailCliMissing": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterManual.detailCodex": {
+    "cli": "string",
+    "cliJosa": "string"
+  },
+  "onboarding.subscriptionRegisterManual.detailUnsupported": {},
+  "onboarding.subscriptionRegisterManual.disclosure": {},
+  "onboarding.subscriptionRegisterManual.hide": {},
+  "onboarding.subscriptionRegisterManual.lineYourself": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterName.charset": {},
+  "onboarding.subscriptionRegisterName.invalid": {},
+  "onboarding.subscriptionRegisterName.required": {},
+  "onboarding.subscriptionRegisterName.taken": {},
+  "onboarding.subscriptionRegisterName.tooLong": {},
+  "onboarding.subscriptionRegisterName.tooShort": {},
+  "onboarding.subscriptionRegisterProgress.cliStage": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterProgress.loggedIn": {
+    "cli": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterProgress.registering": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterProgress.serverStage": {},
+  "onboarding.subscriptionRegisterStart.create": {},
+  "onboarding.subscriptionRegisterStart.detail": {},
+  "onboarding.subscriptionRegisterStart.install": {},
+  "onboarding.subscriptionRegisterStart.title": {},
   "presence.dnd.hint": {},
   "presence.dnd.hintPick": {},
   "presence.menu.cardLabel": {
@@ -6973,6 +7624,106 @@ export interface MessageArgs {
   "auth.claim.passwordRecheck": Record<string, never>;
   "auth.claim.unmapped": Record<string, never>;
   "auth.claim.used": Record<string, never>;
+  "auth.devAccessCommand.envClaude": { path: string };
+  "auth.devAccessCommand.envClaudeRun": Record<string, never>;
+  "auth.devAccessCommand.envCli": Record<string, never>;
+  "auth.devAccessCommand.envCliDone": Record<string, never>;
+  "auth.devAccessCommand.envCodex": { path: string };
+  "auth.devAccessCommand.envCodexRun": Record<string, never>;
+  "auth.devAccessCommand.environmentCaveat": Record<string, never>;
+  "auth.devAccessCommand.envTitle": Record<string, never>;
+  "auth.devAccessCommand.helperClaude": { command: string; path: string };
+  "auth.devAccessCommand.helperCli": { command: string };
+  "auth.devAccessCommand.helperCodex": { command: string; path: string };
+  "auth.devAccessCommand.helperLogin": Record<string, never>;
+  "auth.devAccessCommand.helperTitle": Record<string, never>;
+  "auth.devAccessCommand.pasteAndEnter": Record<string, never>;
+  "auth.devAccessCommand.readIntoEnv": { env: string };
+  "auth.devAccessCommand.stdioClaude": { command: string };
+  "auth.devAccessCommand.stdioCodex": { command: string; path: string };
+  "auth.devAccessCommand.stdioLogin": Record<string, never>;
+  "auth.devAccessCommand.stdioTitle": Record<string, never>;
+  "auth.devAccessCommand.terminal": Record<string, never>;
+  "auth.devAccessCommand.unavailable": Record<string, never>;
+  "auth.devAccessCreate.expiryHint": Record<string, never>;
+  "auth.devAccessError.accessDenied": Record<string, never>;
+  "auth.devAccessError.accessDeniedCreate": Record<string, never>;
+  "auth.devAccessError.busy": { amount: number; unit: string };
+  "auth.devAccessError.forbidden": Record<string, never>;
+  "auth.devAccessError.forbiddenRevoke": Record<string, never>;
+  "auth.devAccessError.invalid": Record<string, never>;
+  "auth.devAccessError.invalidCreate": Record<string, never>;
+  "auth.devAccessError.limit": { limit: number };
+  "auth.devAccessError.network": Record<string, never>;
+  "auth.devAccessError.networkCreate": Record<string, never>;
+  "auth.devAccessError.notFound": Record<string, never>;
+  "auth.devAccessError.notFoundRevoke": Record<string, never>;
+  "auth.devAccessError.passwordIncorrect": Record<string, never>;
+  "auth.devAccessError.passwordUnavailable": Record<string, never>;
+  "auth.devAccessError.rateLimited": { amount: number; unit: string };
+  "auth.devAccessError.unauthorized": Record<string, never>;
+  "auth.devAccessError.unknown": Record<string, never>;
+  "auth.devAccessError.unknownCreate": Record<string, never>;
+  "auth.devAccessExpiry.days": { days: number };
+  "auth.devAccessExpiry.daysAway": { days: number };
+  "auth.devAccessExpiry.passed": Record<string, never>;
+  "auth.devAccessExpiry.today": Record<string, never>;
+  "auth.devAccessGate.adminsOnly": Record<string, never>;
+  "auth.devAccessGate.adminsOpen": Record<string, never>;
+  "auth.devAccessGate.membersDenied": Record<string, never>;
+  "auth.devAccessGate.membersOpen": Record<string, never>;
+  "auth.devAccessGate.off": Record<string, never>;
+  "auth.devAccessGate.open": Record<string, never>;
+  "auth.devAccessKind.card": Record<string, never>;
+  "auth.devAccessKind.session": Record<string, never>;
+  "auth.devAccessList.all": Record<string, never>;
+  "auth.devAccessList.mine": Record<string, never>;
+  "auth.devAccessNotice.cardLimit": { limit: number };
+  "auth.devAccessNotice.fixedAfterIssue": Record<string, never>;
+  "auth.devAccessNotice.logoutKeepsConnections": Record<string, never>;
+  "auth.devAccessNotice.passwordChangeEndsAll": Record<string, never>;
+  "auth.devAccessNotice.revokeWarning": Record<string, never>;
+  "auth.devAccessNotice.toolIsOnlyALabel": Record<string, never>;
+  "auth.devAccessOneTime.caution": Record<string, never>;
+  "auth.devAccessOneTime.confirm": Record<string, never>;
+  "auth.devAccessOneTime.warning": Record<string, never>;
+  "auth.devAccessPhone.passwordAndToolNote": Record<string, never>;
+  "auth.devAccessPreset.readDescription": Record<string, never>;
+  "auth.devAccessPreset.readLabel": Record<string, never>;
+  "auth.devAccessPreset.readWriteDescription": Record<string, never>;
+  "auth.devAccessPreset.readWriteLabel": Record<string, never>;
+  "auth.devAccessRestriction.help": Record<string, never>;
+  "auth.devAccessRestriction.label": Record<string, never>;
+  "auth.devAccessReveal.expiryWithDate": { date: string; expiry: string };
+  "auth.devAccessReveal.scopeWithDetail": { detail: string; label: string };
+  "auth.devAccessRow.neverUsed": Record<string, never>;
+  "auth.devAccessScope.channelsRead": Record<string, never>;
+  "auth.devAccessScope.identity": Record<string, never>;
+  "auth.devAccessScope.inboxRead": Record<string, never>;
+  "auth.devAccessScope.messagesRead": Record<string, never>;
+  "auth.devAccessScope.messagesWrite": Record<string, never>;
+  "auth.devAccessScope.unknown": Record<string, never>;
+  "auth.devAccessScopeLabel.custom": Record<string, never>;
+  "auth.devAccessScopeLabel.customChannelOnly": Record<string, never>;
+  "auth.devAccessScopeLabel.read": Record<string, never>;
+  "auth.devAccessScopeLabel.readChannelOnly": Record<string, never>;
+  "auth.devAccessScopeLabel.readWrite": Record<string, never>;
+  "auth.devAccessScopeLabel.readWriteChannelOnly": Record<string, never>;
+  "auth.devAccessTool.claudeCode": Record<string, never>;
+  "auth.devAccessTool.cli": Record<string, never>;
+  "auth.devAccessTool.codex": Record<string, never>;
+  "auth.devAccessTool.other": Record<string, never>;
+  "auth.devAccessValidation.channelsRequired": Record<string, never>;
+  "auth.devAccessValidation.channelsTooMany": { count: number; excess: number; max: number };
+  "auth.devAccessValidation.expiryNotInteger": { max: number };
+  "auth.devAccessValidation.expiryRequired": { max: number };
+  "auth.devAccessValidation.expiryTooLong": { max: number };
+  "auth.devAccessValidation.nameControl": Record<string, never>;
+  "auth.devAccessValidation.nameEnvelope": Record<string, never>;
+  "auth.devAccessValidation.nameRequired": Record<string, never>;
+  "auth.devAccessValidation.nameTooLong": { length: number; max: number };
+  "auth.devAccessValidation.passwordRequired": Record<string, never>;
+  "auth.devAccessValidation.passwordTooLong": { max: string };
   "auth.deviceKey.authFailed": Record<string, never>;
   "auth.deviceKey.cancelled": Record<string, never>;
   "auth.deviceKey.changed": Record<string, never>;
@@ -7019,6 +7770,9 @@ export interface MessageArgs {
   "auth.failure.serverError": Record<string, never>;
   "auth.failure.tooManyRequests": Record<string, never>;
   "auth.failure.unreadableResponse": Record<string, never>;
+  "auth.humanSignatureInApp.allow": Record<string, never>;
+  "auth.humanSignatureInApp.instruct": Record<string, never>;
+  "auth.humanSignatureInApp.reply": Record<string, never>;
   "auth.join.alreadyRedeemed": Record<string, never>;
   "auth.join.cannotJoin": Record<string, never>;
   "auth.join.exhausted": Record<string, never>;
@@ -7032,6 +7786,43 @@ export interface MessageArgs {
   "auth.linkedDevice.platformWeb": Record<string, never>;
   "auth.passwordRule.tooLong": { hangulBytes: string; maxBytes: string; maxHangul: string };
   "auth.passwordRule.tooShort": { minChars: number };
+  "auth.personalCall.agentNotAllowed": Record<string, never>;
+  "auth.personalCall.callDefault": Record<string, never>;
+  "auth.personalCall.channelMemberOnly": Record<string, never>;
+  "auth.personalCall.folderNotFound": Record<string, never>;
+  "auth.personalCall.hostAmbiguous": Record<string, never>;
+  "auth.personalCall.hostNotFound": Record<string, never>;
+  "auth.personalCall.inputInvalid": Record<string, never>;
+  "auth.personalCall.macOff": Record<string, never>;
+  "auth.personalCall.needsApp": Record<string, never>;
+  "auth.personalCall.nonceReused": Record<string, never>;
+  "auth.personalCall.nothingToAsk": Record<string, never>;
+  "auth.personalCall.originInvalid": Record<string, never>;
+  "auth.personalCall.poolFull": Record<string, never>;
+  "auth.personalCall.promptInvalid": Record<string, never>;
+  "auth.personalCall.spawnDisabled": Record<string, never>;
+  "auth.signatureRefusal.expired": Record<string, never>;
+  "auth.signatureRefusal.instanceUnconfigured": Record<string, never>;
+  "auth.signatureRefusal.invalid": Record<string, never>;
+  "auth.signatureRefusal.keyNotEndorsed": Record<string, never>;
+  "auth.signatureRefusal.keyRevoked": Record<string, never>;
+  "auth.signatureRefusal.nonceReplayed": Record<string, never>;
+  "auth.signatureRefusal.required": Record<string, never>;
+  "auth.signedControl.allowNeedsPreview": Record<string, never>;
+  "auth.signedControl.channelMemberOnly": Record<string, never>;
+  "auth.signedControl.hostOffline": Record<string, never>;
+  "auth.signedControl.hostRevoked": Record<string, never>;
+  "auth.signedControl.instructionDefault": Record<string, never>;
+  "auth.signedControl.instructionsDisabled": Record<string, never>;
+  "auth.signedControl.nonceReused": Record<string, never>;
+  "auth.signedControl.notDelivered": Record<string, never>;
+  "auth.signedControl.notDeliveredWith": { reason: string };
+  "auth.signedControl.ownerOnly": Record<string, never>;
+  "auth.signedControl.resumeAgentUnknown": Record<string, never>;
+  "auth.signedControl.scopeUnsupported": Record<string, never>;
+  "auth.signedControl.sessionNotAccepting": Record<string, never>;
+  "auth.signedControl.slashCommand": Record<string, never>;
+  "auth.signedControl.textInvalid": Record<string, never>;
   "auth.signIn.invalidCredentials": Record<string, never>;
   "auth.signIn.suspended": Record<string, never>;
   "auth.signIn.unmapped": Record<string, never>;
@@ -8187,6 +8978,84 @@ export interface MessageArgs {
   "notifications.banner.code": Record<string, never>;
   "notifications.banner.secret": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
+  "onboarding.aiConnectCopy.commandAria": Record<string, never>;
+  "onboarding.aiConnectCopy.copied": Record<string, never>;
+  "onboarding.aiConnectCopy.copy": Record<string, never>;
+  "onboarding.aiConnectCopy.credential": Record<string, never>;
+  "onboarding.aiConnectCopy.endpoint": Record<string, never>;
+  "onboarding.aiConnectCopy.handedOffStatus": Record<string, never>;
+  "onboarding.aiConnectCopy.loginAriaClaude": Record<string, never>;
+  "onboarding.aiConnectCopy.loginAriaCodex": Record<string, never>;
+  "onboarding.aiConnectCopy.loginOpenedStatus": Record<string, never>;
+  "onboarding.aiConnectCopy.openTerminal": Record<string, never>;
+  "onboarding.aiConnectCopy.spaced": { first: string; second: string };
+  "onboarding.aiConnectCopy.terminalOpenFailed": Record<string, never>;
+  "onboarding.aiConnectEntry.action": Record<string, never>;
+  "onboarding.aiConnectEntry.detail": Record<string, never>;
+  "onboarding.aiConnectEntry.title": Record<string, never>;
+  "onboarding.aiConnectGroup.agents": Record<string, never>;
+  "onboarding.aiConnectGroup.tools": Record<string, never>;
+  "onboarding.aiConnectHarness.grok": Record<string, never>;
+  "onboarding.aiConnectJoin.back": Record<string, never>;
+  "onboarding.aiConnectJoin.cap": Record<string, never>;
+  "onboarding.aiConnectJoin.capDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.claudePaused": Record<string, never>;
+  "onboarding.aiConnectJoin.claudePausedDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.claudePausedPill": Record<string, never>;
+  "onboarding.aiConnectJoin.connectClaude": Record<string, never>;
+  "onboarding.aiConnectJoin.connectCodex": Record<string, never>;
+  "onboarding.aiConnectJoin.connectDetailClaude": Record<string, never>;
+  "onboarding.aiConnectJoin.connectDetailCodex": Record<string, never>;
+  "onboarding.aiConnectJoin.creating": Record<string, never>;
+  "onboarding.aiConnectJoin.error": Record<string, never>;
+  "onboarding.aiConnectJoin.joined": { josa: string; name: string };
+  "onboarding.aiConnectJoin.joinedDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.joinedPersonalDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.off": Record<string, never>;
+  "onboarding.aiConnectJoin.waitingClaude": Record<string, never>;
+  "onboarding.aiConnectJoin.waitingCodex": Record<string, never>;
+  "onboarding.aiConnectJoin.waitingGrok": Record<string, never>;
+  "onboarding.aiConnectList.error": Record<string, never>;
+  "onboarding.aiConnectList.offline": Record<string, never>;
+  "onboarding.aiConnectPersonal.enabling": Record<string, never>;
+  "onboarding.aiConnectPersonal.unavailable": Record<string, never>;
+  "onboarding.aiConnectPersonal.unavailableDetail": Record<string, never>;
+  "onboarding.aiConnectPill.checking": Record<string, never>;
+  "onboarding.aiConnectPill.install": Record<string, never>;
+  "onboarding.aiConnectPill.login": Record<string, never>;
+  "onboarding.aiConnectPill.ready": Record<string, never>;
+  "onboarding.aiConnectRow.apiKeyDetail": Record<string, never>;
+  "onboarding.aiConnectRow.apiKeyMark": Record<string, never>;
+  "onboarding.aiConnectRow.apiKeyTitle": Record<string, never>;
+  "onboarding.aiConnectRow.claudeMark": Record<string, never>;
+  "onboarding.aiConnectRow.claudeTitle": Record<string, never>;
+  "onboarding.aiConnectRow.cliDetail": Record<string, never>;
+  "onboarding.aiConnectRow.codexMark": Record<string, never>;
+  "onboarding.aiConnectRow.codexTitle": Record<string, never>;
+  "onboarding.aiConnectRow.grokDetail": Record<string, never>;
+  "onboarding.aiConnectRow.grokMark": Record<string, never>;
+  "onboarding.aiConnectRow.grokTitle": Record<string, never>;
+  "onboarding.aiConnectStage.apiKeyPill": Record<string, never>;
+  "onboarding.aiConnectStage.back": Record<string, never>;
+  "onboarding.aiConnectStage.boundaryNote": Record<string, never>;
+  "onboarding.aiConnectStage.continue": Record<string, never>;
+  "onboarding.aiConnectStage.desktopOnlyNote": Record<string, never>;
+  "onboarding.aiConnectStage.foundClaude": Record<string, never>;
+  "onboarding.aiConnectStage.foundCodex": Record<string, never>;
+  "onboarding.aiConnectStage.grokNotInstalledPill": Record<string, never>;
+  "onboarding.aiConnectStage.nonAdminDetail": Record<string, never>;
+  "onboarding.aiConnectStage.nonAdminLine": Record<string, never>;
+  "onboarding.aiConnectStage.primaryApiKey": Record<string, never>;
+  "onboarding.aiConnectStage.primaryClaude": Record<string, never>;
+  "onboarding.aiConnectStage.primaryCodex": Record<string, never>;
+  "onboarding.aiConnectStage.primaryGrok": Record<string, never>;
+  "onboarding.aiConnectStage.probing": Record<string, never>;
+  "onboarding.aiConnectStage.question": Record<string, never>;
+  "onboarding.aiConnectStage.questionDetail": Record<string, never>;
+  "onboarding.aiConnectStage.reentry": Record<string, never>;
+  "onboarding.aiConnectStage.serverOffNote": Record<string, never>;
+  "onboarding.aiConnectStage.skip": Record<string, never>;
+  "onboarding.aiConnectStage.skippedLine": Record<string, never>;
   "onboarding.guide.expressionFlustered": Record<string, never>;
   "onboarding.guide.expressionHappy": Record<string, never>;
   "onboarding.guide.expressionIdle": Record<string, never>;
@@ -8226,6 +9095,57 @@ export interface MessageArgs {
   "onboarding.harnessLogin.waitingBrowser": Record<string, never>;
   "onboarding.harnessLogin.waitingDetail": { cli: string };
   "onboarding.harnessLogin.waitingDevice": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.badgePaused": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.detailCleanup": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.detailDisabled": { cli: string };
+  "onboarding.subscriptionRegisterCalm.detailForbidden": { cli: string };
+  "onboarding.subscriptionRegisterCalm.detailLimit": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.detailPaused": { cli: string };
+  "onboarding.subscriptionRegisterCalm.lineCleanup": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.lineDisabled": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.lineForbidden": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.lineLimit": { cli: string };
+  "onboarding.subscriptionRegisterCalm.linePaused": { cli: string };
+  "onboarding.subscriptionRegisterConfirm.bulletCost": { cli: string };
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.create": { handle: string };
+  "onboarding.subscriptionRegisterConfirm.later": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.nameHint": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.nameLabel": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.noStore": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.title": { cli: string; cliJosa: string; handle: string; josa: string };
+  "onboarding.subscriptionRegisterDone.agents": Record<string, never>;
+  "onboarding.subscriptionRegisterDone.close": Record<string, never>;
+  "onboarding.subscriptionRegisterDone.detail": { cli: string; cliJosa: string; handle: string; josa: string };
+  "onboarding.subscriptionRegisterDone.existing": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterDone.existingDetail": Record<string, never>;
+  "onboarding.subscriptionRegisterDone.line": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterFailed.line": { reason: string };
+  "onboarding.subscriptionRegisterFailed.reasonDefault": Record<string, never>;
+  "onboarding.subscriptionRegisterFailed.reasonName": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.detailCliFailed": { cli: string; cliJosa: string };
+  "onboarding.subscriptionRegisterManual.detailCliMissing": { cli: string };
+  "onboarding.subscriptionRegisterManual.detailCodex": { cli: string; cliJosa: string };
+  "onboarding.subscriptionRegisterManual.detailUnsupported": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.disclosure": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.hide": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.lineYourself": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterName.charset": Record<string, never>;
+  "onboarding.subscriptionRegisterName.invalid": Record<string, never>;
+  "onboarding.subscriptionRegisterName.required": Record<string, never>;
+  "onboarding.subscriptionRegisterName.taken": Record<string, never>;
+  "onboarding.subscriptionRegisterName.tooLong": Record<string, never>;
+  "onboarding.subscriptionRegisterName.tooShort": Record<string, never>;
+  "onboarding.subscriptionRegisterProgress.cliStage": { cli: string };
+  "onboarding.subscriptionRegisterProgress.loggedIn": { cli: string; josa: string };
+  "onboarding.subscriptionRegisterProgress.registering": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterProgress.serverStage": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.create": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.detail": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.install": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.title": Record<string, never>;
   "presence.dnd.hint": Record<string, never>;
   "presence.dnd.hintPick": Record<string, never>;
   "presence.menu.cardLabel": { name: string; trigger: string };

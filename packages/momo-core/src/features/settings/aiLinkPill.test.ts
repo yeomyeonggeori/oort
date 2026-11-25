@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ProviderLink, ProviderLinkTest } from "./api";
-import { harnessPillView, isLegacyTeamLink, linkPill } from "./aiLinkPill";
+import { harnessPillView as harnessPillViewModel, isLegacyTeamLink, linkPill } from "./aiLinkPill";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+
+// 알약 낱말은 사전에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const harnessPillView = (pill: Parameters<typeof harnessPillViewModel>[1]) =>
+  harnessPillViewModel(formatMessage, pill);
 
 const LINK: ProviderLink = {
   schema: "momo.provider_link.v0",

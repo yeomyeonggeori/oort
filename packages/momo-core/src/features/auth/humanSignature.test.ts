@@ -1,14 +1,28 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
-import { permissionFailure } from "../workbench/agentPane";
+import { permissionFailure as permissionFailureModel } from "../workbench/agentPane";
 import { fetchHumanControlSignatureRequired, parseSigningContext } from "./deviceKeys";
 import {
   HUMAN_SIGNATURE_REFUSAL,
-  humanSignatureRefusal,
-  INSTRUCT_IN_APP_LINE,
+  humanSignatureRefusal as humanSignatureRefusalModel,
+  INSTRUCT_IN_APP_KEY,
   instructFrom,
 } from "./humanSignature";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const INSTRUCT_IN_APP_LINE = formatMessage(INSTRUCT_IN_APP_KEY);
+const humanSignatureRefusal = (error: unknown) => {
+  const refusal = humanSignatureRefusalModel(error);
+  return refusal === null ? null : { fix: refusal.fix, text: formatMessage(refusal.key) };
+};
+const permissionFailure = (error: unknown) => permissionFailureModel(error, formatMessage);
 
 // #3029 (R2-E9) · #3028 E3 인계. 서명 오류 코드와 status는 E3 골든
 // (`work-permission-decision.golden.json` `device_signature_error_codes`, PR #3075)을

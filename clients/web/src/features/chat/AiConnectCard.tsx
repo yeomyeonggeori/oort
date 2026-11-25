@@ -8,7 +8,7 @@ import { AI_HUB_NAV_COPY } from "@momo/core/features/ai/aiHubModel";
 import { AI_CONNECT_HUB_PATH } from "@momo/core/features/commands/registry";
 import {
   AI_CONNECT_ROW_COPY,
-  AI_CONNECT_SERVER_OFF_NOTE,
+  AI_CONNECT_SERVER_OFF_NOTE_KEY,
   HARNESS_INSTALL_URL,
   HARNESS_LABEL,
   type HarnessPill,
@@ -74,7 +74,7 @@ import {
   registerPoseFixture,
   type RegisterPose,
 } from "@/features/welcome/harnessLogin/registerFixtures";
-import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
+import { START_CREATE_KEY } from "@momo/core/features/onboarding/subscriptionRegister";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
@@ -635,6 +635,7 @@ function SuggestedCard({
 // ---- 내 계정 · 이 맥 ---------------------------------------------------------------
 
 function MineSection({ only }: { only: LocalHarnessId | null }) {
+  const formatMessage = useFormatMessage();
   const headId = useId();
   const state = useSubscriptionEntryState();
   const browserTab = myAccountsBrowserTab(state, IS_TAURI);
@@ -652,7 +653,7 @@ function MineSection({ only }: { only: LocalHarnessId | null }) {
           <span className="break-keep text-body text-ink">{MY_ACCOUNTS_EMPTY_LINE}</span>
           <span className="break-keep text-meta text-ink-muted">
             {state === "server-off"
-              ? AI_CONNECT_SERVER_OFF_NOTE
+              ? formatMessage(AI_CONNECT_SERVER_OFF_NOTE_KEY)
               : state === "denied"
                 ? MY_ACCOUNTS_DENIED_DETAIL
                 : MY_ACCOUNTS_EMPTY_DETAIL}
@@ -795,7 +796,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                     onClick={() => openRegister(id)}
                     data-testid={`ai-connect-card-${id}-register`}
                   >
-                    {START_CREATE_LABEL}
+                    {formatMessage(START_CREATE_KEY)}
                   </Button>
                 )}
               <Button
@@ -820,11 +821,11 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
           return (
             <CardRow
               key={id}
-              mark={AI_CONNECT_ROW_COPY[id].mark}
+              mark={formatMessage(AI_CONNECT_ROW_COPY[id].markKey)}
               name={label}
               source="구독"
               sub="이 맥의 공식 CLI 기본 로그인"
-              pill={harnessPillView(pill)}
+              pill={harnessPillView(formatMessage, pill)}
               pillKey={pill}
               action={action}
               result={harnessResultLine(result, pill)}

@@ -1,5 +1,8 @@
 import { ApiError } from "../../lib/api";
-import { attachParticle, hasFinalConsonant } from "../../lib/koreanParticle";
+import type { MessageKey } from "../../i18n/generated/messages";
+import type { LocaleService } from "../../i18n/context";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+import { hasFinalConsonant } from "../../lib/koreanParticle";
 import type { LocalHarnessId } from "../hostedAgents/detect";
 import { CLAUDE_PAUSED_ERROR_CODE, HARNESS_LABEL, SUBSCRIPTION_HARNESS_WIRE } from "./aiConnect";
 
@@ -109,13 +112,13 @@ export function normalizeAgentHandle(raw: string): string {
   return raw.trim().replace(/^@+/, "").trim().toLowerCase();
 }
 
-/** 이름 칸의 문제(문장) 또는 null. 서버 `is_valid_handle`과 같다. */
-export function agentHandleProblem(raw: string): string | null {
+/** 이름 칸의 문제(문장의 키) 또는 null. 서버 `is_valid_handle`과 같다. */
+export function agentHandleProblem(raw: string): PlainMessageKey | null {
   const value = normalizeAgentHandle(raw);
-  if (value === "") return "이름을 적어 주세요.";
-  if (value.length < 2) return "두 글자 이상으로 적어 주세요.";
-  if (value.length > 32) return "32자까지 쓸 수 있어요.";
-  if (!HANDLE_RE.test(value)) return "영문 소문자, 숫자, - 와 _ 만 쓸 수 있어요.";
+  if (value === "") return "onboarding.subscriptionRegisterName.required";
+  if (value.length < 2) return "onboarding.subscriptionRegisterName.tooShort";
+  if (value.length > 32) return "onboarding.subscriptionRegisterName.tooLong";
+  if (!HANDLE_RE.test(value)) return "onboarding.subscriptionRegisterName.charset";
   return null;
 }
 
@@ -152,14 +155,27 @@ export function registerRequestBody(input: {
 const HANGUL_FIRST = 0xac00;
 const HANGUL_LAST = 0xd7a3;
 
-/** 「으로/로」: 받침이 없거나 ㄹ 받침이면 로. */
-export function attachInstrument(word: string): string {
-  if (!hasFinalConsonant(word)) return `${word}로`;
+/**
+ * 한국어 틀의 조사(이/가 · 을/를)를 고르는 값. 고르는 것은 틀의 `select`이고, 받침 판정은 기존 조사 함수
+ * (`hasFinalConsonant`)가 한다(영어 틀은 같은 인자를 쓰지 않는다).
+ */
+function finalForm(word: string): "final" | "other" {
+  return hasFinalConsonant(word) ? "final" : "other";
+}
+
+/** 「으로/로」를 고르는 값: 받침이 없거나 ㄹ 받침이면 `other`(로), 아니면 `euro`(으로). */
+export function instrumentForm(word: string): "euro" | "other" {
+  if (!hasFinalConsonant(word)) return "other";
   const last = word.trim().charCodeAt(word.trim().length - 1);
   const rieul =
     last >= HANGUL_FIRST && last <= HANGUL_LAST && (last - HANGUL_FIRST) % 28 === 8;
-  return rieul ? `${word}로` : `${word}으로`;
+  return rieul ? "other" : "euro";
 }
+
+/** 이 파일의 문장 하나: 키와 값. 화면이 그릴 때 `formatMessage(message.key, message.values as never)`로 푼다. */
+export type RegisterMessage = MessageRef<
+  Extract<MessageKey, `onboarding.subscriptionRegister${string}`>
+>;
 
 // ---- 단계 ----------------------------------------------------------------------
 
@@ -175,7 +191,7 @@ export function attachInstrument(word: string): string {
  * - `failed`: 만들지 못했다. 다시 시도.
  */
 export type RegisterStep =
-  | { step: "confirm"; problem?: string }
+  | { step: "confirm"; problem?: PlainMessageKey }
   | { step: "registering"; stage: "server" | "cli" }
   | { step: "done"; handle: string; displayName: string }
   | { step: "existing"; handle: string }
@@ -188,171 +204,225 @@ export type ManualWhy = "codex" | "cli-failed" | "cli-missing" | "unsupported";
 
 // ---- 문장 (해요체, 가운뎃점 구분, 줄표 없음) -----------------------------------
 
-export function confirmTitle(harness: LocalHarnessId, handle: string): string {
-  return `이 맥의 ${attachParticle(HARNESS_LABEL[harness], "object")} @${attachInstrument(handle)} 부를 수 있게 할까요?`;
+export function confirmTitle(harness: LocalHarnessId, handle: string): RegisterMessage {
+  const cli = HARNESS_LABEL[harness];
+  return {
+    key: "onboarding.subscriptionRegisterConfirm.title",
+    values: { cli, cliJosa: finalForm(cli), handle, josa: instrumentForm(handle) },
+  };
 }
 
-export const CONFIRM_NAME_LABEL = "에이전트 이름";
-export const CONFIRM_NAME_HINT = "채널에서 @이름으로 불러요. 영문 소문자, 숫자, - 와 _ 를 써요.";
+export const CONFIRM_NAME_LABEL_KEY =
+  "onboarding.subscriptionRegisterConfirm.nameLabel" satisfies PlainMessageKey;
+export const CONFIRM_NAME_HINT_KEY =
+  "onboarding.subscriptionRegisterConfirm.nameHint" satisfies PlainMessageKey;
 
-export function confirmBullets(harness: LocalHarnessId): readonly string[] {
+export function confirmBullets(harness: LocalHarnessId): readonly RegisterMessage[] {
   return [
-    "나만 부를 수 있어요. 다른 멤버가 부르면 안내 문구가 나가요.",
-    `비용은 내 ${HARNESS_LABEL[harness]} 구독에서 나가요. 팀 키는 쓰지 않아요.`,
-    "이 맥이 켜져 있고 oort가 열려 있을 때만 답해요.",
-    "로그인 정보는 oort에 저장하지 않아요.",
+    { key: "onboarding.subscriptionRegisterConfirm.bulletOnlyMe" },
+    {
+      key: "onboarding.subscriptionRegisterConfirm.bulletCost",
+      values: { cli: HARNESS_LABEL[harness] },
+    },
+    { key: "onboarding.subscriptionRegisterConfirm.bulletMacOn" },
+    { key: "onboarding.subscriptionRegisterConfirm.noStore" },
   ];
 }
 
-export const CONFIRM_LATER_LABEL = "나중에";
+export const CONFIRM_LATER_KEY =
+  "onboarding.subscriptionRegisterConfirm.later" satisfies PlainMessageKey;
 
-export function confirmCreateLabel(handle: string): string {
-  return `@${handle} 만들기`;
+export function confirmCreateLabel(handle: string): RegisterMessage {
+  return { key: "onboarding.subscriptionRegisterConfirm.create", values: { handle } };
 }
 
-export function loggedInLine(harness: LocalHarnessId): string {
-  return `${attachParticle(HARNESS_LABEL[harness], "subject")} 로그인됐어요.`;
+export function loggedInLine(harness: LocalHarnessId): RegisterMessage {
+  const cli = HARNESS_LABEL[harness];
+  return {
+    key: "onboarding.subscriptionRegisterProgress.loggedIn",
+    values: { cli, josa: finalForm(cli) },
+  };
 }
 
-export function registeringLine(handle: string): string {
-  return `@${handle}${hasFinalConsonant(handle) ? "을" : "를"} 만들고 있어요.`;
+export function registeringLine(handle: string): RegisterMessage {
+  return {
+    key: "onboarding.subscriptionRegisterProgress.registering",
+    values: { handle, josa: finalForm(handle) },
+  };
 }
 
-export const REGISTERING_SERVER_STAGE = "에이전트 만들기";
-export function registeringCliStage(harness: LocalHarnessId): string {
-  return `${HARNESS_LABEL[harness]}에 연결 걸기`;
+export const REGISTERING_SERVER_STAGE_KEY =
+  "onboarding.subscriptionRegisterProgress.serverStage" satisfies PlainMessageKey;
+export function registeringCliStage(harness: LocalHarnessId): RegisterMessage {
+  return {
+    key: "onboarding.subscriptionRegisterProgress.cliStage",
+    values: { cli: HARNESS_LABEL[harness] },
+  };
 }
 
-export function doneLine(handle: string): string {
-  return `@${handle}${hasFinalConsonant(handle) ? "을" : "를"} 만들었어요.`;
+export function doneLine(handle: string): RegisterMessage {
+  return {
+    key: "onboarding.subscriptionRegisterDone.line",
+    values: { handle, josa: finalForm(handle) },
+  };
 }
 
-export function doneDetail(harness: LocalHarnessId, handle: string): string {
-  return `${attachParticle(HARNESS_LABEL[harness], "object")} 15분 안에 한 번 열면 연결돼요. 그 뒤 채널에서 @${attachInstrument(handle)} 불러 보세요. 15분이 지나면 여기서 다시 눌러 주세요.`;
+export function doneDetail(harness: LocalHarnessId, handle: string): RegisterMessage {
+  const cli = HARNESS_LABEL[harness];
+  return {
+    key: "onboarding.subscriptionRegisterDone.detail",
+    values: { cli, cliJosa: finalForm(cli), handle, josa: instrumentForm(handle) },
+  };
 }
 
-export const DONE_AGENTS_LABEL = "에이전트 보기";
-export const DONE_CLOSE_LABEL = "완료";
+export const DONE_AGENTS_KEY =
+  "onboarding.subscriptionRegisterDone.agents" satisfies PlainMessageKey;
+export const DONE_CLOSE_KEY = "onboarding.subscriptionRegisterDone.close" satisfies PlainMessageKey;
 
-export function existingLine(handle: string): string {
-  return `이미 @${handle}${particleSubject(handle)} 있어요.`;
+export function existingLine(handle: string): RegisterMessage {
+  return {
+    key: "onboarding.subscriptionRegisterDone.existing",
+    values: { handle, josa: finalForm(handle) },
+  };
 }
 
-export const EXISTING_DETAIL = "이 맥의 에이전트라서 새로 만들지 않았어요.";
-
-function particleSubject(word: string): string {
-  return hasFinalConsonant(word) ? "이" : "가";
-}
+export const EXISTING_DETAIL_KEY =
+  "onboarding.subscriptionRegisterDone.existingDetail" satisfies PlainMessageKey;
 
 // 수동 단계
-export function manualLine(handle: string, why: ManualWhy): string {
-  const made = `@${handle}${hasFinalConsonant(handle) ? "을" : "를"} 만들었어요.`;
-  switch (why) {
-    case "codex":
-      return made;
-    default:
-      return `${made} 연결만 직접 해 주세요.`;
-  }
+export function manualLine(handle: string, why: ManualWhy): RegisterMessage {
+  // 「만들었어요」는 코덱스일 때 그 한 문장이고, 그 밖에는 「연결만 직접 해 주세요」가 이어진다.
+  return why === "codex"
+    ? doneLine(handle)
+    : {
+        key: "onboarding.subscriptionRegisterManual.lineYourself",
+        values: { handle, josa: finalForm(handle) },
+      };
 }
 
-export function manualDetail(harness: LocalHarnessId, why: ManualWhy): string {
+export function manualDetail(harness: LocalHarnessId, why: ManualWhy): RegisterMessage {
   const cli = HARNESS_LABEL[harness];
   switch (why) {
     case "codex":
-      return `${attachParticle(cli, "object")} 쓰려면 MCP 서버에 이 주소와 연결 값을 넣어 주세요. 연결 값은 지금 한 번만 보여요.`;
+      return {
+        key: "onboarding.subscriptionRegisterManual.detailCodex",
+        values: { cli, cliJosa: finalForm(cli) },
+      };
     case "cli-missing":
-      return `이 맥에서 ${cli}를 찾지 못해 앱이 연결하지 못했어요. 아래 명령을 터미널에서 한 번 실행해 주세요.`;
+      return { key: "onboarding.subscriptionRegisterManual.detailCliMissing", values: { cli } };
     case "unsupported":
-      return `이 환경에서는 앱이 연결을 걸 수 없어요. 아래 명령을 터미널에서 한 번 실행해 주세요.`;
+      return { key: "onboarding.subscriptionRegisterManual.detailUnsupported" };
     default:
-      return `앱이 ${attachParticle(cli, "object")} 연결하지 못했어요. 아래 명령을 터미널에서 한 번 실행해 주세요. 연결 값은 지금 한 번만 보여요.`;
+      return {
+        key: "onboarding.subscriptionRegisterManual.detailCliFailed",
+        values: { cli, cliJosa: finalForm(cli) },
+      };
   }
 }
 
 /** 접힌 「직접 하려면」 링크. */
-export const MANUAL_DISCLOSURE_LABEL = "직접 하려면";
-export const MANUAL_DISCLOSURE_HIDE_LABEL = "접기";
+export const MANUAL_DISCLOSURE_KEY =
+  "onboarding.subscriptionRegisterManual.disclosure" satisfies PlainMessageKey;
+export const MANUAL_DISCLOSURE_HIDE_KEY =
+  "onboarding.subscriptionRegisterManual.hide" satisfies PlainMessageKey;
 
 // 차분한 상태 (오류 어휘 없음)
-export const CALM_BADGE: Record<"paused" | "disabled", string> = {
-  paused: "회색 · 문의 중",
-  disabled: "꺼짐 · 서버 설정",
-};
+export const CALM_BADGE_KEYS = {
+  paused: "onboarding.subscriptionRegisterCalm.badgePaused",
+  disabled: "onboarding.subscriptionRegisterCalm.badgeDisabled",
+} as const satisfies Record<"paused" | "disabled", PlainMessageKey>;
 
-export function calmLine(refusal: RegisterRefusal, harness: LocalHarnessId): string {
-  switch (refusal) {
-    case "paused":
-      return `이 서버에서는 ${HARNESS_LABEL[harness]} 구독으로 쓰는 에이전트가 잠시 멈춰 있어요.`;
-    case "disabled":
-      return "이 서버에서는 구독으로 쓰는 에이전트가 꺼져 있어요.";
-    case "forbidden":
-      return "에이전트로 만드는 건 워크스페이스 관리자가 해요.";
-    case "limit":
-      return `${HARNESS_LABEL[harness]} 구독으로 쓰는 에이전트가 이미 다섯 개예요.`;
-    default:
-      return "이 에이전트는 연결을 마저 끊은 뒤에 다시 만들 수 있어요.";
-  }
-}
-
-export function calmDetail(refusal: RegisterRefusal, harness: LocalHarnessId): string {
+export function calmLine(refusal: RegisterRefusal, harness: LocalHarnessId): RegisterMessage {
   const cli = HARNESS_LABEL[harness];
   switch (refusal) {
     case "paused":
-      return `서비스 제공자에게 사용 범위를 문의하는 동안 서버 운영자가 닫아 둔 기능이에요. 로그인은 그대로 되어 있고, 내 맥의 ${cli}는 터미널에서 직접 쓸 수 있어요.`;
+      return { key: "onboarding.subscriptionRegisterCalm.linePaused", values: { cli } };
     case "disabled":
-      return `서버 운영자가 켜면 쓸 수 있어요. 로그인은 그대로 되어 있고, 내 맥의 ${cli}는 터미널에서 직접 쓸 수 있어요.`;
+      return { key: "onboarding.subscriptionRegisterCalm.lineDisabled" };
     case "forbidden":
-      return `로그인은 됐어요. 내 맥의 ${cli}는 터미널에서 직접 쓸 수 있어요. 에이전트로 부르려면 관리자에게 부탁해 주세요.`;
+      return { key: "onboarding.subscriptionRegisterCalm.lineForbidden" };
     case "limit":
-      return "쓰지 않는 에이전트를 먼저 정리해 주세요.";
+      return { key: "onboarding.subscriptionRegisterCalm.lineLimit", values: { cli } };
     default:
-      return "에이전트 화면에서 끊기를 마무리해 주세요.";
+      return { key: "onboarding.subscriptionRegisterCalm.lineCleanup" };
   }
 }
 
-export const CALM_CLOSE_LABEL = "완료";
-
-// 실패 (오류 모양은 여기뿐이다)
-export function failedLine(reason: string): string {
-  return `만들지 못했어요: ${reason}`;
+export function calmDetail(refusal: RegisterRefusal, harness: LocalHarnessId): RegisterMessage {
+  const cli = HARNESS_LABEL[harness];
+  switch (refusal) {
+    case "paused":
+      return { key: "onboarding.subscriptionRegisterCalm.detailPaused", values: { cli } };
+    case "disabled":
+      return { key: "onboarding.subscriptionRegisterCalm.detailDisabled", values: { cli } };
+    case "forbidden":
+      return { key: "onboarding.subscriptionRegisterCalm.detailForbidden", values: { cli } };
+    case "limit":
+      return { key: "onboarding.subscriptionRegisterCalm.detailLimit" };
+    default:
+      return { key: "onboarding.subscriptionRegisterCalm.detailCleanup" };
+  }
 }
 
-export const FAILED_REASON_DEFAULT = "서버에 닿지 못했어요";
-export const FAILED_REASON_NAME = "이름을 쓸 수 없어요";
-export const FAILED_RETRY_LABEL = "다시 시도";
-export const FAILED_CLOSE_LABEL = "닫기";
+export const CALM_CLOSE_KEY = DONE_CLOSE_KEY;
 
-export const HANDLE_TAKEN_PROBLEM = "이미 쓰는 이름이에요. 다른 이름을 적어 주세요.";
-export const NAME_INVALID_PROBLEM = "이 이름은 쓸 수 없어요. 영문 소문자, 숫자, - 와 _ 로 적어 주세요.";
+// 실패 (오류 모양은 여기뿐이다). 사유는 문장이라 키로 들고, 이 문장이 풀어 넣는다.
+export function failedLine(reason: string): RegisterMessage {
+  return { key: "onboarding.subscriptionRegisterFailed.line", values: { reason } };
+}
+
+export const FAILED_REASON_DEFAULT_KEY =
+  "onboarding.subscriptionRegisterFailed.reasonDefault" satisfies PlainMessageKey;
+export const FAILED_REASON_NAME_KEY =
+  "onboarding.subscriptionRegisterFailed.reasonName" satisfies PlainMessageKey;
+/** 다시 시도: 공용 낱말. */
+export const FAILED_RETRY_KEY = "common.action.retry" satisfies PlainMessageKey;
+/** 닫기: 대화 상자를 닫는 단추라 공용 낱말이다. */
+export const FAILED_CLOSE_KEY = "common.action.close" satisfies PlainMessageKey;
+
+export const HANDLE_TAKEN_KEY =
+  "onboarding.subscriptionRegisterName.taken" satisfies PlainMessageKey;
+export const NAME_INVALID_KEY =
+  "onboarding.subscriptionRegisterName.invalid" satisfies PlainMessageKey;
 
 // 시안의 상시 줄
-export const REGISTER_NO_STORE_NOTE = "로그인 정보는 oort에 저장하지 않아요.";
+export const REGISTER_NO_STORE_KEY =
+  "onboarding.subscriptionRegisterConfirm.noStore" satisfies PlainMessageKey;
 
-/** 선택 단계 둘 이상일 때 스크린리더 안내. */
-export function registerLiveMessage(step: RegisterStep, harness: LocalHarnessId, handle: string): string {
+/** 선택 단계 둘 이상일 때 스크린리더 안내. 사유를 글로 풀어 넣으므로 글을 푸는 함수를 받는다. */
+export function registerLiveMessage(
+  formatMessage: LocaleService["formatMessage"],
+  step: RegisterStep,
+  harness: LocalHarnessId,
+  handle: string
+): string {
+  const say = (message: RegisterMessage): string =>
+    formatMessage(message.key, message.values as never);
   switch (step.step) {
     case "confirm":
-      return confirmTitle(harness, handle);
+      return say(confirmTitle(harness, handle));
     case "registering":
-      return registeringLine(handle);
+      return say(registeringLine(handle));
     case "done":
-      return doneLine(step.handle);
+      return say(doneLine(step.handle));
     case "existing":
-      return existingLine(step.handle);
+      return say(existingLine(step.handle));
     case "manual":
-      return manualLine(step.handle, step.why);
+      return say(manualLine(step.handle, step.why));
     case "calm":
-      return calmLine(step.refusal, harness);
+      return say(calmLine(step.refusal, harness));
     default:
-      return failedLine(FAILED_REASON_DEFAULT);
+      return say(failedLine(formatMessage(FAILED_REASON_DEFAULT_KEY)));
   }
 }
 
 // ---- 첫 창 (에이전트 화면·설정의 「내 구독으로 에이전트 만들기」) ---------------------
 
-export const START_TITLE = "내 구독으로 에이전트 만들기";
-export const START_DETAIL =
-  "이 맥에서 로그인한 Claude Code나 Codex를 채널에서 @로 부를 수 있게 해요. 나만 부를 수 있어요.";
-export const START_CREATE_LABEL = "에이전트로 만들기";
-export const START_INSTALL_LABEL = "설치 안내";
-export const START_CLOSE_LABEL = "닫기";
+export const START_TITLE_KEY = "onboarding.subscriptionRegisterStart.title" satisfies PlainMessageKey;
+export const START_DETAIL_KEY =
+  "onboarding.subscriptionRegisterStart.detail" satisfies PlainMessageKey;
+export const START_CREATE_KEY =
+  "onboarding.subscriptionRegisterStart.create" satisfies PlainMessageKey;
+export const START_INSTALL_KEY =
+  "onboarding.subscriptionRegisterStart.install" satisfies PlainMessageKey;
+export const START_CLOSE_KEY = "common.action.close" satisfies PlainMessageKey;

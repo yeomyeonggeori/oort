@@ -9,11 +9,20 @@ import {
 } from "@momo/core/lib/api";
 import {
   PERMISSION_HOST_WAIT_MS,
-  permissionFailure,
+  permissionFailure as permissionFailureModel,
   permissionLapsed,
   permissionSentLine,
 } from "@momo/core/features/workbench/agentPane";
 import { agentRoutes } from "./agentPaneSource";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+
+// 기기 서명 거부의 문장은 사전에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const permissionFailure = (error: unknown) => permissionFailureModel(error, formatMessage);
 
 // #3013: A 칸 권한 카드가 #3000 결정 라우트에 붙는 모양을 골든
 // (docs/api/work-permission-decision.golden.json)과 맞춘다. 서버 단위 시험과 workd

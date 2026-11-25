@@ -989,6 +989,1132 @@ export const catalog: MessageCatalog = {
       "value": "This link has already been used. Sign in instead."
     }
   ],
+  "auth.devAccessCommand.envClaude": [
+    {
+      "type": 0,
+      "value": "Put the content below in your project folder's "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ". The file holds no value, but it does contain the server address, so don't commit it to a repository."
+    }
+  ],
+  "auth.devAccessCommand.envClaudeRun": [
+    {
+      "type": 0,
+      "value": "Run Claude Code from the same terminal where you entered the value."
+    }
+  ],
+  "auth.devAccessCommand.envCli": [
+    {
+      "type": 0,
+      "value": "The command below hands the value to curl through its config instead of putting it in the arguments, so it doesn't show up in the process list either."
+    }
+  ],
+  "auth.devAccessCommand.envCliDone": [
+    {
+      "type": 0,
+      "value": "If the response shows this connection's name and scope, it's connected."
+    }
+  ],
+  "auth.devAccessCommand.envCodex": [
+    {
+      "type": 0,
+      "value": "Add the content below to "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ". The file holds no value, but it does contain the server address, so don't commit it to a repository."
+    }
+  ],
+  "auth.devAccessCommand.envCodexRun": [
+    {
+      "type": 0,
+      "value": "Run Codex from the same terminal where you entered the value."
+    }
+  ],
+  "auth.devAccessCommand.environmentCaveat": [
+    {
+      "type": 0,
+      "value": "Environment variables are passed to other programs you run in this terminal. Close the terminal when you're done."
+    }
+  ],
+  "auth.devAccessCommand.envTitle": [
+    {
+      "type": 0,
+      "value": "Connect with an environment variable"
+    }
+  ],
+  "auth.devAccessCommand.helperClaude": [
+    {
+      "type": 0,
+      "value": "In your project folder's "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ", set "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " as the header helper."
+    }
+  ],
+  "auth.devAccessCommand.helperCli": [
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " supplies the value each time. It's handed to curl through its config, so the value never appears in the command arguments."
+    }
+  ],
+  "auth.devAccessCommand.helperCodex": [
+    {
+      "type": 0,
+      "value": "In "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ", set "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " as the header helper."
+    }
+  ],
+  "auth.devAccessCommand.helperLogin": [
+    {
+      "type": 0,
+      "value": "Save the value once in the oort command-line tool. It's taken as input only."
+    }
+  ],
+  "auth.devAccessCommand.helperTitle": [
+    {
+      "type": 0,
+      "value": "Connect with oort token"
+    }
+  ],
+  "auth.devAccessCommand.pasteAndEnter": [
+    {
+      "type": 0,
+      "value": "Paste it and press Enter. What you type isn't shown on screen. This works in bash and zsh."
+    }
+  ],
+  "auth.devAccessCommand.readIntoEnv": [
+    {
+      "type": 0,
+      "value": "Put the copied value into the environment variable "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": ". It's taken as input, not as part of a command, so it stays out of your terminal history."
+    }
+  ],
+  "auth.devAccessCommand.stdioClaude": [
+    {
+      "type": 0,
+      "value": "Then add "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " to Claude Code."
+    }
+  ],
+  "auth.devAccessCommand.stdioCodex": [
+    {
+      "type": 0,
+      "value": "Then add "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " to "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessCommand.stdioLogin": [
+    {
+      "type": 0,
+      "value": "Save the value once in the oort command-line tool. It's taken as input only, and no config file holds it."
+    }
+  ],
+  "auth.devAccessCommand.stdioTitle": [
+    {
+      "type": 0,
+      "value": "Connect with oort mcp"
+    }
+  ],
+  "auth.devAccessCommand.terminal": [
+    {
+      "type": 0,
+      "value": "Terminal"
+    }
+  ],
+  "auth.devAccessCommand.unavailable": [
+    {
+      "type": 0,
+      "value": "Couldn't verify the server address, so there are no setup snippets to show. Reopen the app and try again."
+    }
+  ],
+  "auth.devAccessCreate.expiryHint": [
+    {
+      "type": 0,
+      "value": "The connection ends on its own once it expires. Once created, the scope, channels and expiry can't be changed. To change them, create a new one and remove the old one."
+    }
+  ],
+  "auth.devAccessError.accessDenied": [
+    {
+      "type": 0,
+      "value": "You can't use this feature with your permissions in this workspace. Ask an admin."
+    }
+  ],
+  "auth.devAccessError.accessDeniedCreate": [
+    {
+      "type": 0,
+      "value": "You can't create connections with your current permissions. Ask an admin to turn this on."
+    }
+  ],
+  "auth.devAccessError.busy": [
+    {
+      "type": 0,
+      "value": "The team is being reorganized, so this couldn't be handled right away. Try again "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in a moment"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " second"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " seconds"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minute"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minutes"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hour"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hours"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessError.forbidden": [
+    {
+      "type": 0,
+      "value": "You can't do this with your permissions. Ask an admin."
+    }
+  ],
+  "auth.devAccessError.forbiddenRevoke": [
+    {
+      "type": 0,
+      "value": "You can't remove this connection with your permissions. Ask an owner or whoever created it."
+    }
+  ],
+  "auth.devAccessError.invalid": [
+    {
+      "type": 0,
+      "value": "The server didn't accept the request. Reopen this screen and try again."
+    }
+  ],
+  "auth.devAccessError.invalidCreate": [
+    {
+      "type": 0,
+      "value": "The server didn't accept what you entered. Check the name, channels and expiry, then try again."
+    }
+  ],
+  "auth.devAccessError.limit": [
+    {
+      "type": 0,
+      "value": "Each person can create up to "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " card tokens. Remove connections you don't use, then create it again."
+    }
+  ],
+  "auth.devAccessError.network": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server. Check your network and try again."
+    }
+  ],
+  "auth.devAccessError.networkCreate": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server. We can't tell whether the connection was created, so check the list before trying again."
+    }
+  ],
+  "auth.devAccessError.notFound": [
+    {
+      "type": 0,
+      "value": "This server doesn't support command-line and AI tool connections yet. Update the server, then open this again."
+    }
+  ],
+  "auth.devAccessError.notFoundRevoke": [
+    {
+      "type": 0,
+      "value": "This connection was already removed or can't be found. Reload the list to check."
+    }
+  ],
+  "auth.devAccessError.passwordIncorrect": [
+    {
+      "type": 0,
+      "value": "That isn't your current password. Please enter it again."
+    }
+  ],
+  "auth.devAccessError.passwordUnavailable": [
+    {
+      "type": 0,
+      "value": "This account has no password to check. Create a password, then try again."
+    }
+  ],
+  "auth.devAccessError.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many attempts, so we paused this for a moment. Try again "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in a moment"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " second"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " seconds"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minute"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minutes"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hour"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hours"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessError.unauthorized": [
+    {
+      "type": 0,
+      "value": "Your login has ended. Log in again, then try again."
+    }
+  ],
+  "auth.devAccessError.unknown": [
+    {
+      "type": 0,
+      "value": "Something went wrong. Try again in a moment."
+    }
+  ],
+  "auth.devAccessError.unknownCreate": [
+    {
+      "type": 0,
+      "value": "Something went wrong. We can't tell whether the connection was created, so check the list before trying again."
+    }
+  ],
+  "auth.devAccessExpiry.days": [
+    {
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "auth.devAccessExpiry.daysAway": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "auth.devAccessExpiry.passed": [
+    {
+      "type": 0,
+      "value": "Expiry time has passed"
+    }
+  ],
+  "auth.devAccessExpiry.today": [
+    {
+      "type": 0,
+      "value": "Today"
+    }
+  ],
+  "auth.devAccessGate.adminsOnly": [
+    {
+      "type": 0,
+      "value": "An admin needs to turn this on. For now, only owners and admins can create connections."
+    }
+  ],
+  "auth.devAccessGate.adminsOpen": [
+    {
+      "type": 0,
+      "value": "For now, owners and admins can create connections."
+    }
+  ],
+  "auth.devAccessGate.membersDenied": [
+    {
+      "type": 0,
+      "value": "This account can't create connections. Ask an admin for details."
+    }
+  ],
+  "auth.devAccessGate.membersOpen": [
+    {
+      "type": 0,
+      "value": "Everyone on this workspace's team can create connections."
+    }
+  ],
+  "auth.devAccessGate.off": [
+    {
+      "type": 0,
+      "value": "Command-line and AI tool connections are turned off. You can't create new ones until they're turned back on."
+    }
+  ],
+  "auth.devAccessGate.open": [
+    {
+      "type": 0,
+      "value": "You can create connections."
+    }
+  ],
+  "auth.devAccessKind.card": [
+    {
+      "type": 0,
+      "value": "Card token"
+    }
+  ],
+  "auth.devAccessKind.session": [
+    {
+      "type": 0,
+      "value": "Login session"
+    }
+  ],
+  "auth.devAccessList.all": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "auth.devAccessList.mine": [
+    {
+      "type": 0,
+      "value": "My connections"
+    }
+  ],
+  "auth.devAccessNotice.cardLimit": [
+    {
+      "type": 0,
+      "value": "Each person can create up to "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " card tokens."
+    }
+  ],
+  "auth.devAccessNotice.fixedAfterIssue": [
+    {
+      "type": 0,
+      "value": "Once created, the scope, channels and expiry can't be changed. To change them, create a new one and remove the old one."
+    }
+  ],
+  "auth.devAccessNotice.logoutKeepsConnections": [
+    {
+      "type": 0,
+      "value": "Logging out of the app doesn't disconnect them. Remove them here."
+    }
+  ],
+  "auth.devAccessNotice.passwordChangeEndsAll": [
+    {
+      "type": 0,
+      "value": "Changing your password disconnects every connection."
+    }
+  ],
+  "auth.devAccessNotice.revokeWarning": [
+    {
+      "type": 0,
+      "value": "This can't be undone. The tool using this connection is disconnected right away."
+    }
+  ],
+  "auth.devAccessNotice.toolIsOnlyALabel": [
+    {
+      "type": 0,
+      "value": "The tool is whatever the creator picked. It isn't a verified fact."
+    }
+  ],
+  "auth.devAccessOneTime.caution": [
+    {
+      "type": 0,
+      "value": "Anyone who knows this value can do what this connection allows in your name. Don't send it to anyone."
+    }
+  ],
+  "auth.devAccessOneTime.confirm": [
+    {
+      "type": 0,
+      "value": "I've saved it"
+    }
+  ],
+  "auth.devAccessOneTime.warning": [
+    {
+      "type": 0,
+      "value": "You can't see this again once you close this screen. Copy it now and keep it somewhere safe."
+    }
+  ],
+  "auth.devAccessPhone.passwordAndToolNote": [
+    {
+      "type": 0,
+      "value": "Changing your password disconnects every connection. The tool is whatever the creator picked. It isn't a verified fact."
+    }
+  ],
+  "auth.devAccessPreset.readDescription": [
+    {
+      "type": 0,
+      "value": "Reads your channel list, messages and inbox. Can't send anything."
+    }
+  ],
+  "auth.devAccessPreset.readLabel": [
+    {
+      "type": 0,
+      "value": "Read only"
+    }
+  ],
+  "auth.devAccessPreset.readWriteDescription": [
+    {
+      "type": 0,
+      "value": "Reads too, and sends messages in your name right away, with no separate check before sending."
+    }
+  ],
+  "auth.devAccessPreset.readWriteLabel": [
+    {
+      "type": 0,
+      "value": "Read and send"
+    }
+  ],
+  "auth.devAccessRestriction.help": [
+    {
+      "type": 0,
+      "value": "Reads and sends only inside the channels you choose. You can only choose channels you're in, and if you leave a channel, this connection can't use it either."
+    }
+  ],
+  "auth.devAccessRestriction.label": [
+    {
+      "type": 0,
+      "value": "Only chosen channels"
+    }
+  ],
+  "auth.devAccessReveal.expiryWithDate": [
+    {
+      "type": 1,
+      "value": "expiry"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessReveal.scopeWithDetail": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessRow.neverUsed": [
+    {
+      "type": 0,
+      "value": "Not used yet"
+    }
+  ],
+  "auth.devAccessScope.channelsRead": [
+    {
+      "type": 0,
+      "value": "Read channel list"
+    }
+  ],
+  "auth.devAccessScope.identity": [
+    {
+      "type": 0,
+      "value": "Check my profile"
+    }
+  ],
+  "auth.devAccessScope.inboxRead": [
+    {
+      "type": 0,
+      "value": "Read inbox"
+    }
+  ],
+  "auth.devAccessScope.messagesRead": [
+    {
+      "type": 0,
+      "value": "Read messages"
+    }
+  ],
+  "auth.devAccessScope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "Send messages"
+    }
+  ],
+  "auth.devAccessScope.unknown": [
+    {
+      "type": 0,
+      "value": "Unknown scope"
+    }
+  ],
+  "auth.devAccessScopeLabel.custom": [
+    {
+      "type": 0,
+      "value": "Custom scope"
+    }
+  ],
+  "auth.devAccessScopeLabel.customChannelOnly": [
+    {
+      "type": 0,
+      "value": "Custom scope · chosen channels only"
+    }
+  ],
+  "auth.devAccessScopeLabel.read": [
+    {
+      "type": 0,
+      "value": "Read only"
+    }
+  ],
+  "auth.devAccessScopeLabel.readChannelOnly": [
+    {
+      "type": 0,
+      "value": "Read only · chosen channels only"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWrite": [
+    {
+      "type": 0,
+      "value": "Read and send"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWriteChannelOnly": [
+    {
+      "type": 0,
+      "value": "Read and send · chosen channels only"
+    }
+  ],
+  "auth.devAccessTool.claudeCode": [
+    {
+      "type": 0,
+      "value": "Claude Code"
+    }
+  ],
+  "auth.devAccessTool.cli": [
+    {
+      "type": 0,
+      "value": "Direct command"
+    }
+  ],
+  "auth.devAccessTool.codex": [
+    {
+      "type": 0,
+      "value": "Codex"
+    }
+  ],
+  "auth.devAccessTool.other": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
+  "auth.devAccessValidation.channelsRequired": [
+    {
+      "type": 0,
+      "value": "Choose at least one channel. To allow any channel, turn off \"Only chosen channels\"."
+    }
+  ],
+  "auth.devAccessValidation.channelsTooMany": [
+    {
+      "type": 0,
+      "value": "You can choose up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " channels. You've chosen "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ", so remove "
+    },
+    {
+      "type": 2,
+      "value": "excess",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessValidation.expiryNotInteger": [
+    {
+      "type": 0,
+      "value": "Enter the expiry period as a whole number from 1 to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " days."
+    }
+  ],
+  "auth.devAccessValidation.expiryRequired": [
+    {
+      "type": 0,
+      "value": "Enter an expiry period. You can set it from 1 to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " days."
+    }
+  ],
+  "auth.devAccessValidation.expiryTooLong": [
+    {
+      "type": 0,
+      "value": "The longest expiry is "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " days. To keep using it longer, create a new one before it expires."
+    }
+  ],
+  "auth.devAccessValidation.nameControl": [
+    {
+      "type": 0,
+      "value": "Names can't contain control characters such as line breaks. Keep only text and try again."
+    }
+  ],
+  "auth.devAccessValidation.nameEnvelope": [
+    {
+      "type": 0,
+      "value": "The name contains a token value. Use only easy-to-recognize words in the name field."
+    }
+  ],
+  "auth.devAccessValidation.nameRequired": [
+    {
+      "type": 0,
+      "value": "Enter a name. Anything that helps you recognize this connection in the list works."
+    }
+  ],
+  "auth.devAccessValidation.nameTooLong": [
+    {
+      "type": 0,
+      "value": "Names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters. This one is "
+    },
+    {
+      "type": 2,
+      "value": "length",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ". Please shorten it a little."
+    }
+  ],
+  "auth.devAccessValidation.passwordRequired": [
+    {
+      "type": 0,
+      "value": "Enter your current password. We check it again each time you create a connection."
+    }
+  ],
+  "auth.devAccessValidation.passwordTooLong": [
+    {
+      "type": 0,
+      "value": "Passwords can be up to "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " characters. Please check what you typed."
+    }
+  ],
   "auth.deviceKey.authFailed": [
     {
       "type": 0,
@@ -1265,6 +2391,24 @@ export const catalog: MessageCatalog = {
       "value": "The server's response couldn't be read. Check the address and try again."
     }
   ],
+  "auth.humanSignatureInApp.allow": [
+    {
+      "type": 0,
+      "value": "To allow this once, send it from the phone or desktop app. You can still reject here."
+    }
+  ],
+  "auth.humanSignatureInApp.instruct": [
+    {
+      "type": 0,
+      "value": "Send it from the phone or desktop app"
+    }
+  ],
+  "auth.humanSignatureInApp.reply": [
+    {
+      "type": 0,
+      "value": "Send instructions from the phone or desktop app"
+    }
+  ],
   "auth.join.alreadyRedeemed": [
     {
       "type": 0,
@@ -1399,6 +2543,232 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "auth.personalCall.agentNotAllowed": [
+    {
+      "type": 0,
+      "value": "This personal agent can't be called right now. Check that it's turned on."
+    }
+  ],
+  "auth.personalCall.callDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't call your Mac. Check your connection, then call again."
+    }
+  ],
+  "auth.personalCall.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can call it."
+    }
+  ],
+  "auth.personalCall.folderNotFound": [
+    {
+      "type": 0,
+      "value": "Your Mac doesn't allow this work folder. Check the folder in the Mac app."
+    }
+  ],
+  "auth.personalCall.hostAmbiguous": [
+    {
+      "type": 0,
+      "value": "More than one Mac is connected, so it couldn't tell which one. Pick a Mac and call again."
+    }
+  ],
+  "auth.personalCall.hostNotFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find a connected Mac. Connect your Mac in the desktop app."
+    }
+  ],
+  "auth.personalCall.inputInvalid": [
+    {
+      "type": 0,
+      "value": "The content isn't valid, so it wasn't signed. Fix it, then send again."
+    }
+  ],
+  "auth.personalCall.macOff": [
+    {
+      "type": 0,
+      "value": "Your Mac is off. Turn it on, then call again."
+    }
+  ],
+  "auth.personalCall.needsApp": [
+    {
+      "type": 0,
+      "value": "Call from the desktop or phone"
+    }
+  ],
+  "auth.personalCall.nonceReused": [
+    {
+      "type": 0,
+      "value": "The call and signature don't match, so the server didn't accept it. Calling again signs anew."
+    }
+  ],
+  "auth.personalCall.nothingToAsk": [
+    {
+      "type": 0,
+      "value": "Write what to ask. With only the alias, the agent has nothing to do."
+    }
+  ],
+  "auth.personalCall.originInvalid": [
+    {
+      "type": 0,
+      "value": "Couldn't find the message that made the call. Send the message again, then call."
+    }
+  ],
+  "auth.personalCall.poolFull": [
+    {
+      "type": 0,
+      "value": "The number of tasks that can run right now is full. If one finishes, call again."
+    }
+  ],
+  "auth.personalCall.promptInvalid": [
+    {
+      "type": 0,
+      "value": "The content isn't valid, so it wasn't sent. Fix it, then send again."
+    }
+  ],
+  "auth.personalCall.spawnDisabled": [
+    {
+      "type": 0,
+      "value": "This server doesn't accept calls to your Mac yet."
+    }
+  ],
+  "auth.signatureRefusal.expired": [
+    {
+      "type": 0,
+      "value": "The signing time is more than 5 minutes off from the server's clock, so it wasn't accepted. Set your device clock to automatic, then send again."
+    }
+  ],
+  "auth.signatureRefusal.instanceUnconfigured": [
+    {
+      "type": 0,
+      "value": "The server has no instance id configured, so it can't verify signatures. Let a server admin know."
+    }
+  ],
+  "auth.signatureRefusal.invalid": [
+    {
+      "type": 0,
+      "value": "The device signature doesn't match this request, so the server didn't accept it. Update the app, then send again."
+    }
+  ],
+  "auth.signatureRefusal.keyNotEndorsed": [
+    {
+      "type": 0,
+      "value": "This device hasn't been approved for instructions yet. In the oort app on the Mac that hosts, approve this device under Settings › Devices › Instruction signing."
+    }
+  ],
+  "auth.signatureRefusal.keyRevoked": [
+    {
+      "type": 0,
+      "value": "This device's signing key was revoked, so it can't send. Register this device again under Settings › Devices › Instruction signing."
+    }
+  ],
+  "auth.signatureRefusal.nonceReplayed": [
+    {
+      "type": 0,
+      "value": "That same signature was already used once. The first one may have arrived, so check progress, and if needed press again to sign anew."
+    }
+  ],
+  "auth.signatureRefusal.required": [
+    {
+      "type": 0,
+      "value": "This server requires a device signature for allows and instructions. Send it from the phone or desktop app."
+    }
+  ],
+  "auth.signedControl.allowNeedsPreview": [
+    {
+      "type": 0,
+      "value": "Couldn't check the preview, so the allow wasn't signed. Reject it, or decide on the host."
+    }
+  ],
+  "auth.signedControl.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "You've left this session's channel, so you can't instruct it. Rejoin the channel, then send."
+    }
+  ],
+  "auth.signedControl.hostOffline": [
+    {
+      "type": 0,
+      "value": "The host hasn't responded for over 90 seconds, so nothing was sent. Make sure the host is on, then send again."
+    }
+  ],
+  "auth.signedControl.hostRevoked": [
+    {
+      "type": 0,
+      "value": "This host was revoked and can't receive instructions."
+    }
+  ],
+  "auth.signedControl.instructionDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't send the instruction. Check your connection, then send again."
+    }
+  ],
+  "auth.signedControl.instructionsDisabled": [
+    {
+      "type": 0,
+      "value": "This server doesn't accept signed instructions yet. You'll be able to send them here once it opens."
+    }
+  ],
+  "auth.signedControl.nonceReused": [
+    {
+      "type": 0,
+      "value": "The instruction and signature don't match, so the server didn't accept it. Sending again signs anew."
+    }
+  ],
+  "auth.signedControl.notDelivered": [
+    {
+      "type": 0,
+      "value": "Not delivered"
+    }
+  ],
+  "auth.signedControl.notDeliveredWith": [
+    {
+      "type": 0,
+      "value": "Not delivered · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "auth.signedControl.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Only the session's owner can instruct their own host."
+    }
+  ],
+  "auth.signedControl.resumeAgentUnknown": [
+    {
+      "type": 0,
+      "value": "Couldn't find this session's agent in its history, so a signed takeover can't be made. Continue on the original host."
+    }
+  ],
+  "auth.signedControl.scopeUnsupported": [
+    {
+      "type": 0,
+      "value": "This host doesn't accept session-wide allows. Send it as \"Allow once\" instead."
+    }
+  ],
+  "auth.signedControl.sessionNotAccepting": [
+    {
+      "type": 0,
+      "value": "The session has ended and isn't accepting instructions."
+    }
+  ],
+  "auth.signedControl.slashCommand": [
+    {
+      "type": 0,
+      "value": "Commands that start with \"/\" can't be sent as instructions."
+    }
+  ],
+  "auth.signedControl.textInvalid": [
+    {
+      "type": 0,
+      "value": "The instruction is empty or too long. Keep it within 32,768 characters."
     }
   ],
   "auth.signIn.invalidCredentials": [
@@ -10193,6 +11563,498 @@ export const catalog: MessageCatalog = {
       "value": "Posted an invite link"
     }
   ],
+  "onboarding.aiConnectCopy.commandAria": [
+    {
+      "type": 0,
+      "value": "Connection command"
+    }
+  ],
+  "onboarding.aiConnectCopy.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "onboarding.aiConnectCopy.copy": [
+    {
+      "type": 0,
+      "value": "Copy"
+    }
+  ],
+  "onboarding.aiConnectCopy.credential": [
+    {
+      "type": 0,
+      "value": "Connection value"
+    }
+  ],
+  "onboarding.aiConnectCopy.endpoint": [
+    {
+      "type": 0,
+      "value": "Address"
+    }
+  ],
+  "onboarding.aiConnectCopy.handedOffStatus": [
+    {
+      "type": 0,
+      "value": "Command copied. Paste it into Terminal and run it."
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code login command"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaCodex": [
+    {
+      "type": 0,
+      "value": "Codex login command"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginOpenedStatus": [
+    {
+      "type": 0,
+      "value": "Command copied. Paste it into Terminal and finish logging in, and this row will update."
+    }
+  ],
+  "onboarding.aiConnectCopy.openTerminal": [
+    {
+      "type": 0,
+      "value": "Open in Terminal"
+    }
+  ],
+  "onboarding.aiConnectCopy.spaced": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "onboarding.aiConnectCopy.terminalOpenFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't open Terminal. Copy the command and open it yourself."
+    }
+  ],
+  "onboarding.aiConnectEntry.action": [
+    {
+      "type": 0,
+      "value": "Create an agent with my subscription"
+    }
+  ],
+  "onboarding.aiConnectEntry.detail": [
+    {
+      "type": 0,
+      "value": "A personal agent that thinks with your Claude Code or Codex login on this Mac. Only you can call it."
+    }
+  ],
+  "onboarding.aiConnectEntry.title": [
+    {
+      "type": 0,
+      "value": "Agents that use my subscription"
+    }
+  ],
+  "onboarding.aiConnectGroup.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "onboarding.aiConnectGroup.tools": [
+    {
+      "type": 0,
+      "value": "My tools"
+    }
+  ],
+  "onboarding.aiConnectHarness.grok": [
+    {
+      "type": 0,
+      "value": "Grokbot"
+    }
+  ],
+  "onboarding.aiConnectJoin.back": [
+    {
+      "type": 0,
+      "value": "Choose a different AI"
+    }
+  ],
+  "onboarding.aiConnectJoin.cap": [
+    {
+      "type": 0,
+      "value": "Nobody joined in 5 minutes."
+    }
+  ],
+  "onboarding.aiConnectJoin.capDetail": [
+    {
+      "type": 0,
+      "value": "Check that you ran the command, then press Check again."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePaused": [
+    {
+      "type": 0,
+      "value": "Agents can't be created with Claude Code on this server. You can continue with Codex or an API key."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedDetail": [
+    {
+      "type": 0,
+      "value": "Turned off on this server"
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedPill": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "onboarding.aiConnectJoin.connectClaude": [
+    {
+      "type": 0,
+      "value": "Run this command in Terminal once."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectCodex": [
+    {
+      "type": 0,
+      "value": "Enter this address and connection value into Codex's MCP servers."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code joins oort through this connection. The connection value is shown only once, now."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailCodex": [
+    {
+      "type": 0,
+      "value": "Codex joins oort through this connection. The connection value is shown only once, now."
+    }
+  ],
+  "onboarding.aiConnectJoin.creating": [
+    {
+      "type": 0,
+      "value": "Preparing the connection."
+    }
+  ],
+  "onboarding.aiConnectJoin.error": [
+    {
+      "type": 0,
+      "value": "Couldn't create the connection."
+    }
+  ],
+  "onboarding.aiConnectJoin.joined": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " has joined."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedDetail": [
+    {
+      "type": 0,
+      "value": "A personal agent only you can call."
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedPersonalDetail": [
+    {
+      "type": 0,
+      "value": "A personal agent only you can call. It only answers while your Mac is on."
+    }
+  ],
+  "onboarding.aiConnectJoin.off": [
+    {
+      "type": 0,
+      "value": "Subscription-based agents aren't available on this server right now."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingClaude": [
+    {
+      "type": 0,
+      "value": "Waiting for Claude Code to join oort."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingCodex": [
+    {
+      "type": 0,
+      "value": "Waiting for Codex to join oort."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingGrok": [
+    {
+      "type": 0,
+      "value": "Waiting for Grokbot to join oort."
+    }
+  ],
+  "onboarding.aiConnectList.error": [
+    {
+      "type": 0,
+      "value": "Couldn't load the connection list."
+    }
+  ],
+  "onboarding.aiConnectList.offline": [
+    {
+      "type": 0,
+      "value": "Can't reach the server right now."
+    }
+  ],
+  "onboarding.aiConnectPersonal.enabling": [
+    {
+      "type": 0,
+      "value": "Turning on your personal agent."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailable": [
+    {
+      "type": 0,
+      "value": "Personal agents can't be turned on for this server yet. This opens once the server is updated."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailableDetail": [
+    {
+      "type": 0,
+      "value": "Can't be turned on for this server yet"
+    }
+  ],
+  "onboarding.aiConnectPill.checking": [
+    {
+      "type": 0,
+      "value": "Checking…"
+    }
+  ],
+  "onboarding.aiConnectPill.install": [
+    {
+      "type": 0,
+      "value": "Install needed"
+    }
+  ],
+  "onboarding.aiConnectPill.login": [
+    {
+      "type": 0,
+      "value": "Login needed"
+    }
+  ],
+  "onboarding.aiConnectPill.ready": [
+    {
+      "type": 0,
+      "value": "Ready"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyDetail": [
+    {
+      "type": 0,
+      "value": "OpenAI-compatible API key · Anyone on the team can call it"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyMark": [
+    {
+      "type": 0,
+      "value": "Key"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyTitle": [
+    {
+      "type": 0,
+      "value": "API key · Team agent"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeMark": [
+    {
+      "type": 0,
+      "value": "C"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeTitle": [
+    {
+      "type": 0,
+      "value": "Claude Code · My tool"
+    }
+  ],
+  "onboarding.aiConnectRow.cliDetail": [
+    {
+      "type": 0,
+      "value": "The official CLI on this Mac · Your personal agent, only you can call it"
+    }
+  ],
+  "onboarding.aiConnectRow.codexMark": [
+    {
+      "type": 0,
+      "value": "X"
+    }
+  ],
+  "onboarding.aiConnectRow.codexTitle": [
+    {
+      "type": 0,
+      "value": "Codex · My tool"
+    }
+  ],
+  "onboarding.aiConnectRow.grokDetail": [
+    {
+      "type": 0,
+      "value": "Invite the Grokbot app to your team"
+    }
+  ],
+  "onboarding.aiConnectRow.grokMark": [
+    {
+      "type": 0,
+      "value": "G"
+    }
+  ],
+  "onboarding.aiConnectRow.grokTitle": [
+    {
+      "type": 0,
+      "value": "Grokbot"
+    }
+  ],
+  "onboarding.aiConnectStage.apiKeyPill": [
+    {
+      "type": 0,
+      "value": "Settings"
+    }
+  ],
+  "onboarding.aiConnectStage.back": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "onboarding.aiConnectStage.boundaryNote": [
+    {
+      "type": 0,
+      "value": "Status is whatever the CLI reports itself. oort never reads or moves your login details. My tools are for you only; connect agents the whole team can call through Grokbot or an API key."
+    }
+  ],
+  "onboarding.aiConnectStage.continue": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "onboarding.aiConnectStage.desktopOnlyNote": [
+    {
+      "type": 0,
+      "value": "Connect Claude Code and Codex from this Mac in the desktop app."
+    }
+  ],
+  "onboarding.aiConnectStage.foundClaude": [
+    {
+      "type": 0,
+      "value": "Found Claude Code on this Mac."
+    }
+  ],
+  "onboarding.aiConnectStage.foundCodex": [
+    {
+      "type": 0,
+      "value": "Found Codex on this Mac."
+    }
+  ],
+  "onboarding.aiConnectStage.grokNotInstalledPill": [
+    {
+      "type": 0,
+      "value": "Not installed"
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminDetail": [
+    {
+      "type": 0,
+      "value": "If you need an agent, ask a workspace admin. You can start chatting right away in the meantime."
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminLine": [
+    {
+      "type": 0,
+      "value": "An admin connects agents."
+    }
+  ],
+  "onboarding.aiConnectStage.primaryApiKey": [
+    {
+      "type": 0,
+      "value": "Connect with an API key"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryClaude": [
+    {
+      "type": 0,
+      "value": "Use Claude Code as my personal agent"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryCodex": [
+    {
+      "type": 0,
+      "value": "Use Codex as my personal agent"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryGrok": [
+    {
+      "type": 0,
+      "value": "Invite Grokbot"
+    }
+  ],
+  "onboarding.aiConnectStage.probing": [
+    {
+      "type": 0,
+      "value": "Checking the CLIs on this Mac."
+    }
+  ],
+  "onboarding.aiConnectStage.question": [
+    {
+      "type": 0,
+      "value": "Whose AI should do the thinking?"
+    }
+  ],
+  "onboarding.aiConnectStage.questionDetail": [
+    {
+      "type": 0,
+      "value": "Choose whose AI your agent thinks with."
+    }
+  ],
+  "onboarding.aiConnectStage.reentry": [
+    {
+      "type": 0,
+      "value": "You can pick this up later from the AI screen."
+    }
+  ],
+  "onboarding.aiConnectStage.serverOffNote": [
+    {
+      "type": 0,
+      "value": "This server doesn't accept subscription-based agents right now. Connect team agents with an API key."
+    }
+  ],
+  "onboarding.aiConnectStage.skip": [
+    {
+      "type": 0,
+      "value": "Skip for now"
+    }
+  ],
+  "onboarding.aiConnectStage.skippedLine": [
+    {
+      "type": 0,
+      "value": "You can continue any time from the AI screen."
+    }
+  ],
   "onboarding.guide.expressionFlustered": [
     {
       "type": 0,
@@ -10461,6 +12323,596 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Enter the code shown in the terminal into your browser."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": [
+    {
+      "type": 0,
+      "value": "Off · Server setting"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.badgePaused": [
+    {
+      "type": 0,
+      "value": "Gray · Under inquiry"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailCleanup": [
+    {
+      "type": 0,
+      "value": "Finish removing the connection on the Agents screen."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailDisabled": [
+    {
+      "type": 0,
+      "value": "It works once the server operator turns it on. Your login is unchanged, and you can still use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on your Mac directly in Terminal."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailForbidden": [
+    {
+      "type": 0,
+      "value": "You're logged in. You can use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on your Mac directly in Terminal. To call it as an agent, ask an admin."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailLimit": [
+    {
+      "type": 0,
+      "value": "Clean up agents you no longer use first."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailPaused": [
+    {
+      "type": 0,
+      "value": "The server operator turned this off while asking the service provider about the allowed scope. Your login is unchanged, and you can still use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on your Mac directly in Terminal."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineCleanup": [
+    {
+      "type": 0,
+      "value": "You can create this agent again once its connection is fully removed."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineDisabled": [
+    {
+      "type": 0,
+      "value": "On this server, agents that use a subscription are turned off."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineForbidden": [
+    {
+      "type": 0,
+      "value": "Only a workspace admin can turn this into an agent."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineLimit": [
+    {
+      "type": 0,
+      "value": "You already have five agents that use a "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " subscription."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.linePaused": [
+    {
+      "type": 0,
+      "value": "On this server, agents that use a "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " subscription are paused for now."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletCost": [
+    {
+      "type": 0,
+      "value": "The cost comes out of your "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " subscription. Team keys aren't used."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": [
+    {
+      "type": 0,
+      "value": "It only answers while this Mac is on and oort is open."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": [
+    {
+      "type": 0,
+      "value": "Only you can call it. If someone else calls it, a notice goes out."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.create": [
+    {
+      "type": 0,
+      "value": "Create @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameHint": [
+    {
+      "type": 0,
+      "value": "Call it in channels as @name. Use lowercase letters, numbers, - and _."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameLabel": [
+    {
+      "type": 0,
+      "value": "Agent name"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.noStore": [
+    {
+      "type": 0,
+      "value": "Login details aren't stored in oort."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.title": [
+    {
+      "type": 0,
+      "value": "Make "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on this Mac callable as @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.agents": [
+    {
+      "type": 0,
+      "value": "View agents"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.close": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.detail": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " once within 15 minutes and it connects. Then call @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": " in a channel. If 15 minutes pass, press again here."
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existing": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": " already exists."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existingDetail": [
+    {
+      "type": 0,
+      "value": "It's already an agent on this Mac, so a new one wasn't created."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.line": [
+    {
+      "type": 0,
+      "value": "Created @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.line": [
+    {
+      "type": 0,
+      "value": "Couldn't create it: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonName": [
+    {
+      "type": 0,
+      "value": "That name can't be used"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliFailed": [
+    {
+      "type": 0,
+      "value": "The app couldn't connect "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": ". Run the command below in Terminal once. The connection value is shown only once, now."
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliMissing": [
+    {
+      "type": 0,
+      "value": "Couldn't find "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on this Mac, so the app couldn't connect it. Run the command below in Terminal once."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCodex": [
+    {
+      "type": 0,
+      "value": "To use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": ", enter this address and connection value into its MCP servers. The connection value is shown only once, now."
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailUnsupported": [
+    {
+      "type": 0,
+      "value": "The app can't connect it in this environment. Run the command below in Terminal once."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.disclosure": [
+    {
+      "type": 0,
+      "value": "Do it yourself"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.hide": [
+    {
+      "type": 0,
+      "value": "Collapse"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.lineYourself": [
+    {
+      "type": 0,
+      "value": "Created @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ". You just need to connect it yourself."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterName.charset": [
+    {
+      "type": 0,
+      "value": "Only lowercase letters, numbers, - and _ are allowed."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.invalid": [
+    {
+      "type": 0,
+      "value": "That name can't be used. Use lowercase letters, numbers, - and _."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.required": [
+    {
+      "type": 0,
+      "value": "Enter a name."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.taken": [
+    {
+      "type": 0,
+      "value": "That name is already in use. Enter a different one."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooLong": [
+    {
+      "type": 0,
+      "value": "Names can be up to 32 characters."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooShort": [
+    {
+      "type": 0,
+      "value": "Use at least two characters."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.cliStage": [
+    {
+      "type": 0,
+      "value": "Connecting to "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.loggedIn": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " is logged in."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.registering": [
+    {
+      "type": 0,
+      "value": "Creating @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.serverStage": [
+    {
+      "type": 0,
+      "value": "Creating the agent"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.create": [
+    {
+      "type": 0,
+      "value": "Create as an agent"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.detail": [
+    {
+      "type": 0,
+      "value": "Lets you call the Claude Code or Codex you're logged into on this Mac with @ in a channel. Only you can call it."
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.install": [
+    {
+      "type": 0,
+      "value": "Install guide"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.title": [
+    {
+      "type": 0,
+      "value": "Create an agent with my subscription"
     }
   ],
   "presence.dnd.hint": [

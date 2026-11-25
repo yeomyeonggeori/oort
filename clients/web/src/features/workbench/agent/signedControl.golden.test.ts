@@ -3,16 +3,23 @@ import decisionGolden from "../../../../../../docs/api/work-permission-decision.
 import instructionGolden from "../../../../../../docs/api/work-instruction.golden.json";
 import { ApiError, type HumanSignatureRequest } from "@momo/core/lib/api";
 import { installCoreHost, resetCoreHost } from "@momo/core/runtime/host";
-import { permissionFailure, permissionSentLine, rejectWithInstructionLine } from "@momo/core/features/workbench/agentPane";
+import {
+  permissionFailure as permissionFailureModel,
+  permissionSentLine,
+  rejectWithInstructionLine,
+} from "@momo/core/features/workbench/agentPane";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import vectors from "../../../../../../docs/api/human-control-signing-v3.vectors.json";
 import type { PermissionPreview } from "@momo/core/features/workbench/permissionPreview";
 import {
-  ALLOW_NEEDS_PREVIEW_LINE,
+  ALLOW_NEEDS_PREVIEW_KEY,
   DEFAULT_FOLDER_ID,
-  NOT_DELIVERED,
+  NOT_DELIVERED_KEY,
   rejectWithInstruction,
   resetUnconfirmedInputsForTests,
-  SCOPE_UNSUPPORTED_LINE,
+  SCOPE_UNSUPPORTED_KEY,
   signedAllow,
   signedInstruction,
   signedResume,
@@ -20,6 +27,15 @@ import {
   type ControlToSign,
   type HumanControlSigner,
 } from "@momo/core/features/auth/signedControl";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const NOT_DELIVERED = formatMessage(NOT_DELIVERED_KEY);
+const SCOPE_UNSUPPORTED_LINE = formatMessage(SCOPE_UNSUPPORTED_KEY);
+const permissionFailure = (error: unknown) => permissionFailureModel(error, formatMessage);
 
 // #3028 R2-E8. The envelopes the apps send, held against the server's goldens
 // (`docs/api/work-instruction.golden.json`, `work-permission-decision.golden.json`,
@@ -164,7 +180,11 @@ describe("signed instruction (golden work-instruction `queue`)", () => {
   it("a cancelled signature is 「전달 안 됨」 and nothing is sent — not even as chat", async () => {
     const { signer } = recordingSigner(new SignerRefusal("서명을 취소해서 보내지 않았어요.", true));
     const out = await signedInstruction({ workspaceId: WS, session: SESSION, text: "테스트", mode: "queue", signer });
-    expect(out).toMatchObject({ state: "not_delivered", stage: "sign", text: "서명을 취소해서 보내지 않았어요." });
+    expect(out).toMatchObject({
+      state: "not_delivered",
+      stage: "sign",
+      message: { raw: "서명을 취소해서 보내지 않았어요." },
+    });
     expect(calls).toEqual([]);
   });
 
@@ -180,8 +200,9 @@ describe("signed instruction (golden work-instruction `queue`)", () => {
     expect(out.state).toBe("not_delivered");
     if (out.state !== "not_delivered") return;
     expect(out.stage).toBe("server");
-    expect(out.text).toContain(word);
-    expect(out.text).not.toContain(code);
+    const text = failureMessageText(formatMessage, out.message);
+    expect(text).toContain(word);
+    expect(text).not.toContain(code);
     // Exactly one request: never re-sent unsigned, never posted as a message.
     expect(calls.map((c) => c.path)).toEqual([INSTRUCTION_PATH]);
   });
@@ -338,7 +359,7 @@ describe("signed allow (golden work-permission-decision `session_scope_signed`)"
     for (const preview of [null, { preview: V3_ONCE.preview, sha256: "not-a-hash" }]) {
       await expect(
         signedAllow({ workspaceId: WS, session: SESSION, requestEventId: "e", optionId: "o", scope: "once", preview, signer })
-      ).rejects.toEqual(new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE));
+      ).rejects.toEqual(new SignerRefusal({ key: ALLOW_NEEDS_PREVIEW_KEY }));
     }
     expect(asked).toEqual([]);
     expect(calls).toEqual([]);
@@ -396,7 +417,7 @@ describe("「거부 + 지시」 = unsigned reject + signed input (ADR-0146 개�
   it("a cancelled signature sends nothing — not even the reject", async () => {
     const { signer } = recordingSigner(new SignerRefusal("취소했어요.", true));
     const out = await rejectWithInstruction(args(signer));
-    expect(out).toMatchObject({ state: "not_sent", text: "취소했어요." });
+    expect(out).toMatchObject({ state: "not_sent", message: { raw: "취소했어요." } });
     expect(calls).toEqual([]);
   });
 
@@ -409,7 +430,7 @@ describe("「거부 + 지시」 = unsigned reject + signed input (ADR-0146 개�
     if (out.state !== "rejected") return;
     expect(out.instruction.state).toBe("not_delivered");
     if (out.instruction.state !== "not_delivered") return;
-    const line = rejectWithInstructionLine(false, out.instruction.text);
+    const line = rejectWithInstructionLine(false, failureMessageText(formatMessage, out.instruction.message));
     expect(line).toContain("거부는 보냈어요");
     expect(line).toContain("전달 안 됨");
     expect(line).toContain("호스트");

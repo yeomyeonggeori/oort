@@ -1,8 +1,8 @@
 import {devAccessError} from '@momo/core/features/auth/devAccess';
 import {
-  DEV_LIST_SCOPE_LABELS,
+  DEV_LIST_SCOPE_LABEL_KEYS,
   DEV_NOTICES,
-  devAccessErrorText,
+  devAccessErrorMessage,
   devAccessGate,
   devCredentialRow,
   type DevCredentialRow,
@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import {Sentence} from '../../design/atoms';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {ConfirmStep, GroupCard, ListRow} from '../../design/sheetParts';
 import {usePalette, useStyles} from '../../design/theme';
 import {
@@ -31,7 +32,6 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
-import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useNow} from '../../lib/useNow';
 import {SheetNotice} from '../../shell/sheetForm';
 import {useOnline} from '../inbox/useOnline';
@@ -109,9 +109,9 @@ export function DevToolsPage({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const online = useOnline();
   const now = useNow();
-  const formatMessage = useFormatMessage();
   const policy = useDevAccessPolicy(workspaceId);
   const list = useMyDevCredentials(workspaceId, selfId);
   const revoke = useRevokeDevCredential(workspaceId);
@@ -128,9 +128,13 @@ export function DevToolsPage({
     AccessibilityInfo.announceForAccessibility(confirmHeadline(askedName));
   }, [askedName, onTop]);
 
-  const failure = revoke.isError
-    ? devAccessErrorText(devAccessError(revoke.error), 'revoke')
+  const failureMessage = revoke.isError
+    ? devAccessErrorMessage(devAccessError(revoke.error), 'revoke')
     : null;
+  const failure =
+    failureMessage === null
+      ? null
+      : formatMessage(failureMessage.key, failureMessage.values as never);
 
   const ask = (row: DevCredentialRow) => {
     if (!online) return;
@@ -163,7 +167,7 @@ export function DevToolsPage({
         <ConfirmStep
           testID="dev-revoke-confirm"
           headline={confirmHeadline(target.name)}
-          detail={DEV_NOTICES.revokeWarning}
+          detail={formatMessage(DEV_NOTICES.revokeWarning.key)}
           error={online ? failure : DEV_TOOLS_OFFLINE}
           errorTestID="dev-revoke-error"
           confirmLabel={DEV_TOOLS_REVOKE_LABEL}
@@ -180,14 +184,16 @@ export function DevToolsPage({
   }
 
   const gate = policy.data ? devAccessGate(policy.data) : null;
+  const listError = devAccessErrorMessage(devAccessError(list.error), 'list');
   // 정책을 못 읽었으면 만들 수 있는지 모르는 것이다. 모르는 것을 약속하지 않고 이 줄만 뺀다(지우는 길은 그대로다).
   const intro =
     gate === null
       ? null
       : gate.state === 'open'
         ? DEV_TOOLS_CREATE_ON_COMPUTER
-        : gate.text;
-  const rows = list.data?.map(credential => devCredentialRow(credential, {now, formatMessage})) ?? null;
+        : formatMessage(gate.message.key, gate.message.values as never);
+  const rows =
+    list.data?.map(credential => devCredentialRow(credential, {now, formatMessage})) ?? null;
 
   return (
     <View style={styles.page} testID="dev-tools-page">
@@ -196,7 +202,7 @@ export function DevToolsPage({
           <SettingsNote testID="dev-tools-intro">{intro}</SettingsNote>
         ) : null}
         <SettingsNote testID="dev-tools-logout-note">
-          {DEV_NOTICES.logoutKeepsConnections}
+          {formatMessage(DEV_NOTICES.logoutKeepsConnections.key)}
         </SettingsNote>
       </View>
 
@@ -208,14 +214,14 @@ export function DevToolsPage({
       )}
 
       <SettingsSection>
-        <GroupCard label={DEV_LIST_SCOPE_LABELS.mine} testID="dev-tools-list">
+        <GroupCard label={formatMessage(DEV_LIST_SCOPE_LABEL_KEYS.mine)} testID="dev-tools-list">
           {rows === null
             ? list.isError
               ? [
                   <ListRow
                     key="error"
                     title={DEV_TOOLS_LOAD_FAILED}
-                    detail={devAccessErrorText(devAccessError(list.error), 'list')}
+                    detail={formatMessage(listError.key, listError.values as never)}
                     testID="dev-tools-error"
                   />,
                   <ActionRow
@@ -256,7 +262,7 @@ export function DevToolsPage({
           </SettingsNote>
         ) : null}
         <SettingsNote testID="dev-tools-notes">
-          {[DEV_NOTICES.passwordChangeEndsAll, DEV_NOTICES.toolIsOnlyALabel].join(' ')}
+          {formatMessage('auth.devAccessPhone.passwordAndToolNote')}
         </SettingsNote>
         {policy.data?.canManageAll === true ? (
           <SettingsNote testID="dev-tools-admin-note">{DEV_TOOLS_ADMIN_NOTE}</SettingsNote>

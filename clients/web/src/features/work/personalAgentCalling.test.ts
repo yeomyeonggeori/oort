@@ -13,24 +13,35 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
 
 import { ApiError, type HumanSignatureRequest, type Message, type RosterMember, type WorkHost } from "@momo/core/lib/api";
 import {
-  CALL_MAC_OFF_LINE,
-  CALL_NEEDS_APP_LINE,
+  CALL_MAC_OFF_KEY,
+  CALL_NEEDS_APP_KEY,
   resendPersonalAgentCall,
 } from "@momo/core/features/auth/personalAgentCall";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import type { ControlToSign, HumanControlSigner } from "@momo/core/features/auth/signedControl";
 import {
   callTargetFor,
-  FLAG_OFF_LINE,
+  FLAG_OFF_MESSAGE,
   flagOffSigner,
   harnessName,
   myPersonalAgent,
-  NO_MAC_LINE,
+  NO_MAC_MESSAGE,
   pickCallHost,
   previewFor,
   runPersonalAgentCall,
   workRequestTarget,
   type PersonalCallSpec,
 } from "./personalAgentCalling";
+
+// 사유의 문장은 사전에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const CALL_NEEDS_APP_LINE = formatMessage(CALL_NEEDS_APP_KEY);
+const CALL_MAC_OFF_LINE = formatMessage(CALL_MAC_OFF_KEY);
 
 const ME = "00000000-0000-7000-8000-00000000000a";
 const OTHER = "00000000-0000-7000-8000-00000000000b";
@@ -182,10 +193,11 @@ describe("where it goes", () => {
   it("shows 「내 맥 · <기기> · Claude Code」 before sending, and says why when it cannot", () => {
     expect(previewFor(spec())).toMatchObject({ destination: "내 맥 · 성재의 MacBook · Claude Code", blocked: null, audience: "channel" });
     expect(previewFor(spec({ audience: "dm" })).audience).toBe("dm");
-    expect(previewFor(spec({ host: null })).blocked).toBe(NO_MAC_LINE);
+    expect(previewFor(spec({ host: null })).blocked).toEqual(NO_MAC_MESSAGE);
+    expect(failureMessageText(formatMessage, NO_MAC_MESSAGE)).toContain("연결된 내 맥을 찾지 못했어요");
     const web = previewFor(spec({ signer: null }));
     expect(web.destination).toBeNull();
-    expect(web.blocked).toContain(CALL_NEEDS_APP_LINE);
+    expect(web.blocked === null ? "" : failureMessageText(formatMessage, web.blocked)).toContain(CALL_NEEDS_APP_LINE);
     expect(harnessName("codex")).toBe("Codex");
     expect(harnessName("some-new-tool")).toBe("some-new-tool");
   });
@@ -242,7 +254,7 @@ describe("the call, as the composer runs it", () => {
     const result = await run(spec({ signer: null, host: null }));
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
-    expect(result.call).toMatchObject({ state: "message_only", reason: "no_signer", text: CALL_NEEDS_APP_LINE });
+    expect(result.call).toMatchObject({ state: "message_only", reason: "no_signer", message: { key: CALL_NEEDS_APP_KEY } });
   });
 
   it("no Mac registered: the message goes and the sentence says so; nothing is signed", async () => {
@@ -251,7 +263,7 @@ describe("the call, as the composer runs it", () => {
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(signed).toHaveLength(0);
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
-    expect(result.call).toMatchObject({ state: "not_delivered", text: NO_MAC_LINE, signed: null });
+    expect(result.call).toMatchObject({ state: "not_delivered", message: NO_MAC_MESSAGE, signed: null });
   });
 
   it("the Mac is off: 「내 맥이 꺼져 있어요」, and the SAME signed body is resent — no second sign, no second message", async () => {
@@ -260,7 +272,7 @@ describe("the call, as the composer runs it", () => {
     const result = await run(spec({ signer }));
     expect(result.call.state).toBe("not_delivered");
     if (result.call.state !== "not_delivered") throw new Error("unreachable");
-    expect(result.call.text).toBe(CALL_MAC_OFF_LINE);
+    expect(failureMessageText(formatMessage, result.call.message)).toBe(CALL_MAC_OFF_LINE);
     expect(result.call.signed).not.toBeNull();
     const firstBody = api.postWorkSpawn.mock.calls[0]![1];
     const again = await resendPersonalAgentCall(WS, result.call.signed!);
@@ -274,14 +286,14 @@ describe("the call, as the composer runs it", () => {
   it("the server has signed spawns off: the flag line, no retry (the same body would be refused again)", async () => {
     api.postWorkSpawn.mockRejectedValueOnce(new ApiError(403, "off", "signed_spawn_disabled"));
     const result = await run(spec());
-    expect(result.call).toMatchObject({ state: "not_delivered", text: FLAG_OFF_LINE, signed: null });
+    expect(result.call).toMatchObject({ state: "not_delivered", message: FLAG_OFF_MESSAGE, signed: null });
   });
 
   it("a flag known to be off skips the Touch ID prompt but the message still goes", async () => {
     const result = await run(spec({ signer: flagOffSigner() }));
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
-    expect(result.call).toMatchObject({ state: "not_delivered", stage: "sign", text: FLAG_OFF_LINE, signed: null });
+    expect(result.call).toMatchObject({ state: "not_delivered", stage: "sign", message: FLAG_OFF_MESSAGE, signed: null });
   });
 
   it("a message that cannot be sent throws before anything is signed", async () => {

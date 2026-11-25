@@ -1,6 +1,8 @@
 import { uuidEq, type WorkSession } from "../../lib/api";
 import { humanSignatureRefusal } from "../auth/humanSignature";
-import { SCOPE_UNSUPPORTED_LINE, SignerRefusal, type PermissionScope } from "../auth/signedControl";
+import type { LocaleService } from "../../i18n/context";
+import { failureMessageText } from "../auth/failureMessage";
+import { SCOPE_UNSUPPORTED_KEY, SignerRefusal, type PermissionScope } from "../auth/signedControl";
 import {
   foldSessionEvents,
   type WorkEventRow,
@@ -341,7 +343,11 @@ export interface PermissionFailure {
  * 읽는다(서버 `message`는 바뀔 수 있다). 같은 결정을 다시 보내면 서버가 200으로
  * 같은 행을 돌려주므로, 여기로 오는 것은 진짜 거절과 닿지 못한 경우뿐이다.
  */
-export function permissionFailure(error: unknown): PermissionFailure {
+export function permissionFailure(
+  error: unknown,
+  /** 기기 서명 거부의 문장은 사전에 있어 지금 언어로 푼다. */
+  formatMessage: LocaleService["formatMessage"]
+): PermissionFailure {
   const status =
     typeof error === "object" && error !== null && typeof (error as { status?: unknown }).status === "number"
       ? (error as { status: number }).status
@@ -354,12 +360,14 @@ export function permissionFailure(error: unknown): PermissionFailure {
   // 「소유자만」이 아니고, 409 `device_nonce_replayed`는 요청이 닫힌 것이 아니다.
   // 서명 거부는 요청을 닫지 않는다: 거부(서명 없음)는 여전히 보낼 수 있다.
   // 서명하지 못했다(취소·키 없음): 아무것도 보내지 않았고 요청은 열려 있다.
-  if (error instanceof SignerRefusal) return { closed: false, text: error.message };
+  if (error instanceof SignerRefusal) {
+    return { closed: false, text: failureMessageText(formatMessage, error.refusal) };
+  }
   const signature = humanSignatureRefusal(error);
-  if (signature) return { closed: false, text: signature.text };
+  if (signature) return { closed: false, text: formatMessage(signature.key) };
   // 서버가 「이 세션 동안」을 아직 받지 않는다(#3023): 「이번 한 번」은 여전히 된다.
   if (status === 400 && code === "permission_scope_unsupported") {
-    return { closed: false, text: SCOPE_UNSUPPORTED_LINE };
+    return { closed: false, text: formatMessage(SCOPE_UNSUPPORTED_KEY) };
   }
   if (status === 409 && code === "permission_already_decided") {
     return { closed: true, text: "이미 다른 결정이 먼저 들어갔어요. 다른 기기에서 결정했을 수 있어요." };

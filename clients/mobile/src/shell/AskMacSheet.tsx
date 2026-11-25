@@ -1,4 +1,5 @@
 import {fetchHumanControlSignatureRequired} from '@momo/core/features/auth/deviceKeys';
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
 import {WORK_REQUEST_SHEET_MODE} from '@momo/core/features/timeline/commandSuggest';
 import {uuidEq, type Channel} from '@momo/core/lib/api';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
@@ -11,6 +12,7 @@ import {SheetHeader, type SheetConfirm} from '../design/SheetChrome';
 import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {font, line, SHEET, space, type Palette} from '../design/tokens';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useWorkHosts, useWorkSessions} from '../features/agents/queries';
 import {useDeviceKey} from '../features/deviceKey/useDeviceKey';
 import {
@@ -240,6 +242,7 @@ function SheetBody({
     preview?.prompt ?? initialPrompt ?? restoredPrompt ?? '',
   );
   const [issue, setIssue] = useState<string | null>(null);
+  const formatMessage = useFormatMessage();
   const [banner, setBanner] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   // 글을 쓰던 중에 알림이 이 시트를 걷어도 그 글은 남는다. 보내는 중(`pending`)은 이미 나가는 글이라 맡기지 않는다.
@@ -380,7 +383,7 @@ function SheetBody({
       });
     } catch {
       // 포트는 실패를 결과로 돌려주기로 했지만, 던져도 사람은 왜 아무 일도 없었는지 알아야 한다.
-      outcome = {kind: 'refused', sentence: UNKNOWN_FAILURE_SENTENCE};
+      outcome = {kind: 'refused', message: {raw: UNKNOWN_FAILURE_SENTENCE}};
     } finally {
       setPending(false);
     }
@@ -409,6 +412,10 @@ function SheetBody({
         // 사람이 Face ID를 스스로 접었다. 오류가 아니다: 조용히 폼으로 돌아간다.
         return;
       case 'refused':
+        haptics.error();
+        // 사유의 문장은 사전에 있어 지금 언어로 풀어 둔다(이 상태는 다른 묶음의 문장과 한 줄에 선다).
+        setBanner(failureMessageText(formatMessage, outcome.message));
+        return;
       case 'not_wired':
         haptics.error();
         setBanner(outcome.sentence);
