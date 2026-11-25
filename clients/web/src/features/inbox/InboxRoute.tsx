@@ -29,7 +29,7 @@ import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import {
   filterMailbox,
   mailboxCounts,
-  mailboxFilterLabel,
+  mailboxFilterLabelKey,
   parseMailboxFilter,
   type MailboxEntry,
   type MailboxFilter,
@@ -433,13 +433,13 @@ export function InboxRoute() {
   // 「나중에」 탭은 자기 목록(`RemindersPanel`)이 자기 로딩을 말하므로 그 목록의 시각을 그대로 쓴다.
   const bandSyncedAtMs = filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs;
   const bandListBelow = filter === "reminders" || shown.length > 0 || !(mailbox.isLoading || mailbox.error);
-  const bandRelativeTime = bandListBelow && bandSyncedAtMs > 0 ? relativeLabel(bandSyncedAtMs, Date.now()) : null;
+  const bandRelativeTime = bandListBelow && bandSyncedAtMs > 0 ? relativeLabel(formatMessage, bandSyncedAtMs, Date.now()) : null;
 
   const emptyCopy =
     filter === "task" && localWaiting > 0
       ? EMPTY_WITH_LOCAL_WAITING
       : emptyCopyFor(filter === "reminders" ? "all" : filter, mailbox.source);
-  const scopeLabel = mailboxFilterLabel(filter === "reminders" ? "all" : filter);
+  const scopeLabel = formatMessage(mailboxFilterLabelKey(filter === "reminders" ? "all" : filter));
   const serverUnreadHere = shown.some((e) => e.itemId !== undefined && e.unread);
   const canMarkAllServer =
     filter !== "task" &&

@@ -21,6 +21,12 @@ import { actorToken, resolveActorNames, type ActorNames, type FeedItem } from ".
 import type { MailboxPlace } from "./source";
 import { channelLabel, makeDirectory } from "../workspace/directory";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 const NOW = 1_800_000_000_000;
 const SELF = "00000000-0000-7000-8000-000000000101";
 const SEO = "00000000-0000-7000-8000-000000000102";
@@ -81,7 +87,7 @@ describe("dmEntry", () => {
   const base = { channelId: DM, channelLabel: "서연", place: DM_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW };
 
   it("상대의 마지막 말이 커서 뒤면 안 읽은 DM", () => {
-    const e = dmEntry({
+    const e = dmEntry({ formatMessage: ko,
       ...base,
       readState: rs(),
       messages: [msg({ seq: 7, authorMemberId: SEO }), msg({ seq: 8, authorMemberId: SEO, body: "회의 어때요" })],
@@ -91,7 +97,7 @@ describe("dmEntry", () => {
   });
 
   it("읽은 DM도 목록에 남는다 (메일함)", () => {
-    const e = dmEntry({
+    const e = dmEntry({ formatMessage: ko,
       ...base,
       readState: rs({ lastReadSeq: 8, unreadCount: 0 }),
       messages: [msg({ seq: 8, authorMemberId: SEO })],
@@ -100,7 +106,7 @@ describe("dmEntry", () => {
   });
 
   it("내가 마지막으로 말한 DM은 안 읽음이 아니고 「나:」로 구분", () => {
-    const e = dmEntry({
+    const e = dmEntry({ formatMessage: ko,
       ...base,
       readState: rs({ lastReadSeq: 7, unreadCount: 1 }),
       messages: [msg({ seq: 8, authorMemberId: SELF, body: "네 좋아요" })],
@@ -109,7 +115,7 @@ describe("dmEntry", () => {
   });
 
   it("스레드 답글·시스템 메시지는 대표가 되지 않는다", () => {
-    const e = dmEntry({
+    const e = dmEntry({ formatMessage: ko,
       ...base,
       readState: rs(),
       messages: [
@@ -122,7 +128,7 @@ describe("dmEntry", () => {
   });
 
   it("메시지가 없으면 항목을 만들지 않는다", () => {
-    expect(dmEntry({ ...base, readState: rs(), messages: [] })).toBeNull();
+    expect(dmEntry({ formatMessage: ko, ...base, readState: rs(), messages: [] })).toBeNull();
   });
 });
 
@@ -138,7 +144,7 @@ describe("threadEntry", () => {
   const base = { channelLabel: "#workbench", place: CH_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW };
 
   it("내 글의 마지막 답글이 읽음 기준 뒤면 항목", () => {
-    const e = threadEntry({
+    const e = threadEntry({ formatMessage: ko,
       ...base,
       root: root(),
       readState: rs({ channelId: CH, lastReadSeq: 5 }),
@@ -149,18 +155,18 @@ describe("threadEntry", () => {
 
   it("이미 읽은 답글이면 항목이 아니다", () => {
     expect(
-      threadEntry({ ...base, root: root(), readState: rs({ channelId: CH, lastReadSeq: 9 }), lastReply: undefined })
+      threadEntry({ formatMessage: ko, ...base, root: root(), readState: rs({ channelId: CH, lastReadSeq: 9 }), lastReply: undefined })
     ).toBeNull();
   });
 
   it("남의 글에 달린 답글은 이 모델이 모르는 사실이다", () => {
     expect(
-      threadEntry({ ...base, root: root({ authorMemberId: SEO }), readState: rs({ channelId: CH }), lastReply: undefined })
+      threadEntry({ formatMessage: ko, ...base, root: root({ authorMemberId: SEO }), readState: rs({ channelId: CH }), lastReply: undefined })
     ).toBeNull();
   });
 
   it("마지막 답글 본문을 아직 못 받았으면 루트 본문으로 이유를 말한다", () => {
-    const e = threadEntry({ ...base, root: root(), readState: rs({ channelId: CH }), lastReply: undefined });
+    const e = threadEntry({ formatMessage: ko, ...base, root: root(), readState: rs({ channelId: CH }), lastReply: undefined });
     expect(e?.preview).toContain("답글 2개");
   });
 });
@@ -185,20 +191,20 @@ describe("taskEntry", () => {
     ...over,
   });
   it("결정할 수 있는 대기 승인만", () => {
-    expect(taskEntry(item(), NOW)).toMatchObject({ kind: "task", unread: true });
-    expect(taskEntry(item({ approvalId: undefined }), NOW)).toBeNull();
-    expect(taskEntry(item({ pending: false }), NOW)).toBeNull();
+    expect(taskEntry(ko, item(), NOW)).toMatchObject({ kind: "task", unread: true });
+    expect(taskEntry(ko, item({ approvalId: undefined }), NOW)).toBeNull();
+    expect(taskEntry(ko, item({ pending: false }), NOW)).toBeNull();
   });
 });
 
 describe("composeMailbox / 필터 / 세기", () => {
-  const dm = dmEntry({
+  const dm = dmEntry({ formatMessage: ko,
     channelId: DM, channelLabel: "서연", place: DM_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW,
     readState: rs(), messages: [msg({ seq: 8, authorMemberId: SEO })],
   }) as MailboxEntry;
   const mention = (channelId: string, id: string): MailboxEntry =>
-    mentionEntry(msg({ seq: 4, authorMemberId: SEO, channelId, id }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
-  const task = taskEntry(
+    mentionEntry(ko, msg({ seq: 4, authorMemberId: SEO, channelId, id }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
+  const task = taskEntry(ko, 
     {
       key: "approval:a1", kind: "approval", tone: "warn", actor: "@kim-intern", actorIsAgent: true,
       predicate: "허가 요청", outcome: null, outcomeTone: "muted", channelId: CH, channelLabel: "#workbench",
@@ -258,8 +264,8 @@ describe("entryAriaLabel", () => {
       source: { kind: "place", place: DM_PLACE },
       actorIsAgent: false, preview: "안녕", atMs: NOW, timeLabel: "방금", unread: true, unreadCount: 3, reason: "r",
     } as MailboxEntry;
-    expect(entryAriaLabel(e, "DM · 서연")).toBe("안 읽음 3개, DM · 서연, 서연, 방금, 안녕");
-    expect(entryAriaLabel({ ...e, unread: false }, "DM · 서연")).toBe("DM · 서연, 서연, 방금, 안녕");
+    expect(entryAriaLabel(ko, e, "DM · 서연")).toBe("안 읽음 3개, DM · 서연, 서연, 방금, 안녕");
+    expect(entryAriaLabel(ko, { ...e, unread: false }, "DM · 서연")).toBe("DM · 서연, 서연, 방금, 안녕");
   });
 
   // #5696: 출처 줄 「#채널」은 종류를 말하지 않는다. 아바타가 있는 줄은 종류 그림도 없어서, 낭독이 종류 낱말을 따로 붙인다.
@@ -273,10 +279,10 @@ describe("entryAriaLabel", () => {
     const reply = { ...base, kind: "reply", source: { kind: "place", place: CH_PLACE } } as MailboxEntry;
     const thread = { ...base, kind: "thread", source: { kind: "thread", place: CH_PLACE } } as MailboxEntry;
     const dmThread = { ...base, kind: "thread", source: { kind: "place", place: DM_PLACE } } as MailboxEntry;
-    expect(entryAriaLabel(mention, "#workbench")).toBe("멘션, #workbench, 서연, 방금, 확인 부탁");
-    expect(entryAriaLabel(reply, "#workbench")).toBe("답글, #workbench, 서연, 방금, 확인 부탁");
-    expect(entryAriaLabel(thread, "스레드 · #workbench")).toBe("스레드 · #workbench, 서연, 방금, 확인 부탁");
-    expect(entryAriaLabel(dmThread, "DM · 서연")).toBe("스레드, DM · 서연, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(ko, mention, "#workbench")).toBe("멘션, #workbench, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(ko, reply, "#workbench")).toBe("답글, #workbench, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(ko, thread, "스레드 · #workbench")).toBe("스레드 · #workbench, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(ko, dmThread, "DM · 서연")).toBe("스레드, DM · 서연, 서연, 방금, 확인 부탁");
   });
 });
 
@@ -308,7 +314,7 @@ describe("dmEntry · 명부에서 빠진 상대", () => {
 
   it("부제는 「DM · 나간 멤버」이고 「다이렉트 메시지」가 아니다", () => {
     const directory = makeDirectory([roster(SELF, "구민수")]);
-    const e = dmEntry({
+    const e = dmEntry({ formatMessage: ko,
       channelId: DM,
       channelLabel: channelLabel(dmChannel, directory, SELF),
       place: { kind: "dm", names: [channelLabel(dmChannel, directory, SELF)] },
@@ -379,7 +385,7 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
     Array.from({ length: n }, (_, i) => ({ id: `a-${mime}-${i}`, name: `파일${i}`, mime, sizeBytes: 1000 }));
   const base = { channelId: DM, channelLabel: "서연", place: DM_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs() };
   const dm = (over: Partial<Message> & { authorMemberId: string }) =>
-    dmEntry({ ...base, messages: [msg({ seq: 8, body: "", attachments: attach(2), ...over })] });
+    dmEntry({ formatMessage: ko, ...base, messages: [msg({ seq: 8, body: "", attachments: attach(2), ...over })] });
 
   it("DM 줄은 「내용 없는 메시지」가 아니라 사진 개수로 말한다", () => {
     const e = dm({ authorMemberId: SEO });
@@ -415,7 +421,7 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
   });
 
   it("멘션 줄도 같은 말을 한다", () => {
-    const e = mentionEntry(
+    const e = mentionEntry(ko, 
       msg({ seq: 4, authorMemberId: SEO, channelId: CH, body: "", attachments: attach(1) }),
       actorFor(SEO),
       "#workbench",
@@ -440,14 +446,14 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
       thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 60_000 },
     });
     const common = { channelLabel: "#workbench", place: CH_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs({ channelId: CH, lastReadSeq: 5 }) };
-    const withReply = threadEntry({
+    const withReply = threadEntry({ formatMessage: ko,
       ...common,
       root,
       lastReply: msg({ seq: 9, authorMemberId: BOT, body: "", attachments: attach(1, "application/pdf") }),
     });
     expect(withReply?.preview).toBe("파일 1개");
     expect(withReply?.rootPreview).toBe("사진 3장");
-    const withoutReply = threadEntry({ ...common, root, lastReply: undefined });
+    const withoutReply = threadEntry({ formatMessage: ko, ...common, root, lastReply: undefined });
     expect(withoutReply?.preview).toBe("내 글에 답글 2개: 사진 3장");
   });
 });
@@ -456,7 +462,7 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
 // 맞게 넘기는지만 잠근다(빌더가 출처를 엉뚱하게 지으면 목록 줄의 둘째 줄이 틀린다).
 describe("구 서버 경로 빌더의 출처 (#5696)", () => {
   it("DM 줄은 DM 장소 그대로의 출처다", () => {
-    const e = dmEntry({
+    const e = dmEntry({ formatMessage: ko,
       channelId: DM,
       channelLabel: "서연",
       place: DM_PLACE,
@@ -470,9 +476,9 @@ describe("구 서버 경로 빌더의 출처 (#5696)", () => {
   });
 
   it("루트 없는 채널 멘션은 「#채널」이고, 스레드 안(rootId) 멘션은 「스레드 · #채널」이다", () => {
-    const plain = mentionEntry(msg({ seq: 4, authorMemberId: SEO, channelId: CH }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
+    const plain = mentionEntry(ko, msg({ seq: 4, authorMemberId: SEO, channelId: CH }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
     expect(plain.source).toEqual({ kind: "place", place: CH_PLACE });
-    const inThread = mentionEntry(
+    const inThread = mentionEntry(ko, 
       msg({ seq: 5, authorMemberId: SEO, channelId: CH, rootId: "m-root" }),
       actorFor(SEO),
       "#workbench",
@@ -483,7 +489,7 @@ describe("구 서버 경로 빌더의 출처 (#5696)", () => {
   });
 
   it("스레드 줄은 받은 장소로 스레드 출처를 짓는다", () => {
-    const e = threadEntry({
+    const e = threadEntry({ formatMessage: ko,
       channelLabel: "#workbench",
       place: CH_PLACE,
       selfMemberId: SELF,

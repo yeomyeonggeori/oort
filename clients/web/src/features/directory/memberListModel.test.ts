@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { countLabel, profileEmail } from "@momo/core/features/directory/model";
 import { canSearchByEmail, groupMemberList } from "./memberListModel";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // #5782: who sees a member's email in the member tab, and who can find a member
 // by it. The search half is the one that leaks: a guest who cannot see the
@@ -98,7 +104,7 @@ describe("groupMemberList: 정지됨 묶음 (#5781)", () => {
     expect(groups.people.map((m) => m.handle)).toEqual(["dohyeon", "seoyeon"]);
     expect(groups.suspended.map((m) => m.handle)).toEqual(["haneul", "seoyun"]);
     expect(groups.agents.map((m) => m.handle)).toEqual(["hermes"]);
-    expect(countLabel(groups, { pending: false, failed: false })).toBe("사람 2 · 에이전트 1");
+    expect(countLabel(koCopy, groups, { pending: false, failed: false })).toBe("사람 2 · 에이전트 1");
     expect(groups.total).toBe(5);
   });
 

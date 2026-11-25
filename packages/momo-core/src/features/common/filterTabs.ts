@@ -7,15 +7,23 @@
 // FilterTabs.tsx`).
 // =============================================================================
 
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+
+/**
+ * 탭에 적히는 말. 사전 키를 옮긴 표면은 `MessageRef`(화면이 그릴 때 지금 언어로 푼다)를, 아직 옮기지 않은 표면은 글을 그대로
+ * 준다. 컨트롤(`FilterTabs`)이 둘을 한 곳에서 푼다.
+ */
+export type FilterTabText = string | { key: PlainMessageKey } | MessageRef;
+
 /**
  * 한 표면의 필터 어휘. 그 표면의 model 옆에 두어, 절반만 설정된 탭 묶음(이름은
  * 정했는데 패널 id는 없는 식)이 나올 수 없게 한다.
  */
 export interface FilterTabsSpec<T extends string> {
   /** tablist의 접근성 이름. 느슨한 버튼 N개가 아니라 한 질문임을 말한다. */
-  label: string;
+  label: FilterTabText;
   values: readonly T[];
-  labelFor: (value: T) => string;
+  labelFor: (value: T) => FilterTabText;
   /** 탭 엘리먼트의 id. 라우트가 패널의 `aria-labelledby`로 되짚는다. */
   tabId: (value: T) => string;
   /** 이 탭이 지배하는 패널의 id. 라우트가 자기 패널에 붙인다. */

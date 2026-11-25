@@ -101,8 +101,9 @@ export function DevAccessList({
     const own = isOwnDevCredential(credential, memberId);
     return {
       own,
-      row: devCredentialRow(formatMessage, credential, {
+      row: devCredentialRow(credential, {
         now,
+        formatMessage,
         ...(scope === "all"
           ? { memberName: own ? "나" : memberLabel(roster, credential.memberId) }
           : {}),

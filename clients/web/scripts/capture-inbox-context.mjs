@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
+import { withCaptureLocale } from "./capture-locale.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/inbox-context");
@@ -233,7 +234,7 @@ const overflowX = (page) => page.evaluate(() => document.documentElement.scrollW
 const rows = (page) => page.locator("[data-testid='mailbox-row']");
 
 async function open(browser, origin, scheme) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
+  const context = await browser.newContext(withCaptureLocale({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" }));
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);

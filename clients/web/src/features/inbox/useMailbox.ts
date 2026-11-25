@@ -42,6 +42,7 @@ import {
 } from "@momo/core/features/inbox/mailbox";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
   applyFollowedThreadShareToCache,
@@ -243,6 +244,7 @@ function useStaleListReread(args: {
 export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox {
   const { workspaceId } = useSession();
   const context = useFeedContext();
+  const formatMessage = useFormatMessage();
   const tasksProvided = isSurfaceProvided("approvals");
   const needsAction = useNeedsAction(tasksProvided);
   const surface = useInboxSurface();
@@ -290,6 +292,7 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
         const unresolved = resolved === item.channel.id.slice(0, 8);
         out.push(
           serverEntry(item, {
+            formatMessage,
             channelLabel:
               unresolved && item.channel.name !== null
                 ? `#${item.channel.name}`
@@ -304,7 +307,7 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
     }
     return out;
     // 시각 라벨은 데이터가 바뀔 때 다시 그려진다(now는 의존에 넣지 않는다).
-  }, [query.data, context, readStates.byChannel]);
+  }, [query.data, context, readStates.byChannel, formatMessage]);
 
   // 목록은 안 읽음이라는데 읽음 위치는 이미 지난 항목: 목록이 위치 전진 전의 스냅샷이다. 점은 위 규칙이 이미 껐고, 서버가 센
   // 안 읽음 수에서는 이 항목들을 뺀다(같은 사실을 수에도 쓴다). 다시 읽으면 서버가 둘 다 맞게 돌려준다.
@@ -333,11 +336,11 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
 
   const entries = useMemo(() => {
     const tasks = needsAction.items
-      .map((item) => taskEntry(item, Date.now()))
+      .map((item) => taskEntry(formatMessage, item, Date.now()))
       .filter((entry): entry is MailboxEntry => entry !== null);
     // 서버가 준 순서가 정본이다(최신순 키셋). 처리할 일만 맨 위에 둔다.
     return [...orderMailbox(tasks), ...serverEntries];
-  }, [needsAction.items, serverEntries]);
+  }, [needsAction.items, serverEntries, formatMessage]);
 
   const refetchServer = useCallback(() => {
     if (surface.isError) void surface.refetch();
@@ -383,6 +386,7 @@ function useComposedMailbox(
   const { session, workspaceId } = useSession();
   const selfId = session.member.id;
   const context = useFeedContext();
+  const formatMessage = useFormatMessage();
   const channelsQuery = useChannels(workspaceId);
   const readStates = useReadStates(workspaceId);
   const client = useQueryClient();
@@ -502,6 +506,7 @@ function useComposedMailbox(
       const messages = dmResults.pages[index];
       if (!messages) return null;
       return dmEntry({
+        formatMessage,
         channelId: channel.id,
         channelLabel: context.labelFor(channel.id),
         place: context.placeFor(channel.id),
@@ -514,6 +519,7 @@ function useComposedMailbox(
     });
     const mentions = mentionResults.messages.map((message) =>
       mentionEntry(
+        formatMessage,
         message,
         context.actorFor(message.authorMemberId),
         context.labelFor(message.channelId),
@@ -523,6 +529,7 @@ function useComposedMailbox(
     );
     const threads = roots.map((root, index) =>
       threadEntry({
+        formatMessage,
         root,
         channelLabel: context.labelFor(root.channelId),
         place: context.placeFor(root.channelId),
@@ -533,7 +540,7 @@ function useComposedMailbox(
         nowMs,
       })
     );
-    const tasks = needsAction.items.map((item) => taskEntry(item, nowMs));
+    const tasks = needsAction.items.map((item) => taskEntry(formatMessage, item, nowMs));
     return composeMailbox({
       dms,
       mentions,
@@ -556,6 +563,7 @@ function useComposedMailbox(
     context,
     stateOf,
     selfId,
+    formatMessage,
   ]);
 
   // 시도한 원천이 전부 실패했을 때만 장애다. 하나라도 답했으면 그만큼을 그린다.

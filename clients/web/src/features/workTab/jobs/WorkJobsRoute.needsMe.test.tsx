@@ -22,6 +22,12 @@ import { approvalRowControl, awaitedApprovalId } from "@/features/inbox/approval
 import { resetRunProgress, startRunProgress } from "@/features/agents/agentRunProgressStore";
 import { resetSettledApprovalsForTest } from "@/features/timeline/settledApprovals";
 import { CH_AGENT_LAB, CH_WORKBENCH, ME, WS, agentRow, runRow, sharedRow } from "../teamBoard/teamBoardFixtures";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // 「작업 · 내 작업」의 「응답 필요」 구간(#5640, ADR-0202 D1·D5, ADR-0188 D5)을 실제 컴포넌트·훅으로 잰다. 네트워크 경계만 바꾼다:
 // 보드 읽기(`fetchWorkJobs`)는 #5639 계약을 흉내 내는 가짜 서버(주인이 `include=jobs`로 읽을 때만 내 맥 세션 `waiting`), 승인 원장
@@ -302,7 +308,7 @@ describe("「응답 필요」 구간: run 줄은 인박스 배지와 같은 원�
       .filter(
         (a) =>
           needsMeFrom({
-            approvalItems: [approvalItem(a, { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now())],
+            approvalItems: [approvalItem(koCopy, a, { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now())],
             paneEntries: [],
             unreadMentions: 0,
             desktop: false,
@@ -536,7 +542,7 @@ describe("결과 칸의 그 자리 결정: 인박스와 같은 판정·같은 �
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(2)]));
     // 인박스의 판정 그대로: 행마다 `approvalRowControl`이 id를 실은 컨트롤(`decide`·`open`)을 준 승인의 run.
     const inbox = ledger
-      .map((a) => approvalItem(a, { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now()))
+      .map((a) => approvalItem(koCopy, a, { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now()))
       .filter((item) => awaitedApprovalId(approvalRowControl(item, { offline: false })) !== null)
       .map((item) => item.runId);
     const withControls = screen
@@ -1244,7 +1250,7 @@ describe("다른 승인의 문장은 이 단추 위에 서지 않는다 (#5640 �
           .getAllByTestId("work-job-approval-summary")[0]!.textContent;
       await waitFor(() => expect(summaryOf(R(8))).toBe("#launch 채널에 공지를 올려도 될까요?"));
       expect(summaryOf(R(1))).not.toContain("앞선 승인의 문장");
-      expect(summaryOf(R(1))).toBe(approvalItem(approval({ id: A(1), runId: R(1) }), { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now()).predicate);
+      expect(summaryOf(R(1))).toBe(approvalItem(koCopy, approval({ id: A(1), runId: R(1) }), { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now()).predicate);
     } finally {
       stop();
     }

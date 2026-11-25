@@ -48,6 +48,7 @@ import {
   useTeamBoardRail,
 } from "./useTeamBoard";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // Reading this as: 「팀 작업」 보드 for internal team users on web+Tauri, density 7/10,
 // motion 0/10.
 //
@@ -480,6 +481,7 @@ function BoardRow({
   onOpen: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const where = whereLabel(item);
   const latestStage = item.stages.length > 0 ? item.stages[item.stages.length - 1] : null;
   // 에이전트가 알린 PR만, 검증된 https 주소일 때만 링크가 된다. 줄 전체가 단추라서(안에
@@ -546,7 +548,7 @@ function BoardRow({
           <StateChip item={item} />
         </span>
         <span className="text-meta text-ink-muted" data-col="when">
-          {relativeLabel(item.lastActivityAt * 1000, nowMs)}
+          {relativeLabel(formatMessage, item.lastActivityAt * 1000, nowMs)}
         </span>
         <span className="truncate text-meta text-ink-muted" data-col="channel">
           {channelLabel(item)}

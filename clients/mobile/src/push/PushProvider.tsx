@@ -16,7 +16,7 @@ import {
 } from 'expo-notifications';
 
 import {useSession} from '../session/useSession';
-import {getAccessToken, getPersistedSession, subscribeSession} from '../storage/secureSession';
+import {getAccessToken, subscribeSession} from '../storage/secureSession';
 import {absoluteApiBase} from '../storage/serverBase';
 import {registerPushCategories} from './categories';
 import {useFormatMessage} from '../i18n/useFormatMessage';
@@ -24,10 +24,10 @@ import {
   apnsEnvironment,
   keychainAccessGroup,
   nativeApprovalHandlerAttached,
-  nativeReplyHandlerAttached,
+  nativeQueuedReplyStore,
 } from './native';
 import {PUSH_ACTION} from './contract';
-import {drainQueuedReplies} from './queuedReplies';
+import {drainQueuedReplies, signedInDrainContext} from './queuedReplies';
 import {
   askPushPermission,
   fetchApnsToken,
@@ -441,17 +441,13 @@ export default function PushProvider({
   formatMessageRef.current = formatMessage;
   const drainReplies = useCallback(() => {
     const format = formatMessageRef.current;
-    void drainQueuedReplies({
-      workspaceId,
-      memberId,
-      isCurrent: () =>
-        getPersistedSession()?.member.id.toLowerCase() === memberId.toLowerCase(),
-      copy: {
+    void drainQueuedReplies(
+      signedInDrainContext(workspaceId, memberId, {
         drafted: format('mobile.pushReply.drafted'),
         notSentTitle: format('mobile.pushReply.notSentTitle'),
         notSentBody: format('mobile.pushReply.notSentBody'),
-      },
-    });
+      }),
+    );
   }, [workspaceId, memberId]);
 
   useEffect(() => {
@@ -512,10 +508,11 @@ export default function PushProvider({
   useEffect(() => {
     const subscription = addNotificationResponseReceivedListener(response => {
       deliverTap(response);
-      // 처리기가 이 답장을 이미 목록에 남겼다(같은 응답을 먼저 받는다). 보내기는 목록에서 한 번만.
+      // 처리기가 이 답장을 목록에 남겼을 수 있다(같은 응답을 먼저 받는다). 보내기는 목록에서 한 번만 — 남기지
+      // 못한 응답은 `handlePushResponse` 가 직접 보낸다(`nativeReplyOutcome`).
       if (
         response.actionIdentifier === PUSH_ACTION.quickReply &&
-        nativeReplyHandlerAttached()
+        nativeQueuedReplyStore() !== null
       ) {
         drainReplies();
       }

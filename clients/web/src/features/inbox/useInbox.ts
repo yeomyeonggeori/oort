@@ -35,6 +35,7 @@ import {
   serverSaysAbsent,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import type { ApprovalWait } from "@momo/core/features/agents/workingSignal";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   mailboxPlace,
   type MailboxPlace,
@@ -262,11 +263,13 @@ export function useNeedsAction(enabled: boolean): NeedsActionFeed {
   const progress = useSyncExternalStore(subscribeRunProgress, runProgressSnapshot, runProgressSnapshot);
   const query = useApprovalPage("pending", enabled);
 
+  const formatMessage = useFormatMessage();
   const items = useMemo(() => {
     const nowMs = Date.now();
     return orderFeed(
       (query.data ?? []).map((approval) =>
         approvalItem(
+          formatMessage,
           approval,
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
@@ -275,7 +278,7 @@ export function useNeedsAction(enabled: boolean): NeedsActionFeed {
         )
       )
     );
-  }, [query.data, context, progress]);
+  }, [query.data, context, progress, formatMessage]);
 
   return {
     items,
@@ -382,11 +385,13 @@ export function useMentions(enabled: boolean): Feed {
   const client = useQueryClient();
   const { results, readStates } = useMentionMessages(enabled);
 
+  const formatMessage = useFormatMessage();
   const items = useMemo(() => {
     const nowMs = Date.now();
     return orderFeed(
       results.messages.map((message) =>
         mentionItem(
+          formatMessage,
           message,
           context.actorFor(message.authorMemberId),
           context.labelFor(message.channelId),
@@ -394,7 +399,7 @@ export function useMentions(enabled: boolean): Feed {
         )
       )
     );
-  }, [results.messages, context]);
+  }, [results.messages, context, formatMessage]);
 
   const refetch = useCallback(() => {
     void readStates.refetch();
@@ -543,6 +548,7 @@ export function useAgentFeed(
   });
 
   const ownedBy = options.ownedBy;
+  const formatMessage = useFormatMessage();
   const items = useMemo(() => {
     const nowMs = Date.now();
     /** Owner attribution decides membership of the "my agents" tab (ADR-0131). */
@@ -557,6 +563,7 @@ export function useAgentFeed(
       if (!mine(approval.requestedBy)) continue;
       rows.push(
         approvalItem(
+          formatMessage,
           approval,
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
@@ -569,6 +576,7 @@ export function useAgentFeed(
       if (!mine(run.agentMemberId)) continue;
       rows.push(
         runItem(
+          formatMessage,
           run,
           context.actorFor(run.agentMemberId),
           context.labelFor(run.channelId),
@@ -577,7 +585,7 @@ export function useAgentFeed(
       );
     }
     return orderFeed(rows);
-  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, progress]);
+  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, progress, formatMessage]);
 
   const refetch = useCallback(() => {
     void client.invalidateQueries({ queryKey: ["approvals", workspaceId] });

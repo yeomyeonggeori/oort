@@ -193,7 +193,7 @@ export function DevToolsPage({
         ? DEV_TOOLS_CREATE_ON_COMPUTER
         : formatMessage(gate.message.key, gate.message.values as never);
   const rows =
-    list.data?.map(credential => devCredentialRow(formatMessage, credential, {now})) ?? null;
+    list.data?.map(credential => devCredentialRow(credential, {now, formatMessage})) ?? null;
 
   return (
     <View style={styles.page} testID="dev-tools-page">

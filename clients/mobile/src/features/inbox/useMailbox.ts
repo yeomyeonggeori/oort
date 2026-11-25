@@ -45,6 +45,7 @@ import {
   type Feed,
 } from './useInbox';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 인박스 「전체」 목록의 원천, 폰판 (#3663 → #3684, ADR-0199). 웹 `useMailbox.ts`와
 // **같은 원천·같은 판별·같은 core 모델**이다.
@@ -127,6 +128,7 @@ export function useMailbox(
   enabled: boolean,
   filter: MailboxFilter = 'all',
 ): Mailbox {
+  const formatMessage = useFormatMessage();
   const {workspaceId} = useSession();
   const context = useFeedContext();
   const tasksProvided = isSurfaceProvided('approvals');
@@ -168,7 +170,7 @@ export function useMailbox(
 
   const entries = useMemo(() => {
     const tasks = needsAction.items
-      .map(item => taskEntry(item, nowMs))
+      .map(item => taskEntry(formatMessage, item, nowMs))
       .filter((entry): entry is MailboxEntry => entry !== null);
     const server: MailboxEntry[] = [];
     for (const page of query.data?.pages ?? []) {
@@ -177,6 +179,7 @@ export function useMailbox(
         const unresolved = resolved === item.channel.id.slice(0, 8);
         server.push(
           serverEntry(item, {
+            formatMessage,
             channelLabel:
               unresolved && item.channel.name !== null
                 ? `#${item.channel.name}`
@@ -192,7 +195,7 @@ export function useMailbox(
     }
     // 서버가 준 순서가 정본이다. 처리할 일만 맨 위에 둔다.
     return [...orderMailbox(tasks), ...server];
-  }, [needsAction.items, query.data, context, nowMs, readStates.byChannel]);
+  }, [needsAction.items, query.data, context, nowMs, readStates.byChannel, formatMessage]);
 
   const refetch = useCallback((): Promise<unknown> => {
     return Promise.all([
@@ -258,6 +261,7 @@ function useComposedMailbox(
   needsAction: Feed,
   tasksProvided: boolean,
 ): Mailbox {
+  const formatMessage = useFormatMessage();
   const {member, workspaceId} = useSession();
   const selfId = member.id;
   const context = useFeedContext();
@@ -380,7 +384,8 @@ function useComposedMailbox(
     const dms = dmChannels.map((channel, index) => {
       const messages = dmResults.pages[index];
       if (!messages) return null;
-      return dmEntry({
+      return dmEntry({ formatMessage,
+
         channelId: channel.id,
         channelLabel: context.labelFor(channel.id),
         place: context.placeFor(channel.id),
@@ -393,6 +398,7 @@ function useComposedMailbox(
     });
     const mentions = mentionResults.messages.map(message =>
       mentionEntry(
+        formatMessage,
         message,
         context.actorFor(message.authorMemberId),
         context.labelFor(message.channelId),
@@ -401,7 +407,8 @@ function useComposedMailbox(
       ),
     );
     const threads = roots.map((root, index) =>
-      threadEntry({
+      threadEntry({ formatMessage,
+
         root,
         channelLabel: context.labelFor(root.channelId),
         place: context.placeFor(root.channelId),
@@ -412,7 +419,7 @@ function useComposedMailbox(
         nowMs,
       }),
     );
-    const tasks = needsAction.items.map(item => taskEntry(item, nowMs));
+    const tasks = needsAction.items.map(item => taskEntry(formatMessage, item, nowMs));
     return composeMailbox({
       dms,
       mentions,
@@ -434,6 +441,7 @@ function useComposedMailbox(
     stateOf,
     selfId,
     nowMs,
+    formatMessage,
   ]);
 
   const sources = [

@@ -30,26 +30,28 @@ import {
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
   channelScopeRefusalCopy,
-  ESCALATE_TO_WORKSPACE_DETAIL,
-  ESCALATE_TO_WORKSPACE_LABEL,
+  ESCALATE_TO_WORKSPACE_DETAIL_KEY,
+  ESCALATE_TO_WORKSPACE_LABEL_KEY,
   isChannelScopeRefusal,
   leadsWithEllipsis,
   trailsWithEllipsis,
   noResultsCopy,
-  NO_RESULTS_SCOPE_NOTE,
+  NO_RESULTS_SCOPE_NOTE_KEY,
   parseSearchScope,
   searchPlaceholder,
   searchScopeParams,
   searchScopeTabs,
   SEARCH_CHANNEL_PARAM,
   SEARCH_SCOPE_PARAM,
-  SHORT_QUERY_HINT,
+  SEARCH_MIN_CHARS,
+  SHORT_QUERY_HINT_KEY,
   snippetSegments,
   type SearchChannelContext,
   type SearchScope,
 } from "@momo/core/features/search/searchModel";
 import { useMessageSearch } from "./useMessageSearch";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 메시지 검색 (goal B12 H5).
 //
@@ -88,6 +90,7 @@ function HitRow({
   isAgent: boolean;
   nowMs: number;
 }) {
+  const formatMessage = useFormatMessage();
   const segments = snippetSegments(hit.snippet, hit.matchOffset, query);
   return (
     <li>
@@ -115,7 +118,7 @@ function HitRow({
             {authorName}
           </span>
           <span className="text-timestamp text-ink-muted" data-numeric>
-            {relativeLabel(hit.createdAtMs, nowMs)}
+            {relativeLabel(formatMessage, hit.createdAtMs, nowMs)}
           </span>
         </span>
         <span className="break-words text-body text-ink">
@@ -146,6 +149,7 @@ function HitRow({
 }
 
 export function SearchRoute() {
+  const formatMessage = useFormatMessage();
   const { session, workspaceId } = useSession();
   // ⌘K 팔레트가 이름으로 못 찾았을 때 친 말을 그대로 들고 넘어온다. 넘겨받고도
   // 빈 상자를 보여주면 그 인계는 인계가 아니라 초기화다.
@@ -262,7 +266,7 @@ export function SearchRoute() {
             // 범위를 좁혀 뒀다면 안내문이 그 채널의 **이름**을 말한다. 칩은
             // 「이 채널에서」까지만 말할 수 있고(알약이 이름 길이를 따라
             // 출렁이면 안 되므로), 「이 채널」이 어느 채널인지는 여기서 답한다.
-            placeholder={searchPlaceholder(scope, scopedChannel)}
+            placeholder={searchPlaceholder(formatMessage, scope, scopedChannel)}
             className="ps-8"
             data-testid="search-input"
           />
@@ -304,7 +308,7 @@ export function SearchRoute() {
         )}
 
         {search.phase === "tooShort" && (
-          <EmptyInvite headline={SHORT_QUERY_HINT} testId="search-too-short" />
+          <EmptyInvite headline={formatMessage(SHORT_QUERY_HINT_KEY, { count: SEARCH_MIN_CHARS })} testId="search-too-short" />
         )}
 
         {(search.phase === "searching" ||
@@ -327,8 +331,8 @@ export function SearchRoute() {
               // (c) 나머지는 장애다.
               (isChannelScopeRefusal(search.error, scope, scopedChannel) ? (
                 <EmptyInvite
-                  headline={channelScopeRefusalCopy(scopedChannel).headline}
-                  detail={channelScopeRefusalCopy(scopedChannel).detail}
+                  headline={channelScopeRefusalCopy(formatMessage, scopedChannel).headline}
+                  detail={channelScopeRefusalCopy(formatMessage, scopedChannel).detail}
                   actions={
                     <Button
                       variant="outline"
@@ -336,7 +340,7 @@ export function SearchRoute() {
                       onClick={() => setScope("workspace")}
                       data-testid="search-scope-refused-escalate"
                     >
-                      {ESCALATE_TO_WORKSPACE_LABEL}
+                      {formatMessage(ESCALATE_TO_WORKSPACE_LABEL_KEY)}
                     </Button>
                   }
                   testId="search-scope-refused"
@@ -365,8 +369,8 @@ export function SearchRoute() {
               // 문장으로 뭉뚱그리면 앞의 경우에 사람이 검색을 그만둔다.
               (scope === "channel" && scopedChannel !== null ? (
                 <EmptyInvite
-                  headline={noResultsCopy(search.query, scope, scopedChannel)}
-                  detail={ESCALATE_TO_WORKSPACE_DETAIL}
+                  headline={noResultsCopy(formatMessage, search.query, scope, scopedChannel)}
+                  detail={formatMessage(ESCALATE_TO_WORKSPACE_DETAIL_KEY)}
                   // 승격은 **한 번의 누름**이다. 문구만 두고 컨트롤을 두지 않으면
                   // 「전체에서 찾아보세요」는 칩을 다시 찾아 누르라는 숙제이고,
                   // 이 표면은 방금 그 사람의 질의를 이미 들고 있다. 질의는 그대로
@@ -378,7 +382,7 @@ export function SearchRoute() {
                       onClick={() => setScope("workspace")}
                       data-testid="search-empty-escalate"
                     >
-                      {ESCALATE_TO_WORKSPACE_LABEL}
+                      {formatMessage(ESCALATE_TO_WORKSPACE_LABEL_KEY)}
                     </Button>
                   }
                   testId="search-empty"
@@ -386,8 +390,8 @@ export function SearchRoute() {
                 />
               ) : (
                 <EmptyInvite
-                  headline={noResultsCopy(search.query)}
-                  detail={NO_RESULTS_SCOPE_NOTE}
+                  headline={noResultsCopy(formatMessage, search.query)}
+                  detail={formatMessage(NO_RESULTS_SCOPE_NOTE_KEY)}
                   testId="search-empty"
                   dataAttrs={{ "data-scope": "workspace" }}
                 />

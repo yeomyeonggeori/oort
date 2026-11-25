@@ -369,14 +369,13 @@ export interface DevCredentialRow {
 
 /**
  * The row's labels are strings (the list joins several messages and a relative time), so this takes the
- * formatter. The last-used time still reads through the inbox's `relativeLabel`, which stays Korean until
- * the inbox cell moves it.
+ * formatter; the last-used time reads through the inbox's `relativeLabel` with the same formatter.
  */
 export function devCredentialRow(
-  formatMessage: LocaleService["formatMessage"],
   credential: DevCredential,
-  options: { now: number; memberName?: string }
+  options: { now: number; memberName?: string; formatMessage: LocaleService["formatMessage"] }
 ): DevCredentialRow {
+  const { formatMessage } = options;
   const scopeKind = devScopeKind(credential.scopes);
   const expiry = devExpiry(credential.expiresAtMs, options.now);
   const neverUsed = credential.lastUsedAtMs === undefined;
@@ -397,7 +396,7 @@ export function devCredentialRow(
     lastUsedLabel:
       credential.lastUsedAtMs === undefined
         ? formatMessage("auth.devAccessRow.neverUsed")
-        : relativeLabel(credential.lastUsedAtMs, options.now),
+        : relativeLabel(formatMessage, credential.lastUsedAtMs, options.now),
     neverUsed,
     expiryLabel: formatMessage(expiry.message.key, expiry.message.values as never),
     expired: expiry.expired,

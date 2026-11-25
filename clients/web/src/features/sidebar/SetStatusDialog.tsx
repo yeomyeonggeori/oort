@@ -10,22 +10,22 @@ import {
 import {
   clampStatusText,
   clearCustomStatusWrite,
-  CUSTOM_STATUS_CLEAR_LABEL,
-  CUSTOM_STATUS_CANCEL_LABEL,
-  CUSTOM_STATUS_DIALOG_DESCRIPTION,
-  CUSTOM_STATUS_DIALOG_TITLE,
-  CUSTOM_STATUS_EMOJI_CLEAR_LABEL,
-  CUSTOM_STATUS_EMOJI_LABEL,
-  CUSTOM_STATUS_EXPIRY_LABEL,
+  CUSTOM_STATUS_CLEAR_LABEL_KEY,
+  CUSTOM_STATUS_CANCEL_LABEL_KEY,
+  CUSTOM_STATUS_DIALOG_DESCRIPTION_KEY,
+  CUSTOM_STATUS_DIALOG_TITLE_KEY,
+  CUSTOM_STATUS_EMOJI_CLEAR_LABEL_KEY,
+  CUSTOM_STATUS_EMOJI_LABEL_KEY,
+  CUSTOM_STATUS_EXPIRY_LABEL_KEY,
   CUSTOM_STATUS_PRESETS,
-  CUSTOM_STATUS_SAVE_LABEL,
-  CUSTOM_STATUS_SAVING_LABEL,
-  CUSTOM_STATUS_TEXT_LABEL,
+  CUSTOM_STATUS_SAVE_LABEL_KEY,
+  CUSTOM_STATUS_SAVING_LABEL_KEY,
+  CUSTOM_STATUS_TEXT_LABEL_KEY,
   CUSTOM_STATUS_TEXT_MAX,
-  CUSTOM_STATUS_TEXT_PLACEHOLDER,
+  CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY,
   customExpiryAtMs,
-  customStatusClearFailureMessage,
-  customStatusFailureMessage,
+  customStatusClearFailureKey,
+  customStatusFailureKey,
   localDateInputValue,
   localTimeInputValue,
   STATUS_EXPIRY_OPTIONS,
@@ -53,6 +53,8 @@ import {
 } from "@/lib/entryDrafts";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import type { LocaleService } from "@momo/core/i18n";
 // Reading this as: settings dialog (sidebar profile card) for internal team
 // users on web+Tauri, density 7/10, motion 2/10.
 
@@ -62,8 +64,12 @@ const EXPIRY_PLACEHOLDER = "만료를 고르세요";
 // 지우는 하단 「상태 지우기」와 다르다(이쪽은 아직 저장 전인 초안만 비운다).
 const CUSTOM_STATUS_FIELD_CLEAR_LABEL = "입력한 내용 지우기";
 
-function expiryLabel(id: StatusExpiryChoice): string {
-  return STATUS_EXPIRY_OPTIONS.find((option) => option.id === id)?.label ?? "";
+function expiryLabel(
+  formatMessage: LocaleService["formatMessage"],
+  id: StatusExpiryChoice
+): string {
+  const found = STATUS_EXPIRY_OPTIONS.find((option) => option.id === id);
+  return found === undefined ? "" : formatMessage(found.labelKey);
 }
 
 function applyCustomToRoster(
@@ -149,6 +155,7 @@ export function SetStatusDialog({
   opener: DialogFocusTarget | null;
   nowMs?: number;
 }) {
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const offline = useOffline();
   const textId = useId();
@@ -292,7 +299,7 @@ export function SetStatusDialog({
     }
     setCustomError(null);
     if (emoji.trim() === "" && trimmed === "") {
-      void commit(clearCustomStatusWrite(declared), customStatusClearFailureMessage());
+      void commit(clearCustomStatusWrite(declared), formatMessage(customStatusClearFailureKey()));
       return;
     }
     void commit(
@@ -302,7 +309,7 @@ export function SetStatusDialog({
         statusText: trimmed === "" ? null : trimmed,
         statusExpiresAtMs: expiresAtMs,
       },
-      customStatusFailureMessage()
+      formatMessage(customStatusFailureKey())
     );
   };
 
@@ -320,8 +327,8 @@ export function SetStatusDialog({
           data-testid="set-status-dialog"
           className="gap-3 p-4"
         >
-          <DialogTitle>{CUSTOM_STATUS_DIALOG_TITLE}</DialogTitle>
-          <DialogDescription>{CUSTOM_STATUS_DIALOG_DESCRIPTION}</DialogDescription>
+          <DialogTitle>{formatMessage(CUSTOM_STATUS_DIALOG_TITLE_KEY)}</DialogTitle>
+          <DialogDescription>{formatMessage(CUSTOM_STATUS_DIALOG_DESCRIPTION_KEY)}</DialogDescription>
 
           {offline && (
             <InlineBanner
@@ -337,7 +344,7 @@ export function SetStatusDialog({
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex items-baseline justify-between gap-2">
               <label htmlFor={textId} className="text-meta text-ink-muted">
-                {CUSTOM_STATUS_TEXT_LABEL} (선택, {CUSTOM_STATUS_TEXT_MAX}자)
+                {formatMessage(CUSTOM_STATUS_TEXT_LABEL_KEY)} (선택, {CUSTOM_STATUS_TEXT_MAX}자)
               </label>
               {emoji ? (
                 <button
@@ -350,7 +357,7 @@ export function SetStatusDialog({
                     textRef.current?.focus();
                   }}
                 >
-                  {CUSTOM_STATUS_EMOJI_CLEAR_LABEL}
+                  {formatMessage(CUSTOM_STATUS_EMOJI_CLEAR_LABEL_KEY)}
                 </button>
               ) : null}
             </div>
@@ -362,7 +369,7 @@ export function SetStatusDialog({
                 ref={emojiButtonRef}
                 type="button"
                 disabled={busy}
-                aria-label={CUSTOM_STATUS_EMOJI_LABEL}
+                aria-label={formatMessage(CUSTOM_STATUS_EMOJI_LABEL_KEY)}
                 aria-haspopup="dialog"
                 aria-expanded={pickerOpen}
                 data-testid="set-status-emoji"
@@ -382,7 +389,7 @@ export function SetStatusDialog({
                 value={text}
                 maxLength={CUSTOM_STATUS_TEXT_MAX}
                 disabled={busy}
-                placeholder={CUSTOM_STATUS_TEXT_PLACEHOLDER}
+                placeholder={formatMessage(CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY)}
                 onChange={(event) => setText(event.target.value)}
                 className="h-full min-w-0 flex-1 bg-transparent px-1 text-label text-ink focus-visible:outline-none placeholder:text-ink-muted disabled:cursor-not-allowed disabled:opacity-50"
                 data-testid="set-status-text"
@@ -422,7 +429,7 @@ export function SetStatusDialog({
                   className="tap-target flex min-h-control items-center gap-3 rounded-md px-2 text-left text-label text-ink press-instant-fill hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => {
                     setEmoji(preset.emoji);
-                    setText(preset.label);
+                    setText(formatMessage(preset.labelKey));
                     setExpiry(preset.expiry);
                     textRef.current?.focus();
                   }}
@@ -430,9 +437,9 @@ export function SetStatusDialog({
                   <span aria-hidden="true" className="w-5 shrink-0 text-center">
                     {preset.emoji}
                   </span>
-                  <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{formatMessage(preset.labelKey)}</span>
                   <span className="shrink-0 text-meta text-ink-muted">
-                    {expiryLabel(preset.expiry)}
+                    {expiryLabel(formatMessage, preset.expiry)}
                   </span>
                 </button>
               ))}
@@ -445,7 +452,7 @@ export function SetStatusDialog({
               htmlFor={expiryId}
               className="text-meta text-ink-muted"
             >
-              {CUSTOM_STATUS_EXPIRY_LABEL}
+              {formatMessage(CUSTOM_STATUS_EXPIRY_LABEL_KEY)}
             </label>
             <ListboxSelect
               id={expiryId}
@@ -457,7 +464,7 @@ export function SetStatusDialog({
               placeholder={EXPIRY_PLACEHOLDER}
               options={STATUS_EXPIRY_OPTIONS.map((option) => ({
                 value: option.id,
-                label: option.label,
+                label: formatMessage(option.labelKey),
               }))}
               onValueChange={setExpiry}
             />
@@ -506,7 +513,7 @@ export function SetStatusDialog({
               data-testid="set-status-cancel"
               onClick={() => onOpenChange(false)}
             >
-              {CUSTOM_STATUS_CANCEL_LABEL}
+              {formatMessage(CUSTOM_STATUS_CANCEL_LABEL_KEY)}
             </Button>
             <Button
               type="button"
@@ -516,11 +523,11 @@ export function SetStatusDialog({
               onClick={() =>
                 void commit(
                   clearCustomStatusWrite(declared),
-                  customStatusClearFailureMessage()
+                  formatMessage(customStatusClearFailureKey())
                 )
               }
             >
-              {CUSTOM_STATUS_CLEAR_LABEL}
+              {formatMessage(CUSTOM_STATUS_CLEAR_LABEL_KEY)}
             </Button>
             <Button
               type="button"
@@ -529,8 +536,8 @@ export function SetStatusDialog({
               onClick={save}
             >
               {mutation.isPending
-                ? CUSTOM_STATUS_SAVING_LABEL
-                : CUSTOM_STATUS_SAVE_LABEL}
+                ? formatMessage(CUSTOM_STATUS_SAVING_LABEL_KEY)
+                : formatMessage(CUSTOM_STATUS_SAVE_LABEL_KEY)}
             </Button>
           </div>
         </DialogContent>

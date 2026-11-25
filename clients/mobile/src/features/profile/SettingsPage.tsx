@@ -1,17 +1,16 @@
 import {AgentMonthlyReport} from '../agents/AgentUsage';
 import {AGENT_USAGE_COPY} from '@momo/core/features/settings/agentUsage';
 import {
-  declaredStatusLabel,
-  effectivePresenceLabel,
-  PRESENCE_DND_HINT,
-  PRESENCE_MENU_LABEL,
+  declaredStatusLabelKey,
+  effectivePresenceLabelKey,
+  PRESENCE_DND_HINT_KEY,
+  PRESENCE_MENU_LABEL_KEY,
   PRESENCE_OPTIONS,
-  PRESENCE_WRITE_FAILED,
+  PRESENCE_WRITE_FAILED_KEY,
 } from '@momo/core/features/presence/model';
 import {
-  PAUSE_ACTIVE_NOTE,
-  PAUSE_UNTIL_CHANGE_ACTION,
-  PAUSE_UNTIL_NONE_ACTION_LABEL,
+  PAUSE_ACTIVE_NOTE_KEY,
+  PAUSE_UNTIL_NONE_ACTION_LABEL_KEY,
   pauseUntilLabel,
 } from '@momo/core/features/presence/pauseUntil';
 import {
@@ -23,7 +22,7 @@ import {
   PUSH_WORK_COMPLETE_LABEL,
 } from '@momo/core/features/settings/notificationRules';
 import {
-  CUSTOM_STATUS_MENU_LABEL,
+  CUSTOM_STATUS_MENU_LABEL_KEY,
   statusExpiryShortLabel,
   visibleCustomStatus,
 } from '@momo/core/features/presence/customStatus';
@@ -219,7 +218,7 @@ const SUB_PAGE_TOP = space.md;
 const SUB_PAGE_TITLE: Record<
   Exclude<
     SettingsSubPage,
-    'language' | 'releaseNotes' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE
+    'language' | 'releaseNotes' | 'linkPreview' | 'dndUntil' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE
   >,
   string
 > = {
@@ -229,7 +228,6 @@ const SUB_PAGE_TITLE: Record<
   devTools: DEV_TOOLS_TITLE,
   avatar: '프로필 사진',
   pauseUntil: NOTIFICATION_PAUSE_LABEL,
-  dndUntil: declaredStatusLabel('dnd'),
 };
 
 export function SettingsPage({
@@ -383,6 +381,7 @@ function SubPage({
   directory: Directory;
   onBack: () => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
@@ -397,7 +396,10 @@ function SubPage({
     () => scrollRef.current?.scrollTo({y: 0, animated: false}),
     [],
   );
-  const title = SUB_PAGE_TITLE[page];
+  const title =
+    page === 'dndUntil'
+      ? formatMessage(declaredStatusLabelKey('dnd'))
+      : SUB_PAGE_TITLE[page];
   // ‹ · VoiceOver escape · 「기한/사진을 고른 뒤 돌아가기」는 모두 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로
   // 물러난 뒤 `onBack`(층 밖에서는 곧바로 `onBack`).
   const closeLayer = useLayerClose();
@@ -614,7 +616,7 @@ export function SettingsContent({
     : !pause.ready
       ? formatMessage('settings.notifications.checking')
       : pause.paused
-        ? PAUSE_ACTIVE_NOTE
+        ? formatMessage(PAUSE_ACTIVE_NOTE_KEY)
         : NOTIFICATION_PAUSE_DESCRIPTION;
   const pushDetail = pushSwitchDetail(push);
   // 켜진 스위치는 한 번에 끄고, 꺼진 스위치는 기한을 고르는 장으로 간다(ADR-0204 D2).
@@ -684,12 +686,14 @@ export function SettingsContent({
             {presence ? (
               <View
                 accessible
-                accessibilityLabel={`내 상태: ${effectivePresenceLabel(presence)}`}
+                accessibilityLabel={formatMessage('presence.menu.statusLine', {
+                  status: formatMessage(effectivePresenceLabelKey(presence)),
+                })}
                 style={[styles.pill, pillTone(styles, presence)]}
                 testID="self-profile-presence">
                 <View style={[styles.pillDot, dotTone(styles, presence)]} />
                 <Text style={[styles.pillLabel, pillLabelTone(styles, presence)]}>
-                  {effectivePresenceLabel(presence)}
+                  {formatMessage(effectivePresenceLabelKey(presence))}
                 </Text>
               </View>
             ) : null}
@@ -737,11 +741,13 @@ export function SettingsContent({
       {self ? (
         <GroupCard testID="settings-status-card">
           <ListRow
-            title={CUSTOM_STATUS_MENU_LABEL}
+            title={formatMessage(CUSTOM_STATUS_MENU_LABEL_KEY)}
             value={customLine ?? '없음'}
             accessory="chevron"
             onPress={onOpenStatus}
-            accessibilityLabel={`${CUSTOM_STATUS_MENU_LABEL}, ${customLine ?? '없음'}`}
+            accessibilityLabel={formatMessage('presence.statusDialog.menuAria', {
+              line: customLine ?? '없음',
+            })}
             accessibilityHint="이모지와 짧은 글, 사라질 때를 고릅니다."
             testID="profile-status-row"
           />
@@ -753,23 +759,23 @@ export function SettingsContent({
           r1 H1). 상태의 색은 머리의 알약이 말하고, 고른 줄은 강조색·굵게·✓ 세 신호가 말한다. */}
       {declared ? (
         <SettingsSection>
-          <View accessibilityRole="radiogroup" accessibilityLabel={PRESENCE_MENU_LABEL}>
-            <GroupCard label={PRESENCE_MENU_LABEL} testID="settings-presence-card">
+          <View accessibilityRole="radiogroup" accessibilityLabel={formatMessage(PRESENCE_MENU_LABEL_KEY)}>
+            <GroupCard label={formatMessage(PRESENCE_MENU_LABEL_KEY)} testID="settings-presence-card">
               {PRESENCE_OPTIONS.map(status => {
                 const selected = status === declared;
-                const label = declaredStatusLabel(status);
+                const label = formatMessage(declaredStatusLabelKey(status));
                 return (
                   <ChoiceRow
                     key={status}
                     title={label}
-                    detail={status === 'dnd' ? PRESENCE_DND_HINT : undefined}
+                    detail={status === 'dnd' ? formatMessage(PRESENCE_DND_HINT_KEY) : undefined}
                     selected={selected}
                     disabled={setPresence.isPending && !selected}
                     onPress={() => choosePresence(status)}
                     accessibilityLabel={label}
                     accessibilityHint={
                       status === 'dnd'
-                        ? `${PRESENCE_DND_HINT} 누르면 기한을 골라요.`
+                        ? formatMessage('presence.dnd.hintPick')
                         : undefined
                     }
                     testID={`presence-option-${status}`}
@@ -783,8 +789,10 @@ export function SettingsContent({
                 <ListRow
                   title={
                     self?.dndUntilMs === undefined
-                      ? PAUSE_UNTIL_NONE_ACTION_LABEL
-                      : `${pauseUntilLabel(self.dndUntilMs, now)} · ${PAUSE_UNTIL_CHANGE_ACTION}`
+                      ? formatMessage(PAUSE_UNTIL_NONE_ACTION_LABEL_KEY)
+                      : formatMessage('presence.pauseUntil.labelWithChange', {
+                          label: pauseUntilLabel(self.dndUntilMs, now),
+                        })
                   }
                   accessory="chevron"
                   onPress={onOpenDndUntil}
@@ -796,7 +804,7 @@ export function SettingsContent({
           </View>
           {setPresence.isError ? (
             <SettingsNote tone="danger" testID="presence-failure">
-              {PRESENCE_WRITE_FAILED}
+              {formatMessage(PRESENCE_WRITE_FAILED_KEY)}
             </SettingsNote>
           ) : null}
         </SettingsSection>
@@ -912,8 +920,10 @@ export function SettingsContent({
             <ListRow
               title={
                 pause.untilMs === undefined
-                  ? PAUSE_UNTIL_NONE_ACTION_LABEL
-                  : `${pauseUntilLabel(pause.untilMs, now)} · ${PAUSE_UNTIL_CHANGE_ACTION}`
+                  ? formatMessage(PAUSE_UNTIL_NONE_ACTION_LABEL_KEY)
+                  : formatMessage('presence.pauseUntil.labelWithChange', {
+                      label: pauseUntilLabel(pause.untilMs, now),
+                    })
               }
               accessory="chevron"
               onPress={onOpenPauseUntil}

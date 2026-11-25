@@ -64,6 +64,7 @@ function DirectorySkeleton({ rows = 6 }: { rows?: number }) {
 }
 
 export function DirectoryRoute() {
+  const formatMessage = useFormatMessage();
   const { session, workspaceId } = useSession();
   const t = useFormatMessage();
   const rosterQuery = useDirectory(workspaceId);
@@ -103,7 +104,7 @@ export function DirectoryRoute() {
     pending: rosterQuery.isPending,
     failed: rosterQuery.error !== null,
   };
-  const count = countLabel(groups, roster);
+  const count = countLabel(formatMessage, groups, roster);
 
   const offline = useOffline();
   // The query as the person typed it, only stripped of the spaces around it.

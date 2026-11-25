@@ -5710,6 +5710,72 @@ export const catalog: MessageCatalog = {
       "value": "Session"
     }
   ],
+  "directory.count.summary": [
+    {
+      "type": 6,
+      "value": "people",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 6,
+      "value": "agents",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " agent"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " agents"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "directory.lifecycle.cancel": [
     {
       "type": 0,
@@ -6004,6 +6070,92 @@ export const catalog: MessageCatalog = {
       "value": " role see this"
     }
   ],
+  "directory.memberRow.agent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "directory.memberRow.agentOwned": [
+    {
+      "type": 0,
+      "value": "Agent, managed by "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    }
+  ],
+  "directory.memberRow.openDm": [
+    {
+      "type": 1,
+      "value": "parts"
+    },
+    {
+      "type": 0,
+      "value": ", open direct message"
+    }
+  ],
+  "directory.openDm.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't open a direct message with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Try again."
+    }
+  ],
+  "directory.openDm.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to open direct messages in this workspace. Ask a workspace admin."
+    }
+  ],
+  "directory.openDm.network": [
+    {
+      "type": 0,
+      "value": "Couldn't open the conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.openDm.notActive": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is not an active member of this workspace. Refresh the directory and try again."
+    }
+  ],
+  "directory.openDm.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.openDm.self": [
+    {
+      "type": 0,
+      "value": "You can't open a direct message with yourself."
+    }
+  ],
   "directory.profile.close": [
     {
       "type": 0,
@@ -6152,6 +6304,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Routing settings"
+    }
+  ],
+  "directory.profile.sheetInactive": [
+    {
+      "type": 0,
+      "value": "This member's status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "directory.profile.title": [
@@ -6350,6 +6516,94 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Choose a role"
+    }
+  ],
+  "directory.roleChange.adminGrant": [
+    {
+      "type": 0,
+      "value": "Admins can't grant the admin or owner role."
+    }
+  ],
+  "directory.roleChange.equalOrHigher": [
+    {
+      "type": 0,
+      "value": "You can't change a member with an equal or higher role."
+    }
+  ],
+  "directory.roleChange.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't change the role. Try again."
+    }
+  ],
+  "directory.roleChange.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to change roles in this workspace."
+    }
+  ],
+  "directory.roleChange.invalid": [
+    {
+      "type": 0,
+      "value": "This role can't be set. Pick another role and try again."
+    }
+  ],
+  "directory.roleChange.lastOwner": [
+    {
+      "type": 0,
+      "value": "The last owner's role can't be lowered. Make another member an owner first, then try again."
+    }
+  ],
+  "directory.roleChange.network": [
+    {
+      "type": 0,
+      "value": "Couldn't change the role. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.roleChange.notFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find this member in the directory. Refresh the directory and try again."
+    }
+  ],
+  "directory.roleChange.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.roleChange.self": [
+    {
+      "type": 0,
+      "value": "You can't change your own role."
+    }
+  ],
+  "directory.status.deleted": [
+    {
+      "type": 0,
+      "value": "Deleted"
+    }
+  ],
+  "directory.status.inactive": [
+    {
+      "type": 0,
+      "value": "Inactive"
+    }
+  ],
+  "directory.status.invited": [
+    {
+      "type": 0,
+      "value": "Invited"
+    }
+  ],
+  "directory.status.suspended": [
+    {
+      "type": 0,
+      "value": "Suspended"
     }
   ],
   "expressions.add.adminsOnly": [
@@ -8680,10 +8934,568 @@ export const catalog: MessageCatalog = {
       "value": "Waiting for participants"
     }
   ],
+  "inbox.actionType.fileWriteReindex": [
+    {
+      "type": 0,
+      "value": "Write files and reindex"
+    }
+  ],
+  "inbox.actionType.messageSend": [
+    {
+      "type": 0,
+      "value": "Send message"
+    }
+  ],
+  "inbox.actionType.workExec": [
+    {
+      "type": 0,
+      "value": "Run command"
+    }
+  ],
+  "inbox.actionType.workSpawn": [
+    {
+      "type": 0,
+      "value": "Run task"
+    }
+  ],
+  "inbox.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "inbox.activity.filterApprovals": [
+    {
+      "type": 0,
+      "value": "Approvals"
+    }
+  ],
+  "inbox.activity.filterDone": [
+    {
+      "type": 0,
+      "value": "Work finished"
+    }
+  ],
+  "inbox.activity.filterMine": [
+    {
+      "type": 0,
+      "value": "My agents"
+    }
+  ],
+  "inbox.activity.tabsLabel": [
+    {
+      "type": 0,
+      "value": "Activity filter"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
       "value": "Open"
+    }
+  ],
+  "inbox.deadline.daysLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Expires in "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Expires in "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "inbox.deadline.hoursLeft": [
+    {
+      "type": 0,
+      "value": "Expires in "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " hr"
+    }
+  ],
+  "inbox.deadline.minutesLeft": [
+    {
+      "type": 0,
+      "value": "Expires in "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "inbox.deadline.passed": [
+    {
+      "type": 0,
+      "value": "Past due"
+    }
+  ],
+  "inbox.feedApproval.irreversible": [
+    {
+      "type": 0,
+      "value": "Can't be undone"
+    }
+  ],
+  "inbox.feedApproval.predicate": [
+    {
+      "type": 0,
+      "value": "asked for permission: "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "inbox.feedMention.predicate": [
+    {
+      "type": 0,
+      "value": "mentioned you"
+    }
+  ],
+  "inbox.feedRun.outcomeFailed": [
+    {
+      "type": 0,
+      "value": "Failed"
+    }
+  ],
+  "inbox.feedRun.outcomePaused": [
+    {
+      "type": 0,
+      "value": "Paused"
+    }
+  ],
+  "inbox.feedRun.outcomeSucceeded": [
+    {
+      "type": 0,
+      "value": "Completed"
+    }
+  ],
+  "inbox.feedRun.outcomeTimedOut": [
+    {
+      "type": 0,
+      "value": "No response"
+    }
+  ],
+  "inbox.feedRun.predicateTitled": [
+    {
+      "type": 0,
+      "value": "ran the task \""
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "\""
+    }
+  ],
+  "inbox.feedRun.predicateUntitled": [
+    {
+      "type": 0,
+      "value": "ran a task"
+    }
+  ],
+  "inbox.feedRun.steps": [
+    {
+      "type": 0,
+      "value": "Step "
+    },
+    {
+      "type": 2,
+      "value": "step",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    }
+  ],
+  "inbox.filter.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "inbox.filter.mentions": [
+    {
+      "type": 0,
+      "value": "Mentions"
+    }
+  ],
+  "inbox.filter.needsAction": [
+    {
+      "type": 0,
+      "value": "Needs decision"
+    }
+  ],
+  "inbox.filter.tabsLabel": [
+    {
+      "type": 0,
+      "value": "Inbox filter"
+    }
+  ],
+  "inbox.filter.tabWithCount": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "inbox.mailbox.actorMe": [
+    {
+      "type": 0,
+      "value": "You"
+    }
+  ],
+  "inbox.mailbox.actorThread": [
+    {
+      "type": 0,
+      "value": "Thread"
+    }
+  ],
+  "inbox.mailbox.ariaLabel": [
+    {
+      "type": 5,
+      "value": "unread",
+      "options": {
+        "many": {
+          "value": [
+            {
+              "type": 2,
+              "value": "count",
+              "style": null
+            },
+            {
+              "type": 0,
+              "value": " unread, "
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Unread, "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "showKind",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "kind"
+            },
+            {
+              "type": 0,
+              "value": ", "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    }
+  ],
+  "inbox.mailbox.filterAll": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "inbox.mailbox.filterDm": [
+    {
+      "type": 0,
+      "value": "DMs"
+    }
+  ],
+  "inbox.mailbox.filterMention": [
+    {
+      "type": 0,
+      "value": "Mentions"
+    }
+  ],
+  "inbox.mailbox.filterReply": [
+    {
+      "type": 0,
+      "value": "Replies"
+    }
+  ],
+  "inbox.mailbox.filterTask": [
+    {
+      "type": 0,
+      "value": "To do"
+    }
+  ],
+  "inbox.mailbox.filterThread": [
+    {
+      "type": 0,
+      "value": "Threads"
+    }
+  ],
+  "inbox.mailbox.filterUnread": [
+    {
+      "type": 0,
+      "value": "Unread"
+    }
+  ],
+  "inbox.mailbox.previewMine": [
+    {
+      "type": 0,
+      "value": "You: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailbox.threadPreview": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " to your post: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailboxType.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.mention": [
+    {
+      "type": 0,
+      "value": "Mention · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.reply": [
+    {
+      "type": 0,
+      "value": "Reply · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.task": [
+    {
+      "type": 0,
+      "value": "To do · approval request"
+    }
+  ],
+  "inbox.mailboxType.thread": [
+    {
+      "type": 0,
+      "value": "Thread · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.preview.deleted": [
+    {
+      "type": 0,
+      "value": "This message was deleted."
+    }
+  ],
+  "inbox.preview.empty": [
+    {
+      "type": 0,
+      "value": "This message has no content."
+    }
+  ],
+  "inbox.reason.approvalPending": [
+    {
+      "type": 0,
+      "value": "An agent asked a person for permission before running, and you're a member of this channel."
+    }
+  ],
+  "inbox.reason.approvalSettled": [
+    {
+      "type": 0,
+      "value": "A decision recorded in the approval ledger."
+    }
+  ],
+  "inbox.reason.dm": [
+    {
+      "type": 0,
+      "value": "A message that came by DM."
+    }
+  ],
+  "inbox.reason.dmMine": [
+    {
+      "type": 0,
+      "value": "A DM where the last message is yours."
+    }
+  ],
+  "inbox.reason.mention": [
+    {
+      "type": 0,
+      "value": "You were mentioned in this message, and the server recorded it as a mention."
+    }
+  ],
+  "inbox.reason.mentionServer": [
+    {
+      "type": 0,
+      "value": "Someone mentioned you in a message."
+    }
+  ],
+  "inbox.reason.reply": [
+    {
+      "type": 0,
+      "value": "Someone replied to or quoted your post."
+    }
+  ],
+  "inbox.reason.run": [
+    {
+      "type": 0,
+      "value": "Record of an agent task run."
+    }
+  ],
+  "inbox.reason.threadNewReply": [
+    {
+      "type": 0,
+      "value": "Someone replied to your post."
+    }
+  ],
+  "inbox.reason.threadParticipant": [
+    {
+      "type": 0,
+      "value": "A new reply in a thread you are in."
     }
   ],
   "inbox.source.channelUnknown": [
@@ -8772,6 +9584,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Thread"
+    }
+  ],
+  "inbox.time.daysAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day ago"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days ago"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "inbox.time.hoursAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " hr ago"
+    }
+  ],
+  "inbox.time.justNow": [
+    {
+      "type": 0,
+      "value": "Just now"
+    }
+  ],
+  "inbox.time.minutesAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min ago"
+    }
+  ],
+  "inbox.toolAction.fallback": [
+    {
+      "type": 0,
+      "value": "Run agent tool"
+    }
+  ],
+  "inbox.toolAction.sessionEnd": [
+    {
+      "type": 0,
+      "value": "End work session"
+    }
+  ],
+  "inbox.toolAction.sessionStart": [
+    {
+      "type": 0,
+      "value": "Start work session"
+    }
+  ],
+  "inbox.workspaceAction.agentRename": [
+    {
+      "type": 0,
+      "value": "Rename agent"
+    }
+  ],
+  "inbox.workspaceAction.channelCreate": [
+    {
+      "type": 0,
+      "value": "Create channel"
+    }
+  ],
+  "inbox.workspaceAction.channelMemberAdd": [
+    {
+      "type": 0,
+      "value": "Add member to channel"
+    }
+  ],
+  "inbox.workspaceAction.fallback": [
+    {
+      "type": 0,
+      "value": "Workspace change"
+    }
+  ],
+  "inbox.workspaceAction.hostedChannelsGrant": [
+    {
+      "type": 0,
+      "value": "Allow more channels"
+    }
+  ],
+  "inbox.workspaceAction.inviteCreate": [
+    {
+      "type": 0,
+      "value": "Create invite link"
+    }
+  ],
+  "inbox.workspaceAction.memberAvatarSet": [
+    {
+      "type": 0,
+      "value": "Change my profile photo"
+    }
+  ],
+  "inbox.workspaceAction.memberDisplayNameSet": [
+    {
+      "type": 0,
+      "value": "Change my name"
+    }
+  ],
+  "inbox.workspaceAction.memoryUpdate": [
+    {
+      "type": 0,
+      "value": "Change team memory settings"
+    }
+  ],
+  "inbox.workspaceAction.pluginInstall": [
+    {
+      "type": 0,
+      "value": "Install app"
+    }
+  ],
+  "inbox.workspaceAction.teamAiRolesSet": [
+    {
+      "type": 0,
+      "value": "Turn assistant roles on or off"
+    }
+  ],
+  "inbox.workspaceAction.unfurlUpdate": [
+    {
+      "type": 0,
+      "value": "Change link preview settings"
+    }
+  ],
+  "inbox.workspaceAction.workspaceSettingsUpdate": [
+    {
+      "type": 0,
+      "value": "Change workspace settings"
+    }
+  ],
+  "inbox.workspaceAction.workTierUpdate": [
+    {
+      "type": 0,
+      "value": "Change workspace default resume policy"
     }
   ],
   "memberList.empty.detail": [
@@ -11052,6 +12026,498 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Create an agent with my subscription"
+    }
+  ],
+  "presence.dnd.hint": [
+    {
+      "type": 0,
+      "value": "Others can see this. Notifications are paused too."
+    }
+  ],
+  "presence.dnd.hintPick": [
+    {
+      "type": 0,
+      "value": "Others can see this. Notifications are paused too. Select to pick an end time."
+    }
+  ],
+  "presence.menu.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "trigger"
+    }
+  ],
+  "presence.menu.cardLabelCustom": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "trigger"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "custom"
+    }
+  ],
+  "presence.menu.label": [
+    {
+      "type": 0,
+      "value": "My status"
+    }
+  ],
+  "presence.menu.statusLine": [
+    {
+      "type": 0,
+      "value": "My status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "presence.menu.triggerLabel": [
+    {
+      "type": 0,
+      "value": "My status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (select to change)"
+    }
+  ],
+  "presence.pauseBanner.dndAction": [
+    {
+      "type": 0,
+      "value": "Turn off"
+    }
+  ],
+  "presence.pauseBanner.dndLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.dndTitle": [
+    {
+      "type": 0,
+      "value": "Your status is still Do not disturb"
+    }
+  ],
+  "presence.pauseBanner.pausedLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.pausedTitle": [
+    {
+      "type": 0,
+      "value": "Notifications paused"
+    }
+  ],
+  "presence.pauseBanner.resumeAction": [
+    {
+      "type": 0,
+      "value": "Turn back on"
+    }
+  ],
+  "presence.pausePreset.custom": [
+    {
+      "type": 0,
+      "value": "Pick a time"
+    }
+  ],
+  "presence.pausePreset.hour1": [
+    {
+      "type": 0,
+      "value": "1 hour"
+    }
+  ],
+  "presence.pausePreset.hour2": [
+    {
+      "type": 0,
+      "value": "2 hours"
+    }
+  ],
+  "presence.pausePreset.min30": [
+    {
+      "type": 0,
+      "value": "30 minutes"
+    }
+  ],
+  "presence.pausePreset.nextMonday": [
+    {
+      "type": 0,
+      "value": "Until next Monday 9:00 AM"
+    }
+  ],
+  "presence.pausePreset.tomorrow": [
+    {
+      "type": 0,
+      "value": "Until tomorrow 9:00 AM"
+    }
+  ],
+  "presence.pauseUntil.activeNote": [
+    {
+      "type": 0,
+      "value": "You won't get notifications from this workspace."
+    }
+  ],
+  "presence.pauseUntil.changeAction": [
+    {
+      "type": 0,
+      "value": "Change end time"
+    }
+  ],
+  "presence.pauseUntil.dndConfirm": [
+    {
+      "type": 0,
+      "value": "Turn on Do not disturb"
+    }
+  ],
+  "presence.pauseUntil.dndDescription": [
+    {
+      "type": 0,
+      "value": "Others can see this. Notifications are paused too. It turns off on its own afterward."
+    }
+  ],
+  "presence.pauseUntil.dndPresetHint": [
+    {
+      "type": 0,
+      "value": "Select to turn on Do not disturb until this time."
+    }
+  ],
+  "presence.pauseUntil.dndTitle": [
+    {
+      "type": 0,
+      "value": "Keep Do not disturb on until when?"
+    }
+  ],
+  "presence.pauseUntil.invalid": [
+    {
+      "type": 0,
+      "value": "Check the date and time."
+    }
+  ],
+  "presence.pauseUntil.labelWithChange": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " · Change end time"
+    }
+  ],
+  "presence.pauseUntil.none": [
+    {
+      "type": 0,
+      "value": "No end time"
+    }
+  ],
+  "presence.pauseUntil.noneActionLabel": [
+    {
+      "type": 0,
+      "value": "No end time · Set end time"
+    }
+  ],
+  "presence.pauseUntil.offlineReason": [
+    {
+      "type": 0,
+      "value": "You're offline, so this can't be changed right now."
+    }
+  ],
+  "presence.pauseUntil.optionWithHint": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "hint"
+    }
+  ],
+  "presence.pauseUntil.past": [
+    {
+      "type": 0,
+      "value": "That time has passed. Pick another time."
+    }
+  ],
+  "presence.pauseUntil.pauseConfirm": [
+    {
+      "type": 0,
+      "value": "Pause notifications"
+    }
+  ],
+  "presence.pauseUntil.pauseDescription": [
+    {
+      "type": 0,
+      "value": "You won't get notifications from this workspace until the time you pick. Mentions and approval requests are paused too. They resume on their own afterward."
+    }
+  ],
+  "presence.pauseUntil.pausePresetHint": [
+    {
+      "type": 0,
+      "value": "Select to pause notifications until this time."
+    }
+  ],
+  "presence.pauseUntil.pauseTitle": [
+    {
+      "type": 0,
+      "value": "Pause notifications until when?"
+    }
+  ],
+  "presence.pauseUntil.setAction": [
+    {
+      "type": 0,
+      "value": "Set end time"
+    }
+  ],
+  "presence.status.away": [
+    {
+      "type": 0,
+      "value": "Away"
+    }
+  ],
+  "presence.status.dnd": [
+    {
+      "type": 0,
+      "value": "Do not disturb"
+    }
+  ],
+  "presence.status.offline": [
+    {
+      "type": 0,
+      "value": "Offline"
+    }
+  ],
+  "presence.status.online": [
+    {
+      "type": 0,
+      "value": "Online"
+    }
+  ],
+  "presence.statusDialog.clear": [
+    {
+      "type": 0,
+      "value": "Clear status"
+    }
+  ],
+  "presence.statusDialog.clearFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't clear your status. Try again."
+    }
+  ],
+  "presence.statusDialog.closeLabel": [
+    {
+      "type": 0,
+      "value": "Close set status"
+    }
+  ],
+  "presence.statusDialog.description": [
+    {
+      "type": 0,
+      "value": "Share what you're doing with an emoji and a short note."
+    }
+  ],
+  "presence.statusDialog.emojiClear": [
+    {
+      "type": 0,
+      "value": "Clear emoji"
+    }
+  ],
+  "presence.statusDialog.emojiLabel": [
+    {
+      "type": 0,
+      "value": "Choose a status emoji"
+    }
+  ],
+  "presence.statusDialog.expiryLabel": [
+    {
+      "type": 0,
+      "value": "Expires"
+    }
+  ],
+  "presence.statusDialog.expiryRow": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "presence.statusDialog.menuAria": [
+    {
+      "type": 0,
+      "value": "Set status, "
+    },
+    {
+      "type": 1,
+      "value": "line"
+    }
+  ],
+  "presence.statusDialog.menuLabel": [
+    {
+      "type": 0,
+      "value": "Set status"
+    }
+  ],
+  "presence.statusDialog.save": [
+    {
+      "type": 0,
+      "value": "Save status"
+    }
+  ],
+  "presence.statusDialog.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save your status. Try again."
+    }
+  ],
+  "presence.statusDialog.saving": [
+    {
+      "type": 0,
+      "value": "Saving…"
+    }
+  ],
+  "presence.statusDialog.textLabel": [
+    {
+      "type": 0,
+      "value": "Status text"
+    }
+  ],
+  "presence.statusDialog.textPlaceholder": [
+    {
+      "type": 0,
+      "value": "What you're doing now"
+    }
+  ],
+  "presence.statusDialog.title": [
+    {
+      "type": 0,
+      "value": "Set status"
+    }
+  ],
+  "presence.statusExpiry.custom": [
+    {
+      "type": 0,
+      "value": "Pick a time"
+    }
+  ],
+  "presence.statusExpiry.hour1": [
+    {
+      "type": 0,
+      "value": "1 hour"
+    }
+  ],
+  "presence.statusExpiry.min30": [
+    {
+      "type": 0,
+      "value": "30 minutes"
+    }
+  ],
+  "presence.statusExpiry.none": [
+    {
+      "type": 0,
+      "value": "Don't clear"
+    }
+  ],
+  "presence.statusExpiry.today": [
+    {
+      "type": 0,
+      "value": "Until today"
+    }
+  ],
+  "presence.statusPreset.commute": [
+    {
+      "type": 0,
+      "value": "Commuting"
+    }
+  ],
+  "presence.statusPreset.meeting": [
+    {
+      "type": 0,
+      "value": "In a meeting"
+    }
+  ],
+  "presence.statusPreset.sick": [
+    {
+      "type": 0,
+      "value": "Out sick"
+    }
+  ],
+  "presence.statusPreset.vacation": [
+    {
+      "type": 0,
+      "value": "On vacation"
+    }
+  ],
+  "presence.statusPreset.wfh": [
+    {
+      "type": 0,
+      "value": "Working from home"
+    }
+  ],
+  "presence.write.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't change your status. Try again."
     }
   ],
   "readState.markUnread.action": [
@@ -13422,6 +14888,78 @@ export const catalog: MessageCatalog = {
       "value": "Open the thread this reply is in"
     }
   ],
+  "search.entry.thisChannel": [
+    {
+      "type": 0,
+      "value": "Search in this channel"
+    }
+  ],
+  "search.entry.thisChannelQuery": [
+    {
+      "type": 0,
+      "value": "Search in this channel for '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "'"
+    }
+  ],
+  "search.entry.thisDm": [
+    {
+      "type": 0,
+      "value": "Search in this conversation"
+    }
+  ],
+  "search.entry.thisDmQuery": [
+    {
+      "type": 0,
+      "value": "Search in this conversation for '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "'"
+    }
+  ],
+  "search.entry.workspace": [
+    {
+      "type": 0,
+      "value": "Search everywhere"
+    }
+  ],
+  "search.entry.workspaceQuery": [
+    {
+      "type": 0,
+      "value": "Search everywhere for '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "'"
+    }
+  ],
+  "search.escalate.detail": [
+    {
+      "type": 0,
+      "value": "It may be in another channel. You can search everywhere for the same words."
+    }
+  ],
+  "search.escalate.label": [
+    {
+      "type": 0,
+      "value": "Search everywhere"
+    }
+  ],
   "search.group.channels": [
     {
       "type": 0,
@@ -13460,6 +14998,21 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "search.hint.shortQuery": [
+    {
+      "type": 0,
+      "value": "Type at least "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters to start searching."
     }
   ],
   "search.input.clearLabel": [
@@ -13508,6 +15061,152 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "search.noResults.channelNamed": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.dmNamed": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.thisChannel": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in this channel."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.thisDm": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in this conversation."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.workspace": [
+    {
+      "type": 0,
+      "value": "Couldn't find any messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
     }
   ],
   "search.picker.agent": [
@@ -13568,6 +15267,44 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Where should we search?"
+    }
+  ],
+  "search.placeholder.channelNamed": [
+    {
+      "type": 0,
+      "value": "Search in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "search.placeholder.default": [
+    {
+      "type": 0,
+      "value": "Search message text"
+    }
+  ],
+  "search.placeholder.dmNamed": [
+    {
+      "type": 0,
+      "value": "Search your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "search.placeholder.thisChannel": [
+    {
+      "type": 0,
+      "value": "Search in this channel"
+    }
+  ],
+  "search.placeholder.thisDm": [
+    {
+      "type": 0,
+      "value": "Search in this conversation"
     }
   ],
   "search.recent.clearAll": [
@@ -13636,6 +15373,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "query"
+    }
+  ],
+  "search.refusal.detail": [
+    {
+      "type": 0,
+      "value": "You may have left it, it may be gone, or you may never have had access. You can search everywhere for the same words."
+    }
+  ],
+  "search.refusal.headlineChannel": [
+    {
+      "type": 0,
+      "value": "Messages in this channel can't be found."
+    }
+  ],
+  "search.refusal.headlineDm": [
+    {
+      "type": 0,
+      "value": "Messages in this conversation can't be found."
     }
   ],
   "search.row.agentLabel": [
@@ -13790,6 +15545,50 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Choose a conversation to search"
+    }
+  ],
+  "search.scope.tabsLabel": [
+    {
+      "type": 0,
+      "value": "Search scope"
+    }
+  ],
+  "search.scope.tabsLabelNamed": [
+    {
+      "type": 0,
+      "value": "Search scope ("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "search.scope.thisChannel": [
+    {
+      "type": 0,
+      "value": "In this channel"
+    }
+  ],
+  "search.scope.thisDm": [
+    {
+      "type": 0,
+      "value": "In this conversation"
+    }
+  ],
+  "search.scope.workspace": [
+    {
+      "type": 0,
+      "value": "Everywhere"
+    }
+  ],
+  "search.scopeNote.members": [
+    {
+      "type": 0,
+      "value": "Search only covers channels you belong to. If it was in another channel, join that channel and search again."
     }
   ],
   "search.state.errorDetail": [

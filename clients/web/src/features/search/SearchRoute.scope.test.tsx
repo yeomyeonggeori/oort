@@ -8,11 +8,23 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { Channel, MessageSearchHit, RosterMember } from "@momo/core/lib/api";
 import { ApiError } from "@momo/core/lib/api";
 import {
-  ESCALATE_TO_WORKSPACE_LABEL,
-  searchScopeLabel,
+  ESCALATE_TO_WORKSPACE_LABEL_KEY,
+  searchScopeLabelKey,
 } from "@momo/core/features/search/searchModel";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { SearchRoute } from "./SearchRoute";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // =============================================================================
 // 검색 범위 칩이 실제로 요청을 바꾸는가 (BT-3 / #1931).
@@ -186,7 +198,7 @@ async function mountAt(path: string): Promise<HTMLElement> {
     )
   );
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: tree }));
     await Promise.resolve();
   });
   await settle();
@@ -220,7 +232,8 @@ async function click(host: HTMLElement, testId: string): Promise<void> {
   await settle();
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -263,12 +276,14 @@ describe("범위 칩", () => {
     const host = await mountAt(`/search?q=배포&channel=${CH_DEPLOY}`);
     const chip = host.querySelector('[data-testid="search-scope-channel"]');
     expect(chip?.textContent).toContain(
-      searchScopeLabel("channel", {
-        channelId: CH_DEPLOY,
-        label: "배포",
-        isDirect: false,
-        peer: null,
-      })
+      koCopy(
+        searchScopeLabelKey("channel", {
+          channelId: CH_DEPLOY,
+          label: "배포",
+          isDirect: false,
+          peer: null,
+        })
+      )
     );
   });
 });
@@ -325,7 +340,7 @@ describe("빈 결과는 범위에 따라 다른 말을 한다", () => {
       '[data-testid="search-empty-escalate"]'
     ) as HTMLElement | null;
     expect(escalate).not.toBeNull();
-    expect(escalate!.textContent).toContain(ESCALATE_TO_WORKSPACE_LABEL);
+    expect(escalate!.textContent).toContain(koCopy(ESCALATE_TO_WORKSPACE_LABEL_KEY));
   });
 
   it("승격 버튼 한 번이 질의는 두고 범위만 넓힌다", async () => {
@@ -380,7 +395,7 @@ describe("볼 수 없는 채널의 404는 「기능 미제공」이 아니다", 
       '[data-testid="search-scope-refused-escalate"]'
     ) as HTMLElement | null;
     expect(escalate).not.toBeNull();
-    expect(escalate!.textContent).toContain(ESCALATE_TO_WORKSPACE_LABEL);
+    expect(escalate!.textContent).toContain(koCopy(ESCALATE_TO_WORKSPACE_LABEL_KEY));
 
     searchMessages.mockResolvedValue({ hits: [hit("m-1")] });
     await click(host, "search-scope-refused-escalate");

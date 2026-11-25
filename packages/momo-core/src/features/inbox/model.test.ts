@@ -21,6 +21,12 @@ import {
   type ActorNames,
 } from "./model";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 const NOW = 1_700_000_000_000;
 const SELF = "00000000-0000-7000-8000-000000000101";
 const AGENT = "00000000-0000-7000-8000-000000000103";
@@ -103,16 +109,16 @@ describe("mention decision", () => {
 
 describe("clock labels", () => {
   it("states elapsed time in the coarsest unit that still says something", () => {
-    expect(relativeLabel(NOW, NOW)).toBe("방금");
-    expect(relativeLabel(NOW - 12 * 60_000, NOW)).toBe("12분 전");
-    expect(relativeLabel(NOW - 3 * 3_600_000, NOW)).toBe("3시간 전");
-    expect(relativeLabel(NOW - 2 * 86_400_000, NOW)).toBe("2일 전");
+    expect(relativeLabel(ko, NOW, NOW)).toBe("방금");
+    expect(relativeLabel(ko, NOW - 12 * 60_000, NOW)).toBe("12분 전");
+    expect(relativeLabel(ko, NOW - 3 * 3_600_000, NOW)).toBe("3시간 전");
+    expect(relativeLabel(ko, NOW - 2 * 86_400_000, NOW)).toBe("2일 전");
   });
 
   it("states a deadline as time remaining, and says so once it is gone", () => {
-    expect(deadlineLabel(NOW + 3 * 60_000, NOW)).toBe("3분 후 만료");
-    expect(deadlineLabel(NOW + 2 * 3_600_000, NOW)).toBe("2시간 후 만료");
-    expect(deadlineLabel(NOW - 60_000, NOW)).toBe("기한 지남");
+    expect(deadlineLabel(ko, NOW + 3 * 60_000, NOW)).toBe("3분 후 만료");
+    expect(deadlineLabel(ko, NOW + 2 * 3_600_000, NOW)).toBe("2시간 후 만료");
+    expect(deadlineLabel(ko, NOW - 60_000, NOW)).toBe("기한 지남");
   });
 });
 
@@ -135,7 +141,7 @@ describe("agents tab half-ledger judgement", () => {
 
 describe("approval rows", () => {
   it("leaves the outcome null while nothing has been decided", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ expiresAtMs: NOW + 5 * 60_000 }),
       agent,
       "엔진",
@@ -153,7 +159,7 @@ describe("approval rows", () => {
   });
 
   it("shows the ledger decision and when it was made", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({
         status: "rejected",
         decidedAtMs: NOW - 30 * 60_000,
@@ -170,22 +176,22 @@ describe("approval rows", () => {
   });
 
   it("frames an unanswered request as expiry, never as an error", () => {
-    const item = approvalItem(approval({ status: "expired" }), agent, "엔진", NOW);
+    const item = approvalItem(ko, approval({ status: "expired" }), agent, "엔진", NOW);
     expect(item.outcome).toBe("만료");
     expect(item.outcomeTone).toBe("warn");
   });
 
   it("carries the server's decisionMode as it is, and leaves it absent when the server did not send one (#4763)", () => {
     for (const decisionMode of ["inline", "open"] as const) {
-      expect(approvalItem(approval({ decisionMode }), agent, "엔진", NOW).decisionMode).toBe(decisionMode);
+      expect(approvalItem(ko, approval({ decisionMode }), agent, "엔진", NOW).decisionMode).toBe(decisionMode);
     }
     // 옛 서버: 없음은 inline이 아니다. 행은 예전 그대로이고 값이 지어지지 않는다.
-    expect("decisionMode" in approvalItem(approval(), agent, "엔진", NOW)).toBe(false);
+    expect("decisionMode" in approvalItem(ko, approval(), agent, "엔진", NOW)).toBe(false);
   });
 
   it("reads all five server statuses and keeps the decide control to pending only (#4763)", () => {
     const rows = (["pending", "approved", "rejected", "expired", "cancelled"] as const).map((status) =>
-      approvalItem(approval({ status }), agent, "엔진", NOW)
+      approvalItem(ko, approval({ status }), agent, "엔진", NOW)
     );
     expect(rows.map((row) => row.outcome)).toEqual([null, "끝", "거부", "만료", "취소"]);
     expect(rows.map((row) => row.approvalId !== undefined)).toEqual([true, false, false, false, false]);
@@ -193,7 +199,7 @@ describe("approval rows", () => {
 
   it("does not claim an outcome, nor offer a decide control, for a status it does not know (#4763)", () => {
     // 서버가 새 상태를 더해 모르는 낱말이 오면 닫힌 다섯 중 하나로 우기지 않는다: 「생각 중」도 「승인 대기」도 아니다.
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ status: "escalated" as unknown as Approval["status"] }),
       agent,
       "엔진",
@@ -206,7 +212,7 @@ describe("approval rows", () => {
   });
 
   it("flags an irreversible action", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ isReversible: false }),
       agent,
       "엔진",
@@ -221,13 +227,13 @@ describe("approval rows", () => {
     // "모른다"이지 "되돌릴 수 있다"가 아니다. 이 프로젝션은 그 필드를 아예 싣지
     // 않으므로, 예전 규칙(`!== false`)에서는 **모든** 승인이 가역으로 그려졌다 —
     // 그런데 이 서버가 실행하는 유일한 툴은 비가역인 것이 선정 사유였다.
-    const item = approvalItem(approval(), agent, "엔진", NOW);
+    const item = approvalItem(ko, approval(), agent, "엔진", NOW);
     expect(item.reversible).toBe(false);
     expect(item.note).toBe("되돌릴 수 없음");
   });
 
   it("calls it reversible only when the server said so in so many words", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ isReversible: true }),
       agent,
       "엔진",
@@ -242,16 +248,16 @@ describe("approval rows", () => {
     // (`routes/approvals.rs:584` settle_expired). 화면이 "승인하면 …"이라고
     // 말하면 그것은 일어나지 않을 일이다.
     expect(
-      approvalItem(approval({ expiresAtMs: NOW - 60_000 }), agent, "엔진", NOW)
+      approvalItem(ko, approval({ expiresAtMs: NOW - 60_000 }), agent, "엔진", NOW)
         .deadlinePassed
     ).toBe(true);
     expect(
-      approvalItem(approval({ expiresAtMs: NOW + 60_000 }), agent, "엔진", NOW)
+      approvalItem(ko, approval({ expiresAtMs: NOW + 60_000 }), agent, "엔진", NOW)
         .deadlinePassed
     ).toBeUndefined();
     // 이미 끝난 결정에는 기한 이야기가 없다.
     expect(
-      approvalItem(
+      approvalItem(ko, 
         approval({ status: "approved", expiresAtMs: NOW - 60_000 }),
         agent,
         "엔진",
@@ -263,7 +269,7 @@ describe("approval rows", () => {
   it("never puts the ledger's own class name in front of a person", () => {
     // goal M-AP1 2R B2. 이 서버가 쓰는 action_type은 언제나 `tool_call`이고
     // (`tools.rs:82`), 무엇을 허가하는지는 payload의 툴 이름에만 있다.
-    const known = approvalItem(
+    const known = approvalItem(ko, 
       approval({ actionType: "tool_call", toolName: "work.session.end" }),
       agent,
       "엔진",
@@ -273,7 +279,7 @@ describe("approval rows", () => {
 
     // 모르는 툴: 지어내지 않고 원문 이름을 쓴다.
     expect(
-      approvalItem(
+      approvalItem(ko, 
         approval({ actionType: "tool_call", toolName: "repo.branch.delete" }),
         agent,
         "엔진",
@@ -282,7 +288,7 @@ describe("approval rows", () => {
     ).toBe("repo.branch.delete 허가를 요청했어요");
 
     // 이름조차 없으면 갈래를 우리말로. 어느 경우에도 `tool_call`은 안 나온다.
-    const nameless = approvalItem(
+    const nameless = approvalItem(ko, 
       approval({ actionType: "tool_call" }),
       agent,
       "엔진",
@@ -295,26 +301,26 @@ describe("approval rows", () => {
   });
 
   it("keeps the legacy Swift action vocabulary working", () => {
-    expect(approvalActionLabel("work.spawn")).toBe("작업 실행");
-    expect(approvalActionLabel("message.send")).toBe("메시지 전송");
+    expect(approvalActionLabel(ko, "work.spawn")).toBe("작업 실행");
+    expect(approvalActionLabel(ko, "message.send")).toBe("메시지 전송");
     // 툴 이름이 실려 있으면 그것이 더 구체적인 진실이다.
-    expect(approvalActionLabel("work.spawn", "work.session.end")).toBe(
+    expect(approvalActionLabel(ko, "work.spawn", "work.session.end")).toBe(
       "작업 세션 종료"
     );
     // 아무것도 모르면 원문 유지(정직 폴백).
-    expect(approvalActionLabel("deploy")).toBe("deploy");
+    expect(approvalActionLabel(ko, "deploy")).toBe("deploy");
   });
 
   it("has no timeline seq: the projection exposes a message id, not a seq", () => {
     expect(
-      approvalItem(approval({ requestMessageId: "abc" }), agent, "엔진", NOW).seq
+      approvalItem(ko, approval({ requestMessageId: "abc" }), agent, "엔진", NOW).seq
     ).toBeUndefined();
   });
 });
 
 describe("mention rows", () => {
   it("anchors on the seq of the message that named you", () => {
-    const item = mentionItem(
+    const item = mentionItem(ko, 
       message({ mention_member_ids: [SELF] }),
       human,
       "general",
@@ -338,7 +344,7 @@ describe("work run rows", () => {
   });
 
   it("says what the agent did and how it came out", () => {
-    const item = runItem(run(), agent, "agent-lab", NOW);
+    const item = runItem(ko, run(), agent, "agent-lab", NOW);
     expect(item.predicate).toBe('"릴레이 백프레셔 계측" 작업을 실행했습니다');
     expect(item.outcome).toBe("완료");
     expect(item.outcomeTone).toBe("ok");
@@ -347,40 +353,40 @@ describe("work run rows", () => {
   });
 
   it("calls silence stalled, not failed (ADR-0132)", () => {
-    const item = runItem(run({ status: "timed_out" }), agent, "agent-lab", NOW);
+    const item = runItem(ko, run({ status: "timed_out" }), agent, "agent-lab", NOW);
     expect(item.outcome).toBe("응답 없음");
     expect(item.outcomeTone).toBe("warn");
   });
 
   it("keeps a live run pending so it sorts to the top", () => {
-    expect(runItem(run({ status: "running" }), agent, "a", NOW).pending).toBe(
+    expect(runItem(ko, run({ status: "running" }), agent, "a", NOW).pending).toBe(
       true
     );
-    expect(runItem(run({ status: "running" }), agent, "a", NOW).outcome).toBeNull();
+    expect(runItem(ko, run({ status: "running" }), agent, "a", NOW).outcome).toBeNull();
   });
 });
 
 describe("ordering", () => {
   it("puts live rows first by soonest deadline, then settled rows newest first", () => {
-    const soon = approvalItem(
+    const soon = approvalItem(ko, 
       approval({ id: "a", expiresAtMs: NOW + 60_000 }),
       agent,
       "엔진",
       NOW
     );
-    const later = approvalItem(
+    const later = approvalItem(ko, 
       approval({ id: "b", expiresAtMs: NOW + 600_000 }),
       agent,
       "엔진",
       NOW
     );
-    const old = approvalItem(
+    const old = approvalItem(ko, 
       approval({ id: "c", status: "approved", decidedAtMs: NOW - 86_400_000 }),
       agent,
       "엔진",
       NOW
     );
-    const recent = approvalItem(
+    const recent = approvalItem(ko, 
       approval({ id: "d", status: "approved", decidedAtMs: NOW - 60_000 }),
       agent,
       "엔진",
@@ -395,8 +401,8 @@ describe("ordering", () => {
   });
 
   it("sorts a pending row with no recorded deadline last among pending rows", () => {
-    const noDeadline = approvalItem(approval({ id: "a" }), agent, "엔진", NOW);
-    const withDeadline = approvalItem(
+    const noDeadline = approvalItem(ko, approval({ id: "a" }), agent, "엔진", NOW);
+    const withDeadline = approvalItem(ko, 
       approval({ id: "b", expiresAtMs: NOW + 600_000 }),
       agent,
       "엔진",
@@ -409,8 +415,8 @@ describe("ordering", () => {
   });
 
   it("is a total order, so equal timestamps cannot shuffle between renders", () => {
-    const a = runItem(run({ id: "a" }), agent, "x", NOW);
-    const b = runItem(run({ id: "b" }), agent, "x", NOW);
+    const a = runItem(ko, run({ id: "a" }), agent, "x", NOW);
+    const b = runItem(ko, run({ id: "b" }), agent, "x", NOW);
     expect(orderFeed([b, a]).map((i) => i.key)).toEqual(["run:a", "run:b"]);
     expect(orderFeed([a, b]).map((i) => i.key)).toEqual(["run:a", "run:b"]);
   });
@@ -488,7 +494,7 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
       // ADR-0201 증보 v3 B3-T (#4964)
       ["team_ai.roles.set", "도우미 역할 켜고 끄기"],
     ] as const) {
-      const item = approvalItem(
+      const item = approvalItem(ko, 
         approval({ actionType: "workspace_action", workspaceActionId: id }),
         agent,
         "엔진",
@@ -500,7 +506,7 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
   });
 
   it("팀 기억 행동은 방향을 말하지 않는다 — 같은 id 가 멈춤과 재개를 둘 다 싣는다(ADR-0201 v2 H6-1)", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ actionType: "workspace_action", workspaceActionId: "workspace.memory.update" }),
       agent,
       "엔진",
@@ -512,14 +518,14 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
   });
 
   it("모르는 행동 id 는 지어내지 않고 갈래의 우리말로 떨어진다", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ actionType: "workspace_action", workspaceActionId: "constructor" }),
       agent,
       "엔진",
       NOW
     );
     expect(item.predicate).toBe("워크스페이스 변경 허가를 요청했어요");
-    const none = approvalItem(
+    const none = approvalItem(ko, 
       approval({ actionType: "workspace_action" }),
       agent,
       "엔진",
@@ -529,14 +535,14 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
   });
 
   it("카드 메시지 id 를 행에 싣는다 — 인박스 행이 그 카드로 간다", () => {
-    const item = approvalItem(
+    const item = approvalItem(ko, 
       approval({ requestMessageId: "0199aa11-2222-7000-8000-0000000000d1" }),
       agent,
       "엔진",
       NOW
     );
     expect(item.messageId).toBe("0199aa11-2222-7000-8000-0000000000d1");
-    expect(approvalItem(approval(), agent, "엔진", NOW).messageId).toBeUndefined();
+    expect(approvalItem(ko, approval(), agent, "엔진", NOW).messageId).toBeUndefined();
   });
 });
 
@@ -544,7 +550,7 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
 
 /** 서버 승인 목록의 한 행: 행동 승인(`workspace_action`)과 서버가 찍은 결정 자리. 전부 진짜 `approvalItem`을 태운다. */
 function actionRow(workspaceActionId: string | undefined, decisionMode?: "inline" | "open") {
-  return approvalItem(
+  return approvalItem(ko, 
     approval({
       actionType: "workspace_action",
       ...(workspaceActionId === undefined ? {} : { workspaceActionId }),
@@ -560,7 +566,7 @@ describe("approvalOpensOnCard (#5462)", () => {
   it("행에 행동 id 를 싣는다 — 서버 행이 이름 지어 준 것만, 지어내지 않는다", () => {
     expect(actionRow("expression.set.plan").workspaceActionId).toBe("expression.set.plan");
     // 행동 id 가 없는 승인(도구·스폰)에는 키 자체가 없다.
-    expect("workspaceActionId" in approvalItem(approval(), agent, "엔진", NOW)).toBe(false);
+    expect("workspaceActionId" in approvalItem(ko, approval(), agent, "엔진", NOW)).toBe(false);
   });
 
   it("닫힌 목록은 세트 행동 둘이고, 코어가 아는 두 상수와 글자까지 같다", () => {
@@ -588,7 +594,7 @@ describe("approvalOpensOnCard (#5462)", () => {
     }
     // 도구·스폰 승인(행동 id 없음, 서버가 호스트 고르기를 open 으로 찍는 `work.spawn`)도 같다.
     for (const mode of [undefined, "inline", "open"] as const) {
-      const spawn = approvalItem(approval({ ...(mode === undefined ? {} : { decisionMode: mode }) }), agent, "엔진", NOW);
+      const spawn = approvalItem(ko, approval({ ...(mode === undefined ? {} : { decisionMode: mode }) }), agent, "엔진", NOW);
       expect(approvalOpensOnCard(spawn), `work.spawn (서버 ${mode ?? "값 없음"})`).toBe(false);
     }
   });

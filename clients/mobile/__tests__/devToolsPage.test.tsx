@@ -1,18 +1,13 @@
-import {
-  parseDevCredential,
-  type DevAccessFailure,
-  type DevCredential,
-} from '@momo/core/features/auth/devAccess';
+import {parseDevCredential, type DevAccessFailure} from '@momo/core/features/auth/devAccess';
 import {
   DEV_NOTICES as DEV_NOTICE_MESSAGES,
   devAccessErrorMessage,
   devAccessGate as devAccessGateModel,
-  devCredentialRow as devCredentialRowModel,
+  devCredentialRow,
   type DevAccessAction,
   type DevMessage,
 } from '@momo/core/features/auth/devAccessModel';
 import {createLocaleService, resolveLocaleContext} from '@momo/core/i18n';
-import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
@@ -30,6 +25,12 @@ import {
 } from '../src/features/profile/DevToolsPage';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+
 
 // =============================================================================
 // #4663 설정 › 「명령줄·AI 도구」: 폰의 목록과 폐기.
@@ -229,12 +230,10 @@ const devAccessGate = (policy: Parameters<typeof devAccessGateModel>[0]) => {
   const gate = devAccessGateModel(policy);
   return {state: gate.state, text: t(gate.message)};
 };
-const devCredentialRow = (credential: DevCredential, options: {now: number}) =>
-  devCredentialRowModel(formatMessage, credential, options);
 const notice = (name: keyof typeof DEV_NOTICE_MESSAGES): string => t(DEV_NOTICE_MESSAGES[name]);
 
 /** 표본에서 코어 모델이 만든 한 줄(화면이 보여야 하는 값). */
-const rowOf = (wire: Wire) => devCredentialRow(parseDevCredential(wire), {now: Date.now()});
+const rowOf = (wire: Wire) => devCredentialRow(parseDevCredential(wire), {now: Date.now(), formatMessage: koCopy});
 const baseOf = (wire: Wire) => `dev-credential-${String(wire.id)}`;
 const revokeButton = (wire: Wire) => screen.getByTestId(`${baseOf(wire)}-revoke`);
 

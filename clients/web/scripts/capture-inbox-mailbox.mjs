@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
+import { withCaptureLocale } from "./capture-locale.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/inbox-mailbox");
@@ -196,7 +197,7 @@ function check(name, ok, detail = "") {
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 async function open(browser, origin, scheme, viewport, empty) {
-  const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" });
+  const context = await browser.newContext(withCaptureLocale({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block" }));
   await installRoutes(context, empty);
   const page = await context.newPage();
   await installRealtime(page);

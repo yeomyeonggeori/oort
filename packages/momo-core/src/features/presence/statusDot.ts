@@ -46,7 +46,12 @@ import {
   livenessView,
   type LivenessView,
 } from "../agents/liveness";
-import { declaredStatusLabel, effectivePresenceLabel } from "./model";
+import type { LocaleService } from "../../i18n/context";
+import { declaredStatusLabelKey, effectivePresenceLabelKey } from "./model";
+
+// 문구는 `i18n/catalogs/<언어>/presence.json`에 있다. 낱말이 들어간 점을 짓는 함수만 `formatMessage`를 첫 인자로 받는다.
+// (`macHostDot`의 두 낱말은 작업 세션 상태 모델이 글자로 읽어 가므로 작업 칸이 옮길 때 함께 옮긴다.)
+type FormatMessage = LocaleService["formatMessage"];
 
 export type StatusDotTone = "ok" | "warn" | "danger" | "muted";
 
@@ -57,9 +62,6 @@ export interface StatusDot {
   /** 낱말의 뜻 한 문장(에이전트 생존 판정만). 툴팁의 둘째 줄이다. */
   meaning?: string;
 }
-
-/** 생존 판정이 없는 에이전트가 호스트에 닿아 있을 때의 낱말. 새 DM 모달의 점과 같은 낱말이다. */
-export const AGENT_HOST_ONLINE_LABEL = "연결됨";
 
 /**
  * 에이전트 한 판정의 점 톤 - **아바타 점과 생존 칩이 같은 함수를 읽는다**(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음,
@@ -107,9 +109,13 @@ export function macHostDot(online: boolean): StatusDot {
 }
 
 /** 생존 판정이 없는 에이전트: 호스트에 닿아 있을 때만 점이다. */
-export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null {
+export function agentHostDot(
+  formatMessage: FormatMessage,
+  hostOnline: boolean | undefined
+): StatusDot | null {
+  // 호스트에 닿아 있을 때의 낱말은 새 DM 모달의 점과 같은 「연결됨」이다.
   return hostOnline === true
-    ? { tone: "ok", label: AGENT_HOST_ONLINE_LABEL }
+    ? { tone: "ok", label: formatMessage("common.state.connected") }
     : null;
 }
 
@@ -129,24 +135,25 @@ export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null 
  * 모르는 입력(`status` 없음)은 지금처럼 판정한다.
  */
 export function humanPresenceDot(
+  formatMessage: FormatMessage,
   member: Pick<RosterMember, "presenceStatus" | "dndUntilMs" | "online"> & { status?: RosterMember["status"] },
   nowMs: number
 ): StatusDot | null {
   if (member.status !== undefined && member.status !== "active") return null;
   if (member.presenceStatus === "away") {
-    return { tone: "warn", label: declaredStatusLabel("away") };
+    return { tone: "warn", label: formatMessage(declaredStatusLabelKey("away")) };
   }
   if (
     member.presenceStatus === "dnd" &&
     !(member.dndUntilMs !== undefined && member.dndUntilMs <= nowMs)
   ) {
-    return { tone: "danger", label: declaredStatusLabel("dnd") };
+    return { tone: "danger", label: formatMessage(declaredStatusLabelKey("dnd")) };
   }
   if (member.online === true) {
-    return { tone: "ok", label: effectivePresenceLabel("online") };
+    return { tone: "ok", label: formatMessage(effectivePresenceLabelKey("online")) };
   }
   if (member.online === false) {
-    return { tone: "muted", label: effectivePresenceLabel("offline") };
+    return { tone: "muted", label: formatMessage(effectivePresenceLabelKey("offline")) };
   }
   return null;
 }
@@ -192,6 +199,7 @@ export function withOwnConnection<T extends Pick<RosterMember, "id" | "online">>
  * `liveness`: 값 있음 / `null`(라벨 없음: 호스티드가 아님) / `undefined`(아직 모름). 사람에게는 쓰지 않는다.
  */
 export function dmPeerStatusDot(input: {
+  formatMessage: FormatMessage;
   member: (Pick<
     RosterMember,
     "kind" | "hostOnline" | "presenceStatus" | "dndUntilMs" | "online"
@@ -200,11 +208,11 @@ export function dmPeerStatusDot(input: {
   mayAct: boolean;
   nowMs: number;
 }): StatusDot | null {
-  const { member, liveness, mayAct, nowMs } = input;
+  const { formatMessage, member, liveness, mayAct, nowMs } = input;
   if (member === null) return null;
-  if (member.kind !== "agent") return humanPresenceDot(member, nowMs);
+  if (member.kind !== "agent") return humanPresenceDot(formatMessage, member, nowMs);
   if (liveness === undefined) return null;
-  if (liveness === null) return agentHostDot(member.hostOnline);
+  if (liveness === null) return agentHostDot(formatMessage, member.hostOnline);
   return agentLivenessDot(liveness, nowMs, mayAct);
 }
 
