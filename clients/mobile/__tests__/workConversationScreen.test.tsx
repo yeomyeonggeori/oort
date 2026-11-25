@@ -413,7 +413,7 @@ describe('작업 상세 「대화」 모드 (N3 #3595)', () => {
     instruct.mockResolvedValue({
       state: 'not_delivered',
       stage: 'server',
-      text: '맥이 꺼져 있어요',
+      message: {raw: '맥이 꺼져 있어요'},
       error: new Error('x'),
     });
     const rail = fakeRail();

@@ -1,5 +1,7 @@
 import { useHumanControlSigning, useResumeWorkSession } from "@/features/work/signedWork";
-import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { resumeFailureMessage } from "@momo/core/features/auth/signedControl";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -297,6 +299,7 @@ function ContinuationBlock({
     errorRef.current?.focus({ preventScroll: true });
   }, [error]);
 
+  const formatMessage = useFormatMessage();
   const takeOver = useCallback(
     async (run: WorkstreamRun, hostId: string) => {
       setPendingHostId(hostId);
@@ -328,12 +331,14 @@ function ContinuationBlock({
         // 세 가지 — 상태 변화 · `pool_exhausted` · `member_limit` — 에 전부
         // 「이력을 새로고침하세요」라고 답했다. 슬롯이 찬 사람에게 그것은 아무리
         // 반복해도 풀리지 않는 지시다.
-        setError(resumeFailureLine(cause, takeoverFailureCopy));
+        setError(
+          failureMessageText(formatMessage, resumeFailureMessage(cause, takeoverFailureCopy))
+        );
       } finally {
         setPendingHostId(null);
       }
     },
-    [queryClient, resume, workspaceId]
+    [formatMessage, queryClient, resume, workspaceId]
   );
 
   // 끝난 목표에는 이력을 기다릴 이유가 없다. 목표의 상태는 이 페이지가 이미

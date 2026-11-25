@@ -1,4 +1,6 @@
-import { CALL_NOT_DELIVERED } from "@momo/core/features/auth/personalAgentCall";
+import { CALL_NOT_DELIVERED_KEY } from "@momo/core/features/auth/personalAgentCall";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { previewFor, type PersonalCallSpec } from "@/features/work/personalAgentCalling";
@@ -16,6 +18,7 @@ export const CALL_RETRYING_LINE = "같은 요청을 다시 보내는 중이에�
 const ROW = "flex min-h-8 flex-wrap items-center gap-x-2 px-4 py-1 text-meta";
 
 export function PersonalCallPreview({ spec }: { spec: Pick<PersonalCallSpec, "agent" | "host" | "signer" | "audience"> }) {
+  const formatMessage = useFormatMessage();
   const preview = previewFor(spec);
   const readers = preview.audience === "channel" ? "이 채널 멤버가 요청과 답을 읽어요" : "이 대화 상대만 읽어요";
   return (
@@ -32,7 +35,9 @@ export function PersonalCallPreview({ spec }: { spec: Pick<PersonalCallSpec, "ag
           <span>{readers}</span>
         </>
       ) : (
-        <span data-testid="composer-call-blocked">{preview.blocked}</span>
+        <span data-testid="composer-call-blocked">
+          {preview.blocked === null ? null : failureMessageText(formatMessage, preview.blocked)}
+        </span>
       )}
     </p>
   );
@@ -47,6 +52,7 @@ export function PersonalCallNotice({
   onRetry: () => void;
   onDismiss: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { call } = notice;
   let text: string;
   let tone: "ok" | "warn";
@@ -56,11 +62,8 @@ export function PersonalCallNotice({
   } else if (call.state === "called") {
     text = call.replayed ? CALL_REPLAYED_LINE : CALL_SENT_LINE;
     tone = "ok";
-  } else if (call.state === "message_only") {
-    text = call.text;
-    tone = "warn";
   } else {
-    text = call.text;
+    text = failureMessageText(formatMessage, call.message);
     tone = "warn";
   }
   const canRetry = !notice.retrying && call.state === "not_delivered" && call.signed !== null;
@@ -78,7 +81,7 @@ export function PersonalCallNotice({
       )}
       {call.state === "not_delivered" && !notice.retrying && (
         <span className="font-medium" data-testid="composer-call-label">
-          {CALL_NOT_DELIVERED}
+          {formatMessage(CALL_NOT_DELIVERED_KEY)}
         </span>
       )}
       <span data-testid="composer-call-text">{text}</span>

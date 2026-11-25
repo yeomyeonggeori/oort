@@ -247,7 +247,7 @@ describe('permission card', () => {
         instruction: {
           state: 'not_delivered' as const,
           stage: 'server' as const,
-          text: '호스트가 90초 넘게 응답하지 않아 보내지 않았어요.',
+          message: {raw: '호스트가 90초 넘게 응답하지 않아 보내지 않았어요.'},
           error: null,
         },
       })),
@@ -381,7 +381,7 @@ describe('instruction box', () => {
       instruct: jest.fn(async () => ({
         state: 'not_delivered' as const,
         stage: 'sign' as const,
-        text: 'Face ID를 취소해서 보내지 않았어요.',
+        message: {raw: 'Face ID를 취소해서 보내지 않았어요.'},
         error: null,
       })),
     });

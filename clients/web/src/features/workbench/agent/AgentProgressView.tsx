@@ -43,17 +43,14 @@ import { StatusMark } from "../local/SessionList";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import type { WorkPermissionDecisionBody } from "@momo/core/lib/api";
 import {
-  NOT_DELIVERED,
-  instructionFailureLine,
+  instructionFailureMessage,
   type Delivery,
   type PermissionScope,
   type RejectWithInstructionOutcome,
 } from "@momo/core/features/auth/signedControl";
-import {
-  INSTRUCT_IN_APP_LINE,
-  humanSignatureRefusal,
-  type InstructFrom,
-} from "@momo/core/features/auth/humanSignature";
+import { ALLOW_IN_APP_KEY, REPLY_IN_APP_KEY, type InstructFrom } from "@momo/core/features/auth/humanSignature";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import "./agentPane.css";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
@@ -146,10 +143,8 @@ function useCramped(ref: React.RefObject<HTMLElement>): boolean {
 
 export const REPLY_UNAVAILABLE = "이 서버는 아직 칸에서 보낸 지시를 받지 않아요.";
 
-/** 브라우저에서 허락을 누를 수 없는 이유(D-4). 거부는 여기서 된다고 함께 말한다. */
-export const ALLOW_IN_APP_LINE = `이번 한 번 허락은 ${INSTRUCT_IN_APP_LINE}. 거부는 여기서도 할 수 있어요.`;
-/** 브라우저의 답장 칸(D-4). 어디서 보내는지는 힌트가, 여기서 안 되는 것은 자리 표시 글이 말한다. */
-export const REPLY_IN_APP_HINT = `지시는 ${INSTRUCT_IN_APP_LINE}`;
+// 브라우저에서 허락을 누를 수 없는 이유(D-4, `ALLOW_IN_APP_KEY`: 거부는 여기서 된다고 함께 말한다)와 답장 칸의 힌트
+// (`REPLY_IN_APP_KEY`: 어디서 보내는지는 힌트가, 여기서 안 되는 것은 아래 자리 표시 글이 말한다)는 사전에 있다.
 export const REPLY_IN_APP_PLACEHOLDER = "브라우저에서는 지시를 보낼 수 없어요";
 
 const KIND_ICON: Record<ToolCardKind, typeof FileText> = {
@@ -613,6 +608,7 @@ function PermissionCard({
   /** 카드가 캐럿을 품은 채 사라진다. */
   onLeave: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [armed, setArmed] = useState<Armed>(null);
   const lapsed = useLapsed(permission.atMs);
   // 무장한 채 칸이 낮아지거나, 연결이 끊기거나, 요청이 닫히면 푼다(보이지 않거나
@@ -750,7 +746,11 @@ function PermissionCard({
           text: note,
         });
         if (out.state === "not_sent") {
-          setError(`${NOT_DELIVERED} · ${out.text}`);
+          setError(
+            formatMessage("auth.signedControl.notDeliveredWith", {
+              reason: failureMessageText(formatMessage, out.message),
+            })
+          );
           return;
         }
         if (out.state === "reject_failed") throw out.error;
@@ -758,7 +758,9 @@ function PermissionCard({
         if (!delivered) onUndelivered(note);
         const line = rejectWithInstructionLine(
           delivered,
-          out.instruction.state === "not_delivered" ? out.instruction.text : undefined
+          out.instruction.state === "not_delivered"
+            ? failureMessageText(formatMessage, out.instruction.message)
+            : undefined
         );
         // partial은 카드 문장이 role=alert로 직접 말한다(두 번 읽히지 않게, review R2 L-1).
         if (delivered) onOutcome(line);
@@ -779,7 +781,7 @@ function PermissionCard({
       onOutcome(permissionSentLine(kind, scope));
       setOutcome({ tone: "sent", text: permissionSentLine(kind, scope) });
     } catch (err) {
-      const failure = permissionFailure(err);
+      const failure = permissionFailure(err, formatMessage);
       if (failure.closed) {
         onOutcome(failure.text);
         setOutcome({ tone: "closed", text: failure.text });
@@ -846,7 +848,7 @@ function PermissionCard({
       ) : null}
       {inAppLine ? (
         <p id={unavailableId} className="break-keep text-meta text-ink-muted" data-testid="agent-permission-in-app">
-          {ALLOW_IN_APP_LINE}
+          {formatMessage(ALLOW_IN_APP_KEY)}
         </p>
       ) : null}
       {gate ? (
@@ -1008,6 +1010,7 @@ function ReplyBox({
   /** 이 브라우저는 지시를 보낼 수 없다(D-4). 경로가 있어도 보내지 않는다. */
   inApp: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -1032,14 +1035,22 @@ function ReplyBox({
       const out = await reply({ sessionId, text: body, mode });
       if (out && out.state === "not_delivered") {
         // 글을 지우지 않는다: 그대로 다시 보낼 수 있다. 채팅으로 조용히 남기지 않는다.
-        setNote(`${NOT_DELIVERED} · ${out.text}`);
+        setNote(
+          formatMessage("auth.signedControl.notDeliveredWith", {
+            reason: failureMessageText(formatMessage, out.message),
+          })
+        );
         setFailed(true);
         return;
       }
       setText("");
       setNote(mode === "queue" ? "다음 차례에 전달돼요." : "지금 차례에 끼어들었어요.");
     } catch (err) {
-      setNote(`${NOT_DELIVERED} · ${humanSignatureRefusal(err)?.text ?? instructionFailureLine(err)}`);
+      setNote(
+        formatMessage("auth.signedControl.notDeliveredWith", {
+          reason: failureMessageText(formatMessage, instructionFailureMessage(err)),
+        })
+      );
       setFailed(true);
     } finally {
       setBusy(false);
@@ -1096,7 +1107,7 @@ function ReplyBox({
         data-failed={failed ? "" : undefined}
         role={failed ? "alert" : undefined}
       >
-        {inApp ? REPLY_IN_APP_HINT : unavailable ? REPLY_UNAVAILABLE : note ?? `기본은 다음 차례 예약이에요 · ${SEND_KEY}`}
+        {inApp ? formatMessage(REPLY_IN_APP_KEY) : unavailable ? REPLY_UNAVAILABLE : note ?? `기본은 다음 차례 예약이에요 · ${SEND_KEY}`}
       </p>
     </form>
   );

@@ -1,7 +1,7 @@
 import {
-  callFailureLine,
+  callFailureMessage,
   callPersonalAgent,
-  CALL_MAC_OFF_LINE,
+  CALL_MAC_OFF_KEY,
   labelFromPrompt,
   promptFromMessage,
   type CallDestination,
@@ -9,6 +9,7 @@ import {
   type PersonalAgentCall,
 } from '@momo/core/features/auth/personalAgentCall';
 import {spawnPromptText} from '@momo/core/features/auth/humanControlV4';
+import type {FailureMessage} from '@momo/core/features/auth/failureMessage';
 import type {HumanControlSigner} from '@momo/core/features/auth/signedControl';
 import {mentionedHandles} from '@momo/core/features/routing/mentionTargets';
 import {dmAutoReplyAgent} from '@momo/core/features/workspace/directory';
@@ -93,8 +94,8 @@ export function personalAgentCallTarget(input: {
 
 export type DestinationPick =
   | {kind: 'ok'; destination: CallDestination}
-  /** 보낼 수 없다 — 서명 없이 메시지만 간다. `sentence`가 이유다. */
-  | {kind: 'none'; sentence: string};
+  /** 보낼 수 없다 — 서명 없이 메시지만 간다. `message`가 이유다(키 또는 글, 화면이 지금 언어로 푼다). */
+  | {kind: 'none'; message: FailureMessage};
 
 /** 내 켜진 맥 하나와 그 맥의 질문용 폴더. 서버가 읽어 준 값 그대로다. */
 export function pickDestination(
@@ -106,15 +107,15 @@ export function pickDestination(
   if (state.kind === 'none') {
     return {
       kind: 'none',
-      sentence: callFailureLine(new ApiError(404, '', 'spawn_host_not_found')),
+      message: callFailureMessage(new ApiError(404, '', 'spawn_host_not_found')),
     };
   }
-  if (state.kind === 'off') return {kind: 'none', sentence: CALL_MAC_OFF_LINE};
+  if (state.kind === 'off') return {kind: 'none', message: {key: CALL_MAC_OFF_KEY}};
   const mac = state.macs[0];
   if (mac === undefined || mac.defaultFolderId === null) {
     return {
       kind: 'none',
-      sentence: callFailureLine(new ApiError(409, '', 'spawn_folder_not_found')),
+      message: callFailureMessage(new ApiError(409, '', 'spawn_folder_not_found')),
     };
   }
   return {
@@ -131,8 +132,8 @@ export interface CallDeps {
 }
 
 export type CallRun =
-  /** 부르지 않았다 — 호출하는 쪽이 평범한 메시지로 보내고 `sentence`를 말한다. */
-  | {kind: 'plain'; sentence: string; clientMsgId: string}
+  /** 부르지 않았다 — 호출하는 쪽이 평범한 메시지로 보내고 `message`를 말한다. */
+  | {kind: 'plain'; message: FailureMessage; clientMsgId: string}
   /**
    * 메시지 전송 자체가 실패했다 — 호출하는 쪽이 평범한 전송(실패 줄·재시도)으로 맡는다.
    * 응답이 유실됐을 수 있으니 **같은 `clientMsgId`**로 보내야 서버가 중복을 접는다.
@@ -178,13 +179,13 @@ export async function runPersonalAgentCall(
   } catch {
     return {
       kind: 'plain',
-      sentence: callFailureLine(undefined),
+      message: callFailureMessage(undefined),
       clientMsgId,
     };
   }
   const pick = pickDestination(hosts, input.selfId, input.target.harness);
   if (pick.kind === 'none') {
-    return {kind: 'plain', sentence: pick.sentence, clientMsgId};
+    return {kind: 'plain', message: pick.message, clientMsgId};
   }
 
   let before: Set<string>;

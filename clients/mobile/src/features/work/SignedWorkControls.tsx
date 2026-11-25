@@ -1,8 +1,9 @@
 import {
   fetchHumanControlSignatureRequired,
 } from '@momo/core/features/auth/deviceKeys';
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {
-  NOT_DELIVERED,
   rejectWithInstruction,
   signedAllow,
   signedInstruction,
@@ -438,6 +439,7 @@ export function PermissionCard({
   /** 권한 요청 알림이 이 카드로 착지했다(#5593): 값이 바뀔 때마다 낭독 초점을 질문으로 옮긴다. */
   focusToken?: number;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   // 알림으로 온 사람에게 이 카드가 착지 자리다(#5593). 화면이 머리에 둔 초점(`work-detail-focus`) 뒤에 온다 — 카드는
@@ -519,7 +521,7 @@ export function PermissionCard({
       });
       setOutcome({tone: 'sent', text: permissionSentLine('allow_once', scope)});
     } catch (err) {
-      const failure = permissionFailure(err);
+      const failure = permissionFailure(err, formatMessage);
       if (failure.closed) setOutcome({tone: 'closed', text: failure.text});
       else setError(failure.text);
     } finally {
@@ -536,7 +538,11 @@ export function PermissionCard({
       if (text !== '' && actions && block === null) {
         const out = await actions.rejectWithInstruction(permission, text);
         if (out.state === 'not_sent') {
-          setError(`${NOT_DELIVERED} · ${out.text}`);
+          setError(
+            formatMessage('auth.signedControl.notDeliveredWith', {
+              reason: failureMessageText(formatMessage, out.message),
+            }),
+          );
           return;
         }
         if (out.state === 'reject_failed') throw out.error;
@@ -546,7 +552,9 @@ export function PermissionCard({
           tone: delivered ? 'sent' : 'partial',
           text: rejectWithInstructionLine(
             delivered,
-            out.instruction.state === 'not_delivered' ? out.instruction.text : undefined,
+            out.instruction.state === 'not_delivered'
+              ? failureMessageText(formatMessage, out.instruction.message)
+              : undefined,
           ),
         });
         return;
@@ -554,7 +562,7 @@ export function PermissionCard({
       await (actions ? actions.reject(permission) : fallbackReject!(permission));
       setOutcome({tone: 'sent', text: permissionSentLine('reject_once')});
     } catch (err) {
-      const failure = permissionFailure(err);
+      const failure = permissionFailure(err, formatMessage);
       if (failure.closed) setOutcome({tone: 'closed', text: failure.text});
       else setError(failure.text);
     } finally {
@@ -741,6 +749,7 @@ function InstructionBox({
   /** A permission card is waiting above: its allow is the one filled button. */
   quiet: boolean;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const keyboardAppearance = useKeyboardAppearance();
@@ -767,7 +776,12 @@ function InstructionBox({
     setBusy(null);
     if (out.state === 'not_delivered') {
       // The text stays: the person can send it again as it is.
-      setNote({failed: true, text: `${NOT_DELIVERED} · ${out.text}`});
+      setNote({
+        failed: true,
+        text: formatMessage('auth.signedControl.notDeliveredWith', {
+          reason: failureMessageText(formatMessage, out.message),
+        }),
+      });
       return;
     }
     setText('');

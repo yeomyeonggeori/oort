@@ -1688,6 +1688,24 @@ export const catalog: MessageCatalog = {
       "value": "The server's response couldn't be read. Check the address and try again."
     }
   ],
+  "auth.humanSignatureInApp.allow": [
+    {
+      "type": 0,
+      "value": "To allow this once, send it from the phone or desktop app. You can still reject here."
+    }
+  ],
+  "auth.humanSignatureInApp.instruct": [
+    {
+      "type": 0,
+      "value": "Send it from the phone or desktop app"
+    }
+  ],
+  "auth.humanSignatureInApp.reply": [
+    {
+      "type": 0,
+      "value": "Send instructions from the phone or desktop app"
+    }
+  ],
   "auth.join.alreadyRedeemed": [
     {
       "type": 0,
@@ -1822,6 +1840,232 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "auth.personalCall.agentNotAllowed": [
+    {
+      "type": 0,
+      "value": "This personal agent can't be called right now. Check that it's turned on."
+    }
+  ],
+  "auth.personalCall.callDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't call your Mac. Check your connection, then call again."
+    }
+  ],
+  "auth.personalCall.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can call it."
+    }
+  ],
+  "auth.personalCall.folderNotFound": [
+    {
+      "type": 0,
+      "value": "Your Mac doesn't allow this work folder. Check the folder in the Mac app."
+    }
+  ],
+  "auth.personalCall.hostAmbiguous": [
+    {
+      "type": 0,
+      "value": "More than one Mac is connected, so it couldn't tell which one. Pick a Mac and call again."
+    }
+  ],
+  "auth.personalCall.hostNotFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find a connected Mac. Connect your Mac in the desktop app."
+    }
+  ],
+  "auth.personalCall.inputInvalid": [
+    {
+      "type": 0,
+      "value": "The content isn't valid, so it wasn't signed. Fix it, then send again."
+    }
+  ],
+  "auth.personalCall.macOff": [
+    {
+      "type": 0,
+      "value": "Your Mac is off. Turn it on, then call again."
+    }
+  ],
+  "auth.personalCall.needsApp": [
+    {
+      "type": 0,
+      "value": "Call from the desktop or phone"
+    }
+  ],
+  "auth.personalCall.nonceReused": [
+    {
+      "type": 0,
+      "value": "The call and signature don't match, so the server didn't accept it. Calling again signs anew."
+    }
+  ],
+  "auth.personalCall.nothingToAsk": [
+    {
+      "type": 0,
+      "value": "Write what to ask. With only the alias, the agent has nothing to do."
+    }
+  ],
+  "auth.personalCall.originInvalid": [
+    {
+      "type": 0,
+      "value": "Couldn't find the message that made the call. Send the message again, then call."
+    }
+  ],
+  "auth.personalCall.poolFull": [
+    {
+      "type": 0,
+      "value": "The number of tasks that can run right now is full. If one finishes, call again."
+    }
+  ],
+  "auth.personalCall.promptInvalid": [
+    {
+      "type": 0,
+      "value": "The content isn't valid, so it wasn't sent. Fix it, then send again."
+    }
+  ],
+  "auth.personalCall.spawnDisabled": [
+    {
+      "type": 0,
+      "value": "This server doesn't accept calls to your Mac yet."
+    }
+  ],
+  "auth.signatureRefusal.expired": [
+    {
+      "type": 0,
+      "value": "The signing time is more than 5 minutes off from the server's clock, so it wasn't accepted. Set your device clock to automatic, then send again."
+    }
+  ],
+  "auth.signatureRefusal.instanceUnconfigured": [
+    {
+      "type": 0,
+      "value": "The server has no instance id configured, so it can't verify signatures. Let a server admin know."
+    }
+  ],
+  "auth.signatureRefusal.invalid": [
+    {
+      "type": 0,
+      "value": "The device signature doesn't match this request, so the server didn't accept it. Update the app, then send again."
+    }
+  ],
+  "auth.signatureRefusal.keyNotEndorsed": [
+    {
+      "type": 0,
+      "value": "This device hasn't been approved for instructions yet. In the oort app on the Mac that hosts, approve this device under Settings › Devices › Instruction signing."
+    }
+  ],
+  "auth.signatureRefusal.keyRevoked": [
+    {
+      "type": 0,
+      "value": "This device's signing key was revoked, so it can't send. Register this device again under Settings › Devices › Instruction signing."
+    }
+  ],
+  "auth.signatureRefusal.nonceReplayed": [
+    {
+      "type": 0,
+      "value": "That same signature was already used once. The first one may have arrived, so check progress, and if needed press again to sign anew."
+    }
+  ],
+  "auth.signatureRefusal.required": [
+    {
+      "type": 0,
+      "value": "This server requires a device signature for allows and instructions. Send it from the phone or desktop app."
+    }
+  ],
+  "auth.signedControl.allowNeedsPreview": [
+    {
+      "type": 0,
+      "value": "Couldn't check the preview, so the allow wasn't signed. Reject it, or decide on the host."
+    }
+  ],
+  "auth.signedControl.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "You've left this session's channel, so you can't instruct it. Rejoin the channel, then send."
+    }
+  ],
+  "auth.signedControl.hostOffline": [
+    {
+      "type": 0,
+      "value": "The host hasn't responded for over 90 seconds, so nothing was sent. Make sure the host is on, then send again."
+    }
+  ],
+  "auth.signedControl.hostRevoked": [
+    {
+      "type": 0,
+      "value": "This host was revoked and can't receive instructions."
+    }
+  ],
+  "auth.signedControl.instructionDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't send the instruction. Check your connection, then send again."
+    }
+  ],
+  "auth.signedControl.instructionsDisabled": [
+    {
+      "type": 0,
+      "value": "This server doesn't accept signed instructions yet. You'll be able to send them here once it opens."
+    }
+  ],
+  "auth.signedControl.nonceReused": [
+    {
+      "type": 0,
+      "value": "The instruction and signature don't match, so the server didn't accept it. Sending again signs anew."
+    }
+  ],
+  "auth.signedControl.notDelivered": [
+    {
+      "type": 0,
+      "value": "Not delivered"
+    }
+  ],
+  "auth.signedControl.notDeliveredWith": [
+    {
+      "type": 0,
+      "value": "Not delivered · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "auth.signedControl.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Only the session's owner can instruct their own host."
+    }
+  ],
+  "auth.signedControl.resumeAgentUnknown": [
+    {
+      "type": 0,
+      "value": "Couldn't find this session's agent in its history, so a signed takeover can't be made. Continue on the original host."
+    }
+  ],
+  "auth.signedControl.scopeUnsupported": [
+    {
+      "type": 0,
+      "value": "This host doesn't accept session-wide allows. Send it as \"Allow once\" instead."
+    }
+  ],
+  "auth.signedControl.sessionNotAccepting": [
+    {
+      "type": 0,
+      "value": "The session has ended and isn't accepting instructions."
+    }
+  ],
+  "auth.signedControl.slashCommand": [
+    {
+      "type": 0,
+      "value": "Commands that start with \"/\" can't be sent as instructions."
+    }
+  ],
+  "auth.signedControl.textInvalid": [
+    {
+      "type": 0,
+      "value": "The instruction is empty or too long. Keep it within 32,768 characters."
     }
   ],
   "auth.signIn.invalidCredentials": [

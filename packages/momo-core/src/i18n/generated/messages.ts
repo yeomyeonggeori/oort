@@ -176,6 +176,9 @@ export const messageKeys = [
   "auth.failure.serverError",
   "auth.failure.tooManyRequests",
   "auth.failure.unreadableResponse",
+  "auth.humanSignatureInApp.allow",
+  "auth.humanSignatureInApp.instruct",
+  "auth.humanSignatureInApp.reply",
   "auth.join.alreadyRedeemed",
   "auth.join.cannotJoin",
   "auth.join.exhausted",
@@ -189,6 +192,43 @@ export const messageKeys = [
   "auth.linkedDevice.platformWeb",
   "auth.passwordRule.tooLong",
   "auth.passwordRule.tooShort",
+  "auth.personalCall.agentNotAllowed",
+  "auth.personalCall.callDefault",
+  "auth.personalCall.channelMemberOnly",
+  "auth.personalCall.folderNotFound",
+  "auth.personalCall.hostAmbiguous",
+  "auth.personalCall.hostNotFound",
+  "auth.personalCall.inputInvalid",
+  "auth.personalCall.macOff",
+  "auth.personalCall.needsApp",
+  "auth.personalCall.nonceReused",
+  "auth.personalCall.nothingToAsk",
+  "auth.personalCall.originInvalid",
+  "auth.personalCall.poolFull",
+  "auth.personalCall.promptInvalid",
+  "auth.personalCall.spawnDisabled",
+  "auth.signatureRefusal.expired",
+  "auth.signatureRefusal.instanceUnconfigured",
+  "auth.signatureRefusal.invalid",
+  "auth.signatureRefusal.keyNotEndorsed",
+  "auth.signatureRefusal.keyRevoked",
+  "auth.signatureRefusal.nonceReplayed",
+  "auth.signatureRefusal.required",
+  "auth.signedControl.allowNeedsPreview",
+  "auth.signedControl.channelMemberOnly",
+  "auth.signedControl.hostOffline",
+  "auth.signedControl.hostRevoked",
+  "auth.signedControl.instructionDefault",
+  "auth.signedControl.instructionsDisabled",
+  "auth.signedControl.nonceReused",
+  "auth.signedControl.notDelivered",
+  "auth.signedControl.notDeliveredWith",
+  "auth.signedControl.ownerOnly",
+  "auth.signedControl.resumeAgentUnknown",
+  "auth.signedControl.scopeUnsupported",
+  "auth.signedControl.sessionNotAccepting",
+  "auth.signedControl.slashCommand",
+  "auth.signedControl.textInvalid",
   "auth.signIn.invalidCredentials",
   "auth.signIn.suspended",
   "auth.signIn.unmapped",
@@ -2862,6 +2902,9 @@ export const argumentSpecs = {
   "auth.failure.serverError": {},
   "auth.failure.tooManyRequests": {},
   "auth.failure.unreadableResponse": {},
+  "auth.humanSignatureInApp.allow": {},
+  "auth.humanSignatureInApp.instruct": {},
+  "auth.humanSignatureInApp.reply": {},
   "auth.join.alreadyRedeemed": {},
   "auth.join.cannotJoin": {},
   "auth.join.exhausted": {},
@@ -2881,6 +2924,45 @@ export const argumentSpecs = {
   "auth.passwordRule.tooShort": {
     "minChars": "number"
   },
+  "auth.personalCall.agentNotAllowed": {},
+  "auth.personalCall.callDefault": {},
+  "auth.personalCall.channelMemberOnly": {},
+  "auth.personalCall.folderNotFound": {},
+  "auth.personalCall.hostAmbiguous": {},
+  "auth.personalCall.hostNotFound": {},
+  "auth.personalCall.inputInvalid": {},
+  "auth.personalCall.macOff": {},
+  "auth.personalCall.needsApp": {},
+  "auth.personalCall.nonceReused": {},
+  "auth.personalCall.nothingToAsk": {},
+  "auth.personalCall.originInvalid": {},
+  "auth.personalCall.poolFull": {},
+  "auth.personalCall.promptInvalid": {},
+  "auth.personalCall.spawnDisabled": {},
+  "auth.signatureRefusal.expired": {},
+  "auth.signatureRefusal.instanceUnconfigured": {},
+  "auth.signatureRefusal.invalid": {},
+  "auth.signatureRefusal.keyNotEndorsed": {},
+  "auth.signatureRefusal.keyRevoked": {},
+  "auth.signatureRefusal.nonceReplayed": {},
+  "auth.signatureRefusal.required": {},
+  "auth.signedControl.allowNeedsPreview": {},
+  "auth.signedControl.channelMemberOnly": {},
+  "auth.signedControl.hostOffline": {},
+  "auth.signedControl.hostRevoked": {},
+  "auth.signedControl.instructionDefault": {},
+  "auth.signedControl.instructionsDisabled": {},
+  "auth.signedControl.nonceReused": {},
+  "auth.signedControl.notDelivered": {},
+  "auth.signedControl.notDeliveredWith": {
+    "reason": "string"
+  },
+  "auth.signedControl.ownerOnly": {},
+  "auth.signedControl.resumeAgentUnknown": {},
+  "auth.signedControl.scopeUnsupported": {},
+  "auth.signedControl.sessionNotAccepting": {},
+  "auth.signedControl.slashCommand": {},
+  "auth.signedControl.textInvalid": {},
   "auth.signIn.invalidCredentials": {},
   "auth.signIn.suspended": {},
   "auth.signIn.unmapped": {},
@@ -6316,6 +6398,9 @@ export interface MessageArgs {
   "auth.failure.serverError": Record<string, never>;
   "auth.failure.tooManyRequests": Record<string, never>;
   "auth.failure.unreadableResponse": Record<string, never>;
+  "auth.humanSignatureInApp.allow": Record<string, never>;
+  "auth.humanSignatureInApp.instruct": Record<string, never>;
+  "auth.humanSignatureInApp.reply": Record<string, never>;
   "auth.join.alreadyRedeemed": Record<string, never>;
   "auth.join.cannotJoin": Record<string, never>;
   "auth.join.exhausted": Record<string, never>;
@@ -6329,6 +6414,43 @@ export interface MessageArgs {
   "auth.linkedDevice.platformWeb": Record<string, never>;
   "auth.passwordRule.tooLong": { hangulBytes: string; maxBytes: string; maxHangul: string };
   "auth.passwordRule.tooShort": { minChars: number };
+  "auth.personalCall.agentNotAllowed": Record<string, never>;
+  "auth.personalCall.callDefault": Record<string, never>;
+  "auth.personalCall.channelMemberOnly": Record<string, never>;
+  "auth.personalCall.folderNotFound": Record<string, never>;
+  "auth.personalCall.hostAmbiguous": Record<string, never>;
+  "auth.personalCall.hostNotFound": Record<string, never>;
+  "auth.personalCall.inputInvalid": Record<string, never>;
+  "auth.personalCall.macOff": Record<string, never>;
+  "auth.personalCall.needsApp": Record<string, never>;
+  "auth.personalCall.nonceReused": Record<string, never>;
+  "auth.personalCall.nothingToAsk": Record<string, never>;
+  "auth.personalCall.originInvalid": Record<string, never>;
+  "auth.personalCall.poolFull": Record<string, never>;
+  "auth.personalCall.promptInvalid": Record<string, never>;
+  "auth.personalCall.spawnDisabled": Record<string, never>;
+  "auth.signatureRefusal.expired": Record<string, never>;
+  "auth.signatureRefusal.instanceUnconfigured": Record<string, never>;
+  "auth.signatureRefusal.invalid": Record<string, never>;
+  "auth.signatureRefusal.keyNotEndorsed": Record<string, never>;
+  "auth.signatureRefusal.keyRevoked": Record<string, never>;
+  "auth.signatureRefusal.nonceReplayed": Record<string, never>;
+  "auth.signatureRefusal.required": Record<string, never>;
+  "auth.signedControl.allowNeedsPreview": Record<string, never>;
+  "auth.signedControl.channelMemberOnly": Record<string, never>;
+  "auth.signedControl.hostOffline": Record<string, never>;
+  "auth.signedControl.hostRevoked": Record<string, never>;
+  "auth.signedControl.instructionDefault": Record<string, never>;
+  "auth.signedControl.instructionsDisabled": Record<string, never>;
+  "auth.signedControl.nonceReused": Record<string, never>;
+  "auth.signedControl.notDelivered": Record<string, never>;
+  "auth.signedControl.notDeliveredWith": { reason: string };
+  "auth.signedControl.ownerOnly": Record<string, never>;
+  "auth.signedControl.resumeAgentUnknown": Record<string, never>;
+  "auth.signedControl.scopeUnsupported": Record<string, never>;
+  "auth.signedControl.sessionNotAccepting": Record<string, never>;
+  "auth.signedControl.slashCommand": Record<string, never>;
+  "auth.signedControl.textInvalid": Record<string, never>;
   "auth.signIn.invalidCredentials": Record<string, never>;
   "auth.signIn.suspended": Record<string, never>;
   "auth.signIn.unmapped": Record<string, never>;

@@ -485,7 +485,7 @@ describe('⑥ 과금을 단정하지 않는다(#3566 미측정)', () => {
   it('켜짐·꺼짐·막힘·거절 어느 판에도 그런 문장이 없다', async () => {
     const seen: string[] = [];
     installFetch({});
-    const a = mount(fakePort({kind: 'refused', sentence: '서버가 받지 않았어요.'}).port);
+    const a = mount(fakePort({kind: 'refused', message: {raw: '서버가 받지 않았어요.'}}).port);
     await screen.findByTestId('ask-mac-form');
     seen.push(JSON.stringify(screen.toJSON()));
     await pickChannelAndType();
@@ -643,7 +643,7 @@ describe('보낼 글과 집 채널', () => {
 
   it('Face ID를 취소하면 오류 배너 없이 폼으로 돌아온다', async () => {
     installFetch({});
-    mount(fakePort({kind: 'cancelled', sentence: 'x'}).port);
+    mount(fakePort({kind: 'cancelled', message: {raw: 'x'}}).port);
     await screen.findByTestId('ask-mac-form');
     await pickChannelAndType();
     await act(async () => {

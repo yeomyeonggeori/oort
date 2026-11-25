@@ -11,7 +11,8 @@
 // ObserverTerminal 을 두 번 마운트하지 않기 위해 ChatShell 이 둘을 XOR 한다.
 // 입력 왕복은 여기도 도크도 없다.
 import { useHumanControlSigning, useResumeWorkSession } from "./signedWork";
-import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { resumeFailureMessage } from "@momo/core/features/auth/signedControl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRight, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
@@ -741,6 +742,7 @@ export function WorkPanel({
   onOpenThread: (session: WorkSession) => void;
   onClose: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { session: auth, workspaceId, connStatus } = useSession();
   const signing = useHumanControlSigning(workspaceId, true);
   const resume = useResumeWorkSession(workspaceId, signing.signed);
@@ -901,12 +903,16 @@ export function WorkPanel({
         // 슬롯이 찼을 때도 멀쩡한 호스트를 고치라고 시켰다. 서버의 거절 어휘는
         // 닫혀 있으므로(pool_exhausted · member_limit · …) 코어가 그것을 행동으로
         // 번역한다 (ADR-0154 D3 「실패를 무엇을 하면 되는지로」).
-        setResumeError(resumeFailureLine(error, takeoverFailureCopy));
+        // 사유의 문장은 사전에 있어 지금 언어로 풀어 둔다(이 상태는 다른 묶음의 글과 한 줄에 선다).
+        setResumeError(
+          failureMessageText(formatMessage, resumeFailureMessage(error, takeoverFailureCopy))
+        );
       } finally {
         setResumingHostId(null);
       }
     },
     [
+      formatMessage,
       onSelectedIdChange,
       resume,
       resumingHostId,

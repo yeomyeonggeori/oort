@@ -185,7 +185,7 @@ function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
       reply: async () => ({
         state: "not_delivered",
         stage: "sign",
-        text: "서명을 취소해서 보내지 않았어요.",
+        message: { raw: "서명을 취소해서 보내지 않았어요." },
         error: null,
       }),
       sessionScope: true,
@@ -194,7 +194,7 @@ function sceneActions(scene: AgentFixtureScene): AgentPaneActions {
         instruction: {
           state: "not_delivered",
           stage: "server",
-          text: "호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요.",
+          message: { key: "auth.signedControl.hostOffline" },
           error: null,
         },
       }),

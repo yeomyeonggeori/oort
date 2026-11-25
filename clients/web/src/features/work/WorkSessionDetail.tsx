@@ -1,5 +1,6 @@
 import { useHumanControlSigning, useResumeWorkSession } from "./signedWork";
-import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { resumeFailureMessage } from "@momo/core/features/auth/signedControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
@@ -634,6 +635,7 @@ function HandoffSection({
   const [open, setOpen] = useState(false);
   const [busyHostId, setBusyHostId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const formatMessage = useFormatMessage();
 
   // 판정을 한 번 내고 그 값을 그대로 나른다 (R1 N1). 앞 판은 동사를 먼저 뽑은
   // 뒤 `verb === "resume" ? "reattach" : null` 로 판정을 **되짚어** 만들었다. 지금은
@@ -655,7 +657,7 @@ function HandoffSection({
       onResumed(resumed.id);
     } catch (caught) {
       // 서명한 인수(#3028)의 거절은 사유별 문장으로, 나머지는 인수 문장으로.
-      setError(resumeFailureLine(caught, takeoverFailureCopy));
+      setError(failureMessageText(formatMessage, resumeFailureMessage(caught, takeoverFailureCopy)));
     } finally {
       setBusyHostId(null);
     }

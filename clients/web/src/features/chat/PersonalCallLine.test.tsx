@@ -4,9 +4,16 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApiError, type WorkSpawnBody } from "@momo/core/lib/api";
-import { CALL_MAC_OFF_LINE } from "@momo/core/features/auth/personalAgentCall";
+import { CALL_MAC_OFF_KEY, CALL_NEEDS_APP_KEY } from "@momo/core/features/auth/personalAgentCall";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 import { PersonalCallNotice, CALL_SENT_LINE } from "./PersonalCallLine";
 import type { CallNotice } from "./usePersonalCall";
+
+// 사유의 문장은 사전에 있다(#6064). 한국어 언어 객체 아래에서 예전 한국어를 그대로 단정한다.
+const koLocale = await koreanLocale();
+const CALL_MAC_OFF_LINE = koLocale.service.formatMessage(CALL_MAC_OFF_KEY);
+const CALL_NEEDS_APP_LINE = koLocale.service.formatMessage(CALL_NEEDS_APP_KEY);
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -22,7 +29,14 @@ function show(notice: CallNotice, onRetry = vi.fn()) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  act(() => root?.render(createElement(PersonalCallNotice, { notice, onRetry, onDismiss: () => undefined })));
+  act(() =>
+    root?.render(
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: createElement(PersonalCallNotice, { notice, onRetry, onDismiss: () => undefined }),
+      })
+    )
+  );
   return { host, onRetry };
 }
 
@@ -39,7 +53,7 @@ describe("the line after a call", () => {
     const { host, onRetry } = show({
       channelId: "c",
       retrying: false,
-      call: { state: "not_delivered", stage: "server", text: CALL_MAC_OFF_LINE, error: new ApiError(409, "", "work_host_offline"), signed },
+      call: { state: "not_delivered", stage: "server", message: { key: CALL_MAC_OFF_KEY }, error: new ApiError(409, "", "work_host_offline"), signed },
     });
     expect(host.querySelector("[data-testid='composer-call-label']")?.textContent).toBe("전달 안 됨");
     expect(host.querySelector("[data-testid='composer-call-text']")?.textContent).toBe(CALL_MAC_OFF_LINE);
@@ -51,7 +65,7 @@ describe("the line after a call", () => {
     const { host } = show({
       channelId: "c",
       retrying: false,
-      call: { state: "not_delivered", stage: "server", text: "x", error: null, signed: null },
+      call: { state: "not_delivered", stage: "server", message: { raw: "x" }, error: null, signed: null },
     });
     expect(host.querySelector("[data-testid='composer-call-retry']")).toBeNull();
   });
@@ -60,10 +74,10 @@ describe("the line after a call", () => {
     const { host } = show({
       channelId: "c",
       retrying: false,
-      call: { state: "message_only", reason: "no_signer", text: "데스크탑·폰에서 불러 주세요" },
+      call: { state: "message_only", reason: "no_signer", message: { key: CALL_NEEDS_APP_KEY } },
     });
     expect(host.querySelector("[data-testid='composer-call-label']")?.textContent).toBe("메시지만 보냈어요");
-    expect(host.querySelector("[data-testid='composer-call-text']")?.textContent).toBe("데스크탑·폰에서 불러 주세요");
+    expect(host.querySelector("[data-testid='composer-call-text']")?.textContent).toBe(CALL_NEEDS_APP_LINE);
     expect(host.querySelector("[data-testid='composer-call-retry']")).toBeNull();
   });
 });

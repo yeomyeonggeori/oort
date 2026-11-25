@@ -38,6 +38,8 @@ import {
   type WorkSpawnBody,
   type WorkSpawnResult,
 } from "../../lib/api";
+import type { PlainMessageKey } from "../../i18n/keys";
+import type { FailureMessage } from "./failureMessage";
 import { humanSignatureRefusal } from "./humanSignature";
 import {
   SpawnTaskInputError,
@@ -50,57 +52,54 @@ import { newNonce, SignerRefusal, type HumanControlSigner } from "./signedContro
 // ---- sentences ---------------------------------------------------------------
 
 /** A browser without a signing key sends the message and says this (결재 1). */
-export const CALL_NEEDS_APP_LINE = "데스크탑·폰에서 불러 주세요";
+export const CALL_NEEDS_APP_KEY = "auth.personalCall.needsApp" satisfies PlainMessageKey;
 
 /** Mac off: nothing is queued (D4 결재 6). */
-export const CALL_MAC_OFF_LINE = "내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.";
+export const CALL_MAC_OFF_KEY = "auth.personalCall.macOff" satisfies PlainMessageKey;
 
-export const CALL_NOTHING_TO_ASK_LINE =
-  "무엇을 시킬지 적어 주세요. 별칭만 보내면 에이전트가 할 일이 없어요.";
+export const CALL_NOTHING_TO_ASK_KEY = "auth.personalCall.nothingToAsk" satisfies PlainMessageKey;
 
 /** The label a failed call carries (same word as a failed instruction). */
-export const CALL_NOT_DELIVERED = "전달 안 됨";
+export const CALL_NOT_DELIVERED_KEY = "auth.signedControl.notDelivered" satisfies PlainMessageKey;
 
 /** Why the call did not start, as one sentence. Signer, signature, then the
  * spawn route's own codes (`work_spawns.rs`), then transport. */
-export function callFailureLine(error: unknown): string {
-  if (error instanceof SignerRefusal) return error.message;
-  if (error instanceof SpawnTaskInputError) {
-    return "보낼 내용이 올바르지 않아 서명하지 않았어요. 내용을 고친 뒤 다시 보내 주세요.";
-  }
+export function callFailureMessage(error: unknown): FailureMessage {
+  if (error instanceof SignerRefusal) return error.refusal;
+  if (error instanceof SpawnTaskInputError) return { key: "auth.personalCall.inputInvalid" };
   const signature = humanSignatureRefusal(error);
-  if (signature) return signature.text;
+  if (signature) return { key: signature.key };
   const code = error instanceof ApiError ? error.code : undefined;
   switch (code) {
     case "work_host_offline":
-      return CALL_MAC_OFF_LINE;
+      return { key: CALL_MAC_OFF_KEY };
     case "signed_spawn_disabled":
-      return "이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요.";
+      return { key: "auth.personalCall.spawnDisabled" };
     case "spawn_host_not_found":
-      return "연결된 내 맥을 찾지 못했어요. 데스크탑 앱에서 내 맥을 연결해 주세요.";
+      return { key: "auth.personalCall.hostNotFound" };
     case "spawn_folder_not_found":
-      return "내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요.";
+      return { key: "auth.personalCall.folderNotFound" };
     case "spawn_host_ambiguous":
-      return "연결된 맥이 여러 대라 어느 맥인지 정하지 못했어요. 맥을 골라 다시 불러 주세요.";
+      return { key: "auth.personalCall.hostAmbiguous" };
     case "spawn_agent_not_allowed":
-      return "이 개인 에이전트는 지금 부를 수 없어요. 켜져 있는지 확인해 주세요.";
+      return { key: "auth.personalCall.agentNotAllowed" };
     case "spawn_channel_member_only":
-      return "이 채널의 멤버만 부를 수 있어요.";
+      return { key: "auth.personalCall.channelMemberOnly" };
     case "spawn_origin_invalid":
-      return "부른 메시지를 찾지 못했어요. 메시지를 다시 보낸 뒤 불러 주세요.";
+      return { key: "auth.personalCall.originInvalid" };
     case "spawn_prompt_invalid":
     case "spawn_slash_command":
     case "spawn_label_invalid":
     case "spawn_tool_invalid":
     case "spawn_folder_required":
-      return "보낼 내용이 올바르지 않아 보내지 않았어요. 내용을 고친 뒤 다시 보내 주세요.";
+      return { key: "auth.personalCall.promptInvalid" };
     case "spawn_nonce_reused":
-      return "보낸 호출과 서명이 맞지 않아 서버가 받지 않았어요. 다시 부르면 새로 서명해요.";
+      return { key: "auth.personalCall.nonceReused" };
     case "pool_exhausted":
     case "member_limit":
-      return "지금 돌릴 수 있는 작업이 가득 찼어요. 끝난 작업이 있으면 다시 불러 주세요.";
+      return { key: "auth.personalCall.poolFull" };
     default:
-      return "내 맥을 부르지 못했어요. 연결을 확인한 뒤 다시 불러 주세요.";
+      return { key: "auth.personalCall.callDefault" };
   }
 }
 
@@ -170,7 +169,7 @@ export type PersonalAgentCall =
   /** The Mac accepted the task (`replayed`: this answered a resend). */
   | { state: "called"; replayed: boolean; controlId: string }
   /** Only the message exists; nothing was signed or sent to the Mac. */
-  | { state: "message_only"; reason: "no_signer" | "nothing_to_ask"; text: string }
+  | { state: "message_only"; reason: "no_signer" | "nothing_to_ask"; message: FailureMessage }
   /**
    * The message exists, the call did not. `signed` is set when the statement
    * was signed and may be resent as it is while it lives (the Mac was off, the
@@ -179,7 +178,7 @@ export type PersonalAgentCall =
   | {
       state: "not_delivered";
       stage: "sign" | "server";
-      text: string;
+      message: FailureMessage;
       error: unknown;
       signed: WorkSpawnBody | null;
     };
@@ -241,7 +240,7 @@ export async function callPersonalAgent(
   if (input.signer === null) {
     return {
       message,
-      call: { state: "message_only", reason: "no_signer", text: CALL_NEEDS_APP_LINE },
+      call: { state: "message_only", reason: "no_signer", message: { key: CALL_NEEDS_APP_KEY } },
     };
   }
 
@@ -253,7 +252,11 @@ export async function callPersonalAgent(
     if (prompt.trim() === "") {
       return {
         message,
-        call: { state: "message_only", reason: "nothing_to_ask", text: CALL_NOTHING_TO_ASK_LINE },
+        call: {
+          state: "message_only",
+          reason: "nothing_to_ask",
+          message: { key: CALL_NOTHING_TO_ASK_KEY },
+        },
       };
     }
     prompt = spawnPromptText(prompt);
@@ -334,5 +337,5 @@ function notDelivered(
   error: unknown,
   signed: WorkSpawnBody | null
 ): PersonalAgentCall {
-  return { state: "not_delivered", stage, text: callFailureLine(error), error, signed };
+  return { state: "not_delivered", stage, message: callFailureMessage(error), error, signed };
 }

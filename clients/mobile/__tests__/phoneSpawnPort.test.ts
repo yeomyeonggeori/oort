@@ -8,7 +8,16 @@ import {
   type ControlToSign,
   type HumanControlSigner,
 } from '@momo/core/features/auth/signedControl';
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
+import {createLocaleService, resolveLocaleContext} from '@momo/core/i18n';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {ApiError, type HumanSignatureRequest} from '@momo/core/lib/api';
+
+// 사유의 문장은 사전에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const {formatMessage} = createLocaleService({
+  ...resolveLocaleContext('ko-KR', {languages: ['ko-KR']}),
+  catalog: koCatalog,
+});
 
 import {myToolsGateOpen} from '../src/features/ai/aiSheetModel';
 import {
@@ -180,7 +189,7 @@ describe('spawn — 서명 → /work-spawns', () => {
   it('Face ID를 접으면 cancelled이고 아무것도 보내지 않는다', async () => {
     const r = rig({signError: new SignerRefusal('Face ID를 취소해서 보내지 않았어요.', true)});
     const outcome = await createPhoneSpawnPort(r.deps).spawn(REQUEST);
-    expect(outcome).toEqual({kind: 'cancelled', sentence: 'Face ID를 취소해서 보내지 않았어요.'});
+    expect(outcome).toEqual({kind: 'cancelled', message: {raw: 'Face ID를 취소해서 보내지 않았어요.'}});
     expect(r.posted).toEqual([]);
   });
 
@@ -190,27 +199,39 @@ describe('spawn — 서명 → /work-spawns', () => {
     [
       'spawn_folder_not_found',
       409,
-      {kind: 'refused', sentence: '내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요.'},
+      {kind: 'refused', message: {key: 'auth.personalCall.folderNotFound'}},
     ],
     [
       'spawn_nonce_reused',
       409,
-      {kind: 'refused', sentence: '보낸 호출과 서명이 맞지 않아 서버가 받지 않았어요. 다시 부르면 새로 서명해요.'},
+      {kind: 'refused', message: {key: 'auth.personalCall.nonceReused'}},
     ],
     [
       'something_new',
       500,
-      {kind: 'refused', sentence: '내 맥을 부르지 못했어요. 연결을 확인한 뒤 다시 불러 주세요.'},
+      {kind: 'refused', message: {key: 'auth.personalCall.callDefault'}},
     ],
   ])('서버가 %s로 거절하면 사유에 맞는 결과다', async (code, status, expected) => {
     const r = rig({postError: new ApiError(status, 'x', code)});
     expect(await createPhoneSpawnPort(r.deps).spawn(REQUEST)).toEqual(expected);
   });
 
+  it('키로 돌려준 사유는 예전 한국어 그대로 풀린다', () => {
+    expect(failureMessageText(formatMessage, {key: 'auth.personalCall.folderNotFound'})).toBe(
+      '내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요.',
+    );
+    expect(failureMessageText(formatMessage, {key: 'auth.personalCall.nonceReused'})).toBe(
+      '보낸 호출과 서명이 맞지 않아 서버가 받지 않았어요. 다시 부르면 새로 서명해요.',
+    );
+    expect(failureMessageText(formatMessage, {key: 'auth.personalCall.callDefault'})).toBe(
+      '내 맥을 부르지 못했어요. 연결을 확인한 뒤 다시 불러 주세요.',
+    );
+  });
+
   it('서명 키가 없으면 서명자를 부르지 않고 키 안내 문장으로 멈춘다', async () => {
     const r = rig({local: {status: 'unsupported', publicKey: null}});
     const outcome = await createPhoneSpawnPort(r.deps).spawn(REQUEST);
-    expect(outcome).toEqual({kind: 'refused', sentence: KEY_NOT_READY_DETAIL});
+    expect(outcome).toEqual({kind: 'refused', message: {raw: KEY_NOT_READY_DETAIL}});
     expect(r.makeSigner).not.toHaveBeenCalled();
     expect(r.signed).toEqual([]);
     expect(r.posted).toEqual([]);

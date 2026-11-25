@@ -26,6 +26,8 @@ import {
   type WorkInstructionMode,
   type WorkSession,
 } from "../../lib/api";
+import type { PlainMessageKey } from "../../i18n/keys";
+import type { FailureMessage } from "./failureMessage";
 import { humanSignatureRefusal } from "./humanSignature";
 import type { SpawnTaskContent } from "./humanControlV4";
 import type { PermissionPreview } from "../workbench/permissionPreview";
@@ -87,7 +89,8 @@ export interface ControlToSign {
 /**
  * Signs one statement (Face ID / Touch ID) and returns the wire envelope.
  * A failure that is the person's or the device's (cancelled, no key, not
- * approved) rejects with `SignerRefusal` carrying a 해요체 sentence.
+ * approved) rejects with `SignerRefusal` carrying a 해요체 sentence: a dictionary
+ * key, or the text a signer built itself.
  */
 export interface HumanControlSigner {
   sign(control: ControlToSign): Promise<HumanSignatureRequest>;
@@ -96,15 +99,23 @@ export interface HumanControlSigner {
 export class SignerRefusal extends Error {
   /** The person said no (Face ID / Touch ID cancelled, dialog declined). */
   readonly cancelled: boolean;
-  constructor(text: string, cancelled = false) {
-    super(text);
+  /**
+   * The sentence: a dictionary message, or `{ raw }` for a signer's own text (a plain string argument is
+   * that text). A screen reads it with `failureMessageText` in the language it shows; `message` only
+   * serves logs.
+   */
+  readonly refusal: FailureMessage;
+  constructor(sentence: string | FailureMessage, cancelled = false) {
+    const refusal: FailureMessage = typeof sentence === "string" ? { raw: sentence } : sentence;
+    super(refusal.key === undefined ? refusal.raw : refusal.key);
     this.name = "SignerRefusal";
     this.cancelled = cancelled;
+    this.refusal = refusal;
   }
 }
 
 /** The label a failed signed action carries (D-5b 「전달 안 됨」). */
-export const NOT_DELIVERED = "전달 안 됨";
+export const NOT_DELIVERED_KEY = "auth.signedControl.notDelivered" satisfies PlainMessageKey;
 
 export type Delivery =
   | { state: "sent" }
@@ -112,7 +123,7 @@ export type Delivery =
       state: "not_delivered";
       /** Where it stopped: nothing was sent (`sign`) or the server refused (`server`). */
       stage: "sign" | "server";
-      text: string;
+      message: FailureMessage;
       error: unknown;
     };
 
@@ -130,50 +141,49 @@ export function newNonce(): string {
  * 400 `permission_scope_unsupported`: the host is not a member's own machine, so
  * it takes no 「이 세션 동안」 grant (#3095 — the server itself accepts the scope).
  */
-export const SCOPE_UNSUPPORTED_LINE =
-  "이 호스트는 세션 허락을 받지 않아요. 「이번 한 번 허락」으로 보내 주세요.";
+export const SCOPE_UNSUPPORTED_KEY = "auth.signedControl.scopeUnsupported" satisfies PlainMessageKey;
 
 /**
  * Why a signed instruction did not arrive, as one sentence. Signature refusals
  * first (by code), then the instruction route's own codes (golden
  * `work-instruction`), then transport.
  */
-export function instructionFailureLine(error: unknown): string {
-  if (error instanceof SignerRefusal) return error.message;
+export function instructionFailureMessage(error: unknown): FailureMessage {
+  if (error instanceof SignerRefusal) return error.refusal;
   const signature = humanSignatureRefusal(error);
-  if (signature) return signature.text;
+  if (signature) return { key: signature.key };
   const code =
     typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string"
       ? (error as { code: string }).code
       : null;
   switch (code) {
     case "signed_instructions_disabled":
-      return "이 서버는 아직 서명한 지시를 받지 않아요. 서버가 열리면 여기서 보낼 수 있어요.";
+      return { key: "auth.signedControl.instructionsDisabled" };
     case "work_host_offline":
-      return "호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요.";
+      return { key: "auth.signedControl.hostOffline" };
     case "work_host_revoked":
-      return "이 호스트는 해제되어 지시를 받을 수 없어요.";
+      return { key: "auth.signedControl.hostRevoked" };
     case "work_session_not_accepting":
-      return "세션이 끝나 지시를 받지 않아요.";
+      return { key: "auth.signedControl.sessionNotAccepting" };
     case "instruction_owner_only":
     case "instruction_member_host_only":
-      return "이 세션의 소유자만 자기 호스트에 지시할 수 있어요.";
+      return { key: "auth.signedControl.ownerOnly" };
     case "instruction_channel_member_only":
-      return "이 세션의 채널에서 나가 있어 지시할 수 없어요. 채널에 다시 들어간 뒤 보내 주세요.";
+      return { key: "auth.signedControl.channelMemberOnly" };
     case "instruction_slash_command":
-      return "「/」로 시작하는 명령은 지시로 보낼 수 없어요.";
+      return { key: "auth.signedControl.slashCommand" };
     case "instruction_text_invalid":
-      return "지시가 비었거나 너무 길어요. 32,768자 안으로 적어 주세요.";
+      return { key: "auth.signedControl.textInvalid" };
     case "instruction_nonce_reused":
     case "instruction_signature_mismatch":
-      return "보낸 지시와 서명이 맞지 않아 서버가 받지 않았어요. 다시 보내면 새로 서명해요.";
+      return { key: "auth.signedControl.nonceReused" };
     default:
-      return "지시를 보내지 못했어요. 연결을 확인한 뒤 다시 보내 주세요.";
+      return { key: "auth.signedControl.instructionDefault" };
   }
 }
 
 function notDelivered(stage: "sign" | "server", error: unknown): Delivery {
-  return { state: "not_delivered", stage, text: instructionFailureLine(error), error };
+  return { state: "not_delivered", stage, message: instructionFailureMessage(error), error };
 }
 
 // ---- flows ---------------------------------------------------------------------
@@ -181,8 +191,7 @@ function notDelivered(stage: "sign" | "server", error: unknown): Delivery {
 type SessionRef = Pick<WorkSession, "id" | "hostId">;
 
 /** An allow without a checked preview is never signed (#3128). */
-export const ALLOW_NEEDS_PREVIEW_LINE =
-  "미리보기를 확인하지 못해 허락에 서명하지 않았어요. 거부하거나 호스트에서 결정해 주세요.";
+export const ALLOW_NEEDS_PREVIEW_KEY = "auth.signedControl.allowNeedsPreview" satisfies PlainMessageKey;
 
 /**
  * A signed allow (「이번 한 번」 or 「이 세션 동안」), `momo.human.control.v3`
@@ -201,7 +210,7 @@ export async function signedAllow(input: {
   signer: HumanControlSigner;
 }): Promise<void> {
   if (!input.preview || !/^[0-9a-f]{64}$/.test(input.preview.sha256)) {
-    throw new SignerRefusal(ALLOW_NEEDS_PREVIEW_LINE);
+    throw new SignerRefusal({ key: ALLOW_NEEDS_PREVIEW_KEY });
   }
   const humanSignature = await input.signer.sign({
     hostId: input.session.hostId,
@@ -347,7 +356,7 @@ export async function signedInstruction(input: {
 
 export type RejectWithInstructionOutcome =
   /** Nothing was sent: the instruction could not be signed. */
-  | { state: "not_sent"; text: string; error: unknown }
+  | { state: "not_sent"; message: FailureMessage; error: unknown }
   /** The reject itself was refused (the card's `permissionFailure` reads it). */
   | { state: "reject_failed"; error: unknown }
   /** Rejected; the instruction arrived or is 「전달 안 됨」. */
@@ -373,7 +382,7 @@ export async function rejectWithInstruction(input: {
   try {
     signed = await signedInputFor({ ...input, text, mode: "queue" });
   } catch (error) {
-    return { state: "not_sent", text: instructionFailureLine(error), error };
+    return { state: "not_sent", message: instructionFailureMessage(error), error };
   }
   try {
     await decideWorkPermission(input.workspaceId, input.session.id, {
@@ -440,23 +449,24 @@ export function agentMemberIdFromEvents(
   return null;
 }
 
-export const RESUME_AGENT_UNKNOWN_LINE =
-  "이 세션의 에이전트를 기록에서 찾지 못해 서명한 인수를 만들 수 없어요. 원래 호스트에서 이어 가세요.";
+export const RESUME_AGENT_UNKNOWN_KEY =
+  "auth.signedControl.resumeAgentUnknown" satisfies PlainMessageKey;
 
 /**
  * A resume failure in a sentence: the signer's or the signature's reason
- * first, otherwise `fallback` (the handoff copy, which reads status + message).
+ * first, otherwise `fallback` (the handoff copy, which reads status + message;
+ * its text is another module's, so it rides as `{ raw }`).
  */
-export function resumeFailureLine(
+export function resumeFailureMessage(
   error: unknown,
   fallback: (status: number | undefined, message: string | undefined) => string
-): string {
-  if (error instanceof SignerRefusal) return error.message;
+): FailureMessage {
+  if (error instanceof SignerRefusal) return error.refusal;
   const signature = humanSignatureRefusal(error);
-  if (signature) return signature.text;
+  if (signature) return { key: signature.key };
   const status =
     typeof error === "object" && error !== null && typeof (error as { status?: unknown }).status === "number"
       ? (error as { status: number }).status
       : undefined;
-  return fallback(status, error instanceof Error ? error.message : undefined);
+  return { raw: fallback(status, error instanceof Error ? error.message : undefined) };
 }

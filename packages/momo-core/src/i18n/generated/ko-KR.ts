@@ -1455,6 +1455,24 @@ export const catalog: MessageCatalog = {
       "value": "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요."
     }
   ],
+  "auth.humanSignatureInApp.allow": [
+    {
+      "type": 0,
+      "value": "이번 한 번 허락은 폰이나 데스크탑 앱에서 보내 주세요. 거부는 여기서도 할 수 있어요."
+    }
+  ],
+  "auth.humanSignatureInApp.instruct": [
+    {
+      "type": 0,
+      "value": "폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
+  "auth.humanSignatureInApp.reply": [
+    {
+      "type": 0,
+      "value": "지시는 폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
   "auth.join.alreadyRedeemed": [
     {
       "type": 0,
@@ -1563,6 +1581,232 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "자 이상으로 입력하세요."
+    }
+  ],
+  "auth.personalCall.agentNotAllowed": [
+    {
+      "type": 0,
+      "value": "이 개인 에이전트는 지금 부를 수 없어요. 켜져 있는지 확인해 주세요."
+    }
+  ],
+  "auth.personalCall.callDefault": [
+    {
+      "type": 0,
+      "value": "내 맥을 부르지 못했어요. 연결을 확인한 뒤 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 부를 수 있어요."
+    }
+  ],
+  "auth.personalCall.folderNotFound": [
+    {
+      "type": 0,
+      "value": "내 맥이 이 작업 폴더를 허용하고 있지 않아요. 맥 앱에서 폴더를 확인해 주세요."
+    }
+  ],
+  "auth.personalCall.hostAmbiguous": [
+    {
+      "type": 0,
+      "value": "연결된 맥이 여러 대라 어느 맥인지 정하지 못했어요. 맥을 골라 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.hostNotFound": [
+    {
+      "type": 0,
+      "value": "연결된 내 맥을 찾지 못했어요. 데스크탑 앱에서 내 맥을 연결해 주세요."
+    }
+  ],
+  "auth.personalCall.inputInvalid": [
+    {
+      "type": 0,
+      "value": "보낼 내용이 올바르지 않아 서명하지 않았어요. 내용을 고친 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.personalCall.macOff": [
+    {
+      "type": 0,
+      "value": "내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.needsApp": [
+    {
+      "type": 0,
+      "value": "데스크탑·폰에서 불러 주세요"
+    }
+  ],
+  "auth.personalCall.nonceReused": [
+    {
+      "type": 0,
+      "value": "보낸 호출과 서명이 맞지 않아 서버가 받지 않았어요. 다시 부르면 새로 서명해요."
+    }
+  ],
+  "auth.personalCall.nothingToAsk": [
+    {
+      "type": 0,
+      "value": "무엇을 시킬지 적어 주세요. 별칭만 보내면 에이전트가 할 일이 없어요."
+    }
+  ],
+  "auth.personalCall.originInvalid": [
+    {
+      "type": 0,
+      "value": "부른 메시지를 찾지 못했어요. 메시지를 다시 보낸 뒤 불러 주세요."
+    }
+  ],
+  "auth.personalCall.poolFull": [
+    {
+      "type": 0,
+      "value": "지금 돌릴 수 있는 작업이 가득 찼어요. 끝난 작업이 있으면 다시 불러 주세요."
+    }
+  ],
+  "auth.personalCall.promptInvalid": [
+    {
+      "type": 0,
+      "value": "보낼 내용이 올바르지 않아 보내지 않았어요. 내용을 고친 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.personalCall.spawnDisabled": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요."
+    }
+  ],
+  "auth.signatureRefusal.expired": [
+    {
+      "type": 0,
+      "value": "서명한 시각이 서버 시각과 5분 넘게 어긋나 받지 않았어요. 기기 시계를 자동 맞춤으로 바꾼 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signatureRefusal.instanceUnconfigured": [
+    {
+      "type": 0,
+      "value": "서버에 인스턴스 id가 설정되지 않아 서명을 확인할 수 없어요. 서버 관리자에게 알려 주세요."
+    }
+  ],
+  "auth.signatureRefusal.invalid": [
+    {
+      "type": 0,
+      "value": "기기 서명이 이 요청과 맞지 않아 서버가 받지 않았어요. 앱을 최신으로 올린 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signatureRefusal.keyNotEndorsed": [
+    {
+      "type": 0,
+      "value": "이 기기는 아직 지시 승인을 받지 않았어요. 호스트가 있는 맥의 oort 앱에서 설정 › 기기 › 지시 서명으로 이 기기를 승인해 주세요."
+    }
+  ],
+  "auth.signatureRefusal.keyRevoked": [
+    {
+      "type": 0,
+      "value": "이 기기의 서명 키가 해제되어 보낼 수 없어요. 설정 › 기기 › 지시 서명에서 이 기기를 다시 등록해 주세요."
+    }
+  ],
+  "auth.signatureRefusal.nonceReplayed": [
+    {
+      "type": 0,
+      "value": "같은 서명이 이미 한 번 쓰였어요. 먼저 보낸 것이 닿았을 수 있으니 진행을 확인하고, 필요하면 다시 눌러 새로 서명해 주세요."
+    }
+  ],
+  "auth.signatureRefusal.required": [
+    {
+      "type": 0,
+      "value": "이 서버는 허락과 지시에 기기 서명을 받아요. 폰이나 데스크탑 앱에서 보내 주세요."
+    }
+  ],
+  "auth.signedControl.allowNeedsPreview": [
+    {
+      "type": 0,
+      "value": "미리보기를 확인하지 못해 허락에 서명하지 않았어요. 거부하거나 호스트에서 결정해 주세요."
+    }
+  ],
+  "auth.signedControl.channelMemberOnly": [
+    {
+      "type": 0,
+      "value": "이 세션의 채널에서 나가 있어 지시할 수 없어요. 채널에 다시 들어간 뒤 보내 주세요."
+    }
+  ],
+  "auth.signedControl.hostOffline": [
+    {
+      "type": 0,
+      "value": "호스트가 90초 넘게 응답하지 않아 보내지 않았어요. 호스트가 켜져 있는지 확인한 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signedControl.hostRevoked": [
+    {
+      "type": 0,
+      "value": "이 호스트는 해제되어 지시를 받을 수 없어요."
+    }
+  ],
+  "auth.signedControl.instructionDefault": [
+    {
+      "type": 0,
+      "value": "지시를 보내지 못했어요. 연결을 확인한 뒤 다시 보내 주세요."
+    }
+  ],
+  "auth.signedControl.instructionsDisabled": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 서명한 지시를 받지 않아요. 서버가 열리면 여기서 보낼 수 있어요."
+    }
+  ],
+  "auth.signedControl.nonceReused": [
+    {
+      "type": 0,
+      "value": "보낸 지시와 서명이 맞지 않아 서버가 받지 않았어요. 다시 보내면 새로 서명해요."
+    }
+  ],
+  "auth.signedControl.notDelivered": [
+    {
+      "type": 0,
+      "value": "전달 안 됨"
+    }
+  ],
+  "auth.signedControl.notDeliveredWith": [
+    {
+      "type": 0,
+      "value": "전달 안 됨 · "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "auth.signedControl.ownerOnly": [
+    {
+      "type": 0,
+      "value": "이 세션의 소유자만 자기 호스트에 지시할 수 있어요."
+    }
+  ],
+  "auth.signedControl.resumeAgentUnknown": [
+    {
+      "type": 0,
+      "value": "이 세션의 에이전트를 기록에서 찾지 못해 서명한 인수를 만들 수 없어요. 원래 호스트에서 이어 가세요."
+    }
+  ],
+  "auth.signedControl.scopeUnsupported": [
+    {
+      "type": 0,
+      "value": "이 호스트는 세션 허락을 받지 않아요. 「이번 한 번 허락」으로 보내 주세요."
+    }
+  ],
+  "auth.signedControl.sessionNotAccepting": [
+    {
+      "type": 0,
+      "value": "세션이 끝나 지시를 받지 않아요."
+    }
+  ],
+  "auth.signedControl.slashCommand": [
+    {
+      "type": 0,
+      "value": "「/」로 시작하는 명령은 지시로 보낼 수 없어요."
+    }
+  ],
+  "auth.signedControl.textInvalid": [
+    {
+      "type": 0,
+      "value": "지시가 비었거나 너무 길어요. 32,768자 안으로 적어 주세요."
     }
   ],
   "auth.signIn.invalidCredentials": [

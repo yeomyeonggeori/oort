@@ -1,3 +1,5 @@
+import type { PlainMessageKey } from "../../i18n/keys";
+
 // =============================================================================
 // Who may instruct from where, and device-signature refusals in sentences
 // (ADR-0146 개정 2026-09-28 D-4 · D-10 · D-11; #3029 E9, #3023 E3 인계).
@@ -28,8 +30,11 @@ export function instructFrom(input: {
   return input.signatureRequired === true ? "app" : "here";
 }
 
-/** ADR-0146 개정 D-4 원문. */
-export const INSTRUCT_IN_APP_LINE = "폰이나 데스크탑 앱에서 보내 주세요";
+/** ADR-0146 개정 D-4 원문(문장은 사전에 있다). */
+export const INSTRUCT_IN_APP_KEY = "auth.humanSignatureInApp.instruct" satisfies PlainMessageKey;
+/** 브라우저의 허락 카드와 지시 칸이 그 문장을 넣어 말하는 한 줄씩(이어 붙이지 않고 문장째 키다). */
+export const ALLOW_IN_APP_KEY = "auth.humanSignatureInApp.allow" satisfies PlainMessageKey;
+export const REPLY_IN_APP_KEY = "auth.humanSignatureInApp.reply" satisfies PlainMessageKey;
 
 // ---- device-signature refusals, in sentences (#3023 E3 → #3029) -------------
 
@@ -61,7 +66,8 @@ export type HumanSignatureFix =
  */
 export interface HumanSignatureRefusal {
   fix: HumanSignatureFix;
-  text: string;
+  /** 해요체 한 문장의 키. 화면이 그릴 때 지금 언어로 푼다. */
+  key: PlainMessageKey;
 }
 
 /**
@@ -76,40 +82,19 @@ export function humanSignatureRefusal(error: unknown): HumanSignatureRefusal | n
       : null;
   switch (code) {
     case HUMAN_SIGNATURE_REFUSAL.required:
-      return {
-        fix: "use_app",
-        text: "이 서버는 허락과 지시에 기기 서명을 받아요. 폰이나 데스크탑 앱에서 보내 주세요.",
-      };
+      return { fix: "use_app", key: "auth.signatureRefusal.required" };
     case HUMAN_SIGNATURE_REFUSAL.invalid:
-      return {
-        fix: "resend",
-        text: "기기 서명이 이 요청과 맞지 않아 서버가 받지 않았어요. 앱을 최신으로 올린 뒤 다시 보내 주세요.",
-      };
+      return { fix: "resend", key: "auth.signatureRefusal.invalid" };
     case HUMAN_SIGNATURE_REFUSAL.expired:
-      return {
-        fix: "check_clock",
-        text: "서명한 시각이 서버 시각과 5분 넘게 어긋나 받지 않았어요. 기기 시계를 자동 맞춤으로 바꾼 뒤 다시 보내 주세요.",
-      };
+      return { fix: "check_clock", key: "auth.signatureRefusal.expired" };
     case HUMAN_SIGNATURE_REFUSAL.nonceReplayed:
-      return {
-        fix: "check_progress",
-        text: "같은 서명이 이미 한 번 쓰였어요. 먼저 보낸 것이 닿았을 수 있으니 진행을 확인하고, 필요하면 다시 눌러 새로 서명해 주세요.",
-      };
+      return { fix: "check_progress", key: "auth.signatureRefusal.nonceReplayed" };
     case HUMAN_SIGNATURE_REFUSAL.keyRevoked:
-      return {
-        fix: "register_again",
-        text: "이 기기의 서명 키가 해제되어 보낼 수 없어요. 설정 › 기기 › 지시 서명에서 이 기기를 다시 등록해 주세요.",
-      };
+      return { fix: "register_again", key: "auth.signatureRefusal.keyRevoked" };
     case HUMAN_SIGNATURE_REFUSAL.keyNotEndorsed:
-      return {
-        fix: "approve_on_mac",
-        text: "이 기기는 아직 지시 승인을 받지 않았어요. 호스트가 있는 맥의 oort 앱에서 설정 › 기기 › 지시 서명으로 이 기기를 승인해 주세요.",
-      };
+      return { fix: "approve_on_mac", key: "auth.signatureRefusal.keyNotEndorsed" };
     case HUMAN_SIGNATURE_REFUSAL.instanceUnconfigured:
-      return {
-        fix: "ask_admin",
-        text: "서버에 인스턴스 id가 설정되지 않아 서명을 확인할 수 없어요. 서버 관리자에게 알려 주세요.",
-      };
+      return { fix: "ask_admin", key: "auth.signatureRefusal.instanceUnconfigured" };
     default:
       return null;
   }

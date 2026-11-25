@@ -15,12 +15,13 @@
 // =============================================================================
 
 import {
-  callFailureLine,
+  callFailureMessage,
   callPersonalAgent,
   type CallDestination,
   type PersonalAgentCall,
   type PersonalAgentCallResult,
 } from "@momo/core/features/auth/personalAgentCall";
+import type { FailureMessage } from "@momo/core/features/auth/failureMessage";
 import { SignerRefusal, type HumanControlSigner } from "@momo/core/features/auth/signedControl";
 import { mentionedAgents } from "@momo/core/features/routing/mentionTargets";
 import {
@@ -132,12 +133,12 @@ export interface CallPreview {
   destination: string | null;
   /** 이 글을 누가 읽는가: 채널 멤버 전부 / 대화 상대만. */
   audience: "channel" | "dm";
-  /** 보내도 일이 시작되지 않는 이유 한 문장(웹·맥 미연결). 있으면 `destination`은 null. */
-  blocked: string | null;
+  /** 보내도 일이 시작되지 않는 이유 한 문장(웹·맥 미연결)의 키나 글. 있으면 `destination`은 null. */
+  blocked: FailureMessage | null;
 }
 
-export const NO_MAC_LINE = callFailureLine(new ApiError(404, "", "spawn_host_not_found"));
-export const FLAG_OFF_LINE = callFailureLine(new ApiError(403, "", "signed_spawn_disabled"));
+export const NO_MAC_MESSAGE = callFailureMessage(new ApiError(404, "", "spawn_host_not_found"));
+export const FLAG_OFF_MESSAGE = callFailureMessage(new ApiError(403, "", "signed_spawn_disabled"));
 
 /** 이 글이 부르는 내 개인 에이전트(처음 하나). DM이면 상대가 곧 대상이다. */
 export function callTargetFor(input: {
@@ -170,9 +171,13 @@ export interface PersonalCallSpec {
 export function previewFor(spec: Pick<PersonalCallSpec, "agent" | "host" | "signer" | "audience">): CallPreview {
   const { agent, host, signer, audience } = spec;
   if (signer === null) {
-    return { destination: null, audience, blocked: "웹에서는 메시지만 보내져요. 데스크탑·폰에서 불러 주세요." };
+    return {
+      destination: null,
+      audience,
+      blocked: { raw: "웹에서는 메시지만 보내져요. 데스크탑·폰에서 불러 주세요." },
+    };
   }
-  if (host === null) return { destination: null, audience, blocked: NO_MAC_LINE };
+  if (host === null) return { destination: null, audience, blocked: NO_MAC_MESSAGE };
   return {
     destination: `내 맥 · ${host.hostName} · ${harnessName(agent.harness)}`,
     audience,
@@ -215,7 +220,7 @@ export async function runPersonalAgentCall(input: {
     const call: PersonalAgentCall = {
       state: "not_delivered",
       stage: "server",
-      text: NO_MAC_LINE,
+      message: NO_MAC_MESSAGE,
       error: new ApiError(404, "", "spawn_host_not_found"),
       signed: null,
     };
@@ -236,7 +241,7 @@ export async function runPersonalAgentCall(input: {
 export function flagOffSigner(): HumanControlSigner {
   return {
     async sign() {
-      throw new SignerRefusal(FLAG_OFF_LINE);
+      throw new SignerRefusal(FLAG_OFF_MESSAGE);
     },
   };
 }

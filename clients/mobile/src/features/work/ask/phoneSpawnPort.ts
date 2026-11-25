@@ -7,7 +7,7 @@ import {
   spawnLabelText,
   spawnPromptText,
 } from '@momo/core/features/auth/humanControlV4';
-import {callFailureLine} from '@momo/core/features/auth/personalAgentCall';
+import {callFailureMessage} from '@momo/core/features/auth/personalAgentCall';
 import {
   newNonce,
   SignerRefusal,
@@ -21,7 +21,7 @@ import {
   type LocalDeviceKey,
 } from '../../../deviceKey/enrollment';
 import {phoneSigner} from '../../../deviceKey/signer';
-import {KEY_NOT_READY_DETAIL, UNKNOWN_FAILURE_SENTENCE} from './model';
+import {KEY_NOT_READY_DETAIL} from './model';
 import type {SpawnOutcome, SpawnPort, SpawnRequest} from './spawnPort';
 
 // =============================================================================
@@ -42,7 +42,7 @@ import type {SpawnOutcome, SpawnPort, SpawnRequest} from './spawnPort';
 /** 서버가 서명 요구를 꺼 둔 것(403 `signed_spawn_disabled`) — Face ID 전에 알아낸 경우. */
 export class FlagOffRefusal extends SignerRefusal {
   constructor() {
-    super(callFailureLine(new ApiError(403, '', 'signed_spawn_disabled')));
+    super(callFailureMessage(new ApiError(403, '', 'signed_spawn_disabled')));
     this.name = 'FlagOffRefusal';
   }
 }
@@ -120,15 +120,14 @@ function outcomeFromError(error: unknown): SpawnOutcome {
   if (error instanceof FlagOffRefusal) return {kind: 'flag_off'};
   if (error instanceof SignerRefusal) {
     return error.cancelled
-      ? {kind: 'cancelled', sentence: error.message}
-      : {kind: 'refused', sentence: error.message};
+      ? {kind: 'cancelled', message: error.refusal}
+      : {kind: 'refused', message: error.refusal};
   }
   if (error instanceof ApiError) {
     if (error.code === 'work_host_offline') return {kind: 'mac_off'};
     if (error.code === 'signed_spawn_disabled') return {kind: 'flag_off'};
   }
-  const sentence = callFailureLine(error);
-  return {kind: 'refused', sentence: sentence || UNKNOWN_FAILURE_SENTENCE};
+  return {kind: 'refused', message: callFailureMessage(error)};
 }
 
 /** 부팅에서 `registerSpawnPort`로 꽂는 포트. `wired`가 입구(FAB·AI 시트)를 연다. */

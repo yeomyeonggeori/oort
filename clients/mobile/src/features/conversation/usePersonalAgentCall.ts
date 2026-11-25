@@ -1,3 +1,4 @@
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
 import {callPersonalAgent} from '@momo/core/features/auth/personalAgentCall';
 import {SignerRefusal} from '@momo/core/features/auth/signedControl';
 import type {Directory} from '@momo/core/features/workspace/directory';
@@ -12,6 +13,7 @@ import {
 } from '@momo/core/lib/api';
 import {useCallback, useEffect, useRef, useState} from 'react';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useWorkSessions} from '../agents/queries';
 import {lazyPhoneSigner} from '../work/ask/phoneSpawnPort';
 import {findSpawnedSession} from '../work/ask/model';
@@ -96,6 +98,10 @@ export function usePersonalAgentCall(input: {
   );
   const latest = useRef(input);
   latest.current = input;
+  // 안내는 만들 때의 언어로 풀어 둔다(이 상태는 다른 묶음의 문장과 한 줄에 선다).
+  const formatMessage = useFormatMessage();
+  const formatRef = useRef(formatMessage);
+  formatRef.current = formatMessage;
   const openedRef = useRef(false);
 
   // 안내는 부른 방의 것이다. 다른 방으로 옮기면 걷는다(디자인 검수 M1: 이전 방의 실패 문장이
@@ -181,7 +187,7 @@ export function usePersonalAgentCall(input: {
           ).catch(() => undefined);
         }
         if (run.kind === 'plain') {
-          setNotice({text: run.sentence, tone: 'info'});
+          setNotice({text: failureMessageText(formatRef.current, run.message), tone: 'info'});
         }
         return;
       }
@@ -197,7 +203,10 @@ export function usePersonalAgentCall(input: {
         run.call.state === 'not_delivered' &&
         run.call.error instanceof SignerRefusal &&
         run.call.error.cancelled;
-      setNotice({text: run.call.text, tone: cancelled ? 'info' : 'error'});
+      setNotice({
+        text: failureMessageText(formatRef.current, run.call.message),
+        tone: cancelled ? 'info' : 'error',
+      });
     })();
     return true;
   }, []);
