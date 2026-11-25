@@ -2164,7 +2164,23 @@ async fn the_grant_handlers_refuse_every_credential_but_a_persons_app_session() 
             );
         }
         assert_eq!(live_grants(&w, &t, t.a.member).await, 0, "{credential}");
-        // The settings switch (Y3): only a person's full app session moves it.
+        // The settings switch (Y3): only a person's full app session moves it. An agent principal is
+        // refused by the route's own `require_human`, a person without the marker by the switch's check.
+        if principal.kind == PrincipalKind::Agent {
+            let (status, body) = answer(
+                workspace_settings::patch(
+                    State(state.clone()),
+                    Extension(principal.clone()),
+                    full(),
+                    Path(ws.clone()),
+                    Query(serde_json::from_value(json!({})).unwrap()),
+                    Json(json!({"agent_self_expressions": false})),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(status, 403, "{credential} settings: {body}");
+        }
         if principal.kind == PrincipalKind::Human {
             let (status, body) = answer(
                 workspace_settings::patch(
@@ -2279,4 +2295,193 @@ async fn the_grant_handlers_refuse_every_credential_but_a_persons_app_session() 
         1,
         "untouched by the other workspace"
     );
+}
+
+async fn post_raw(w: &World, bearer: &str, tool: &str, body: Vec<u8>) -> u16 {
+    client()
+        .post(format!("{}{MCP_PATH}", w.base))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .header("mcp-name", tool)
+        .bearer_auth(bearer)
+        .body(body)
+        .send()
+        .await
+        .expect("tools/call")
+        .status()
+        .as_u16()
+}
+
+/// Y2.2 · X9-2 「2 MiB」 for door 가: a real picture past 64 KiB raises its card through an open door; the
+/// same body is 413 with no card while the switch over agents' own expressions is off, and for a
+/// credential without \`workspace:initiate\`; a body past 2 MiB is 413 even through an open door (the
+/// proposal's 6 MiB is not this door's).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_unasked_emoticons_big_body_is_read_only_through_its_open_door() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    let picture = noise_png(300);
+    let big = |name: &str| {
+        let mut arguments = emoticon_args(name);
+        arguments["args"]["candidates"][0]["image"]["dataBase64"] =
+            json!(base64::engine::general_purpose::STANDARD.encode(&picture));
+        serde_json::to_vec(&modern_body(
+            "tools/call",
+            json!({"name": INITIATE, "arguments": arguments}),
+        ))
+        .unwrap()
+    };
+    let approvals = |w: &World| {
+        let su = w.su.clone();
+        let ws = t.ws;
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM approval WHERE workspace_id = $1")
+                .bind(ws)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    let body = big("big-unasked");
+    assert!(
+        body.len() > 64 * 1024 && body.len() < 2 * 1024 * 1024,
+        "{}",
+        body.len()
+    );
+    assert_eq!(post_raw(&w, &t.a.bearer, INITIATE, body).await, 200);
+    assert_eq!(approvals(&w).await, 1, "the card stands");
+
+    set_self_switch(&w, &t, false).await;
+    assert_eq!(
+        post_raw(&w, &t.a.bearer, INITIATE, big("big-off")).await,
+        413
+    );
+    assert_eq!(approvals(&w).await, 1, "no card through a closed door");
+    set_self_switch(&w, &t, true).await;
+
+    let mut over = big("big-over");
+    over.extend(vec![b' '; 2 * 1024 * 1024 + 16 - over.len()]);
+    assert_eq!(post_raw(&w, &t.a.bearer, INITIATE, over).await, 413);
+    assert_eq!(approvals(&w).await, 1, "past 2 MiB is not this door's");
+
+    exec(
+        &w.su,
+        "UPDATE token SET scopes = array_remove(scopes, 'workspace:initiate') \
+          WHERE workspace_id = $1 AND hosted_connection_id = $2",
+        &[t.ws, t.a.connection],
+    )
+    .await;
+    assert_eq!(
+        post_raw(&w, &t.a.bearer, INITIATE, big("big-unscoped")).await,
+        413
+    );
+    assert_eq!(approvals(&w).await, 1);
+}
+
+/// 「같은 에이전트 잠금」 (#6137): the register tool queues behind the agent's advisory key — the one the
+/// unasked-card door and a person's proposal take first — before it reads or writes anything; released, it
+/// goes on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_register_tool_queues_behind_the_agents_own_lock() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let mut holder = w.su.begin().await.expect("holder");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(momo_agent::initiative::initiative_lock_key(
+            t.ws, t.a.member,
+        ))
+        .execute(&mut *holder)
+        .await
+        .expect("hold the agent's key");
+    let base = w.base.clone();
+    let bearer = t.a.bearer.clone();
+    let task = tokio::spawn(async move {
+        let probe = World {
+            base,
+            addr: "127.0.0.1:0".parse().unwrap(),
+            su: PgPoolOptions::new()
+                .max_connections(1)
+                .connect(&database_url())
+                .await
+                .unwrap(),
+        };
+        call(&probe, &bearer, args("behind-the-lock")).await
+    });
+    let mut waiting = 0;
+    for _ in 0..200 {
+        waiting = count(
+            &w,
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted",
+            &[],
+        )
+        .await;
+        if waiting >= 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(waiting, 1, "the call waits on the agent's key");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM expression_agent_call WHERE workspace_id = $1",
+            &[t.ws]
+        )
+        .await,
+        0,
+        "nothing is read or written past the lock"
+    );
+    holder.commit().await.expect("release");
+    let (status, body) = task.await.expect("the call");
+    assert_eq!(status, 200, "{body}");
+}
+
+/// X9-2 at the decision: the stored draft is proved again — a draft whose origin is no longer the agent's
+/// own picture (tampered as the superuser) is not registered; the approval stays pending.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_decision_proves_the_unasked_draft_is_still_one_generated_picture() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    let (status, body) = initiate(&w, &t.a.bearer, emoticon_args("tampered")).await;
+    assert_eq!(status, 200, "{body}");
+    let approval = approval_of(&body);
+    let props = card_props(&w, approval).await;
+    let mut tamper = w.su.begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tamper)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE expression_draft SET origin = jsonb_set(origin, '{kind}', '\"attachment\"') \
+          WHERE workspace_id = $1 AND approval_id = $2",
+    )
+    .bind(t.ws)
+    .bind(approval)
+    .execute(&mut *tamper)
+    .await
+    .expect("tamper");
+    tamper.commit().await.unwrap();
+    let (status, body) = decide(
+        &w,
+        &t,
+        &t.admin.jwt,
+        approval,
+        true,
+        Some(choice_of(&props)),
+        None,
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(approval_status(&w, approval).await, "pending");
+    assert_eq!(expressions(&w, &t).await, 0);
 }
