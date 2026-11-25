@@ -74,7 +74,7 @@ import {
   registerPoseFixture,
   type RegisterPose,
 } from "@/features/welcome/harnessLogin/registerFixtures";
-import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
+import { START_CREATE_KEY } from "@momo/core/features/onboarding/subscriptionRegister";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
@@ -796,7 +796,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                     onClick={() => openRegister(id)}
                     data-testid={`ai-connect-card-${id}-register`}
                   >
-                    {START_CREATE_LABEL}
+                    {formatMessage(START_CREATE_KEY)}
                   </Button>
                 )}
               <Button

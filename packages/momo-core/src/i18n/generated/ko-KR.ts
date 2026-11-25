@@ -9679,6 +9679,698 @@ export const catalog: MessageCatalog = {
       "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
     }
   ],
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": [
+    {
+      "type": 0,
+      "value": "꺼짐 · 서버 설정"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.badgePaused": [
+    {
+      "type": 0,
+      "value": "회색 · 문의 중"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailCleanup": [
+    {
+      "type": 0,
+      "value": "에이전트 화면에서 끊기를 마무리해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailDisabled": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 켜면 쓸 수 있어요. 로그인은 그대로 되어 있고, 내 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "는 터미널에서 직접 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailForbidden": [
+    {
+      "type": 0,
+      "value": "로그인은 됐어요. 내 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "는 터미널에서 직접 쓸 수 있어요. 에이전트로 부르려면 관리자에게 부탁해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailLimit": [
+    {
+      "type": 0,
+      "value": "쓰지 않는 에이전트를 먼저 정리해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailPaused": [
+    {
+      "type": 0,
+      "value": "서비스 제공자에게 사용 범위를 문의하는 동안 서버 운영자가 닫아 둔 기능이에요. 로그인은 그대로 되어 있고, 내 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "는 터미널에서 직접 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineCleanup": [
+    {
+      "type": 0,
+      "value": "이 에이전트는 연결을 마저 끊은 뒤에 다시 만들 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineDisabled": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 구독으로 쓰는 에이전트가 꺼져 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineForbidden": [
+    {
+      "type": 0,
+      "value": "에이전트로 만드는 건 워크스페이스 관리자가 해요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineLimit": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " 구독으로 쓰는 에이전트가 이미 다섯 개예요."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.linePaused": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " 구독으로 쓰는 에이전트가 잠시 멈춰 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletCost": [
+    {
+      "type": 0,
+      "value": "비용은 내 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " 구독에서 나가요. 팀 키는 쓰지 않아요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": [
+    {
+      "type": 0,
+      "value": "이 맥이 켜져 있고 oort가 열려 있을 때만 답해요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": [
+    {
+      "type": 0,
+      "value": "나만 부를 수 있어요. 다른 멤버가 부르면 안내 문구가 나가요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.create": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": " 만들기"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameHint": [
+    {
+      "type": 0,
+      "value": "채널에서 @이름으로 불러요. 영문 소문자, 숫자, - 와 _ 를 써요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameLabel": [
+    {
+      "type": 0,
+      "value": "에이전트 이름"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.noStore": [
+    {
+      "type": 0,
+      "value": "로그인 정보는 oort에 저장하지 않아요."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.title": [
+    {
+      "type": 0,
+      "value": "이 맥의 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": [
+            {
+              "type": 0,
+              "value": "으로"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "로"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 부를 수 있게 할까요?"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.agents": [
+    {
+      "type": 0,
+      "value": "에이전트 보기"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.close": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.detail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 15분 안에 한 번 열면 연결돼요. 그 뒤 채널에서 @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": [
+            {
+              "type": 0,
+              "value": "으로"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "로"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 불러 보세요. 15분이 지나면 여기서 다시 눌러 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existing": [
+    {
+      "type": 0,
+      "value": "이미 @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existingDetail": [
+    {
+      "type": 0,
+      "value": "이 맥의 에이전트라서 새로 만들지 않았어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.line": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 만들었어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.line": [
+    {
+      "type": 0,
+      "value": "만들지 못했어요: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonDefault": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonName": [
+    {
+      "type": 0,
+      "value": "이름을 쓸 수 없어요"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliFailed": [
+    {
+      "type": 0,
+      "value": "앱이 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 연결하지 못했어요. 아래 명령을 터미널에서 한 번 실행해 주세요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliMissing": [
+    {
+      "type": 0,
+      "value": "이 맥에서 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "를 찾지 못해 앱이 연결하지 못했어요. 아래 명령을 터미널에서 한 번 실행해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCodex": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 쓰려면 MCP 서버에 이 주소와 연결 값을 넣어 주세요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailUnsupported": [
+    {
+      "type": 0,
+      "value": "이 환경에서는 앱이 연결을 걸 수 없어요. 아래 명령을 터미널에서 한 번 실행해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.disclosure": [
+    {
+      "type": 0,
+      "value": "직접 하려면"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.hide": [
+    {
+      "type": 0,
+      "value": "접기"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.lineYourself": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 만들었어요. 연결만 직접 해 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.charset": [
+    {
+      "type": 0,
+      "value": "영문 소문자, 숫자, - 와 _ 만 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.invalid": [
+    {
+      "type": 0,
+      "value": "이 이름은 쓸 수 없어요. 영문 소문자, 숫자, - 와 _ 로 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.required": [
+    {
+      "type": 0,
+      "value": "이름을 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.taken": [
+    {
+      "type": 0,
+      "value": "이미 쓰는 이름이에요. 다른 이름을 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooLong": [
+    {
+      "type": 0,
+      "value": "32자까지 쓸 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooShort": [
+    {
+      "type": 0,
+      "value": "두 글자 이상으로 적어 주세요."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.cliStage": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "에 연결 걸기"
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.loggedIn": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 로그인됐어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.registering": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "을"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "를"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 만들고 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.serverStage": [
+    {
+      "type": 0,
+      "value": "에이전트 만들기"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.create": [
+    {
+      "type": 0,
+      "value": "에이전트로 만들기"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.detail": [
+    {
+      "type": 0,
+      "value": "이 맥에서 로그인한 Claude Code나 Codex를 채널에서 @로 부를 수 있게 해요. 나만 부를 수 있어요."
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.install": [
+    {
+      "type": 0,
+      "value": "설치 안내"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.title": [
+    {
+      "type": 0,
+      "value": "내 구독으로 에이전트 만들기"
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,

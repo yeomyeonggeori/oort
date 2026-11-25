@@ -1,4 +1,8 @@
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
+import {
+  FAILED_REASON_DEFAULT_KEY,
+  HANDLE_TAKEN_KEY,
+} from "@momo/core/features/onboarding/subscriptionRegister";
 import type { RegisterState } from "./registerController";
 
 // design 캡처가 세우는 「로그인 뒤 에이전트로 만들기」 단계(#3389). 컨트롤러도 서버도
@@ -44,7 +48,7 @@ export function registerPoseFixture(pose: RegisterPose): {
         state: {
           ...base,
           handle: "haneul-claude",
-          step: { step: "confirm", problem: "이미 쓰는 이름이에요. 다른 이름을 적어 주세요." },
+          step: { step: "confirm", problem: HANDLE_TAKEN_KEY },
         },
       };
     case "register-registering-server":
@@ -89,7 +93,7 @@ export function registerPoseFixture(pose: RegisterPose): {
     case "register-failed":
       return {
         harness: "claude",
-        state: { ...base, step: { step: "failed" }, reason: "서버에 닿지 못했어요" },
+        state: { ...base, step: { step: "failed" }, reason: FAILED_REASON_DEFAULT_KEY },
       };
     default:
       return { harness: "claude", state: base };

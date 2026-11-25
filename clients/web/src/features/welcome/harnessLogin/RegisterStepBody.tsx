@@ -10,20 +10,20 @@ import {
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import { expressionForState } from "@momo/core/features/onboarding/guide";
 import {
-  CALM_BADGE,
-  CALM_CLOSE_LABEL,
-  CONFIRM_LATER_LABEL,
-  CONFIRM_NAME_HINT,
-  CONFIRM_NAME_LABEL,
-  DONE_AGENTS_LABEL,
-  DONE_CLOSE_LABEL,
-  EXISTING_DETAIL,
-  FAILED_CLOSE_LABEL,
-  FAILED_RETRY_LABEL,
-  MANUAL_DISCLOSURE_HIDE_LABEL,
-  MANUAL_DISCLOSURE_LABEL,
-  REGISTERING_SERVER_STAGE,
-  REGISTER_NO_STORE_NOTE,
+  CALM_BADGE_KEYS,
+  CALM_CLOSE_KEY,
+  CONFIRM_LATER_KEY,
+  CONFIRM_NAME_HINT_KEY,
+  CONFIRM_NAME_LABEL_KEY,
+  DONE_AGENTS_KEY,
+  DONE_CLOSE_KEY,
+  EXISTING_DETAIL_KEY,
+  FAILED_CLOSE_KEY,
+  FAILED_RETRY_KEY,
+  MANUAL_DISCLOSURE_HIDE_KEY,
+  MANUAL_DISCLOSURE_KEY,
+  REGISTERING_SERVER_STAGE_KEY,
+  REGISTER_NO_STORE_KEY,
   calmDetail,
   calmLine,
   confirmBullets,
@@ -41,7 +41,9 @@ import {
   normalizeAgentHandle,
   registeringCliStage,
   registeringLine,
+  type RegisterMessage,
 } from "@momo/core/features/onboarding/subscriptionRegister";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Check } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -94,6 +96,7 @@ export function RegisterStepBody({
   /** 로그인을 막 마친 흐름이면 첫 줄에 「로그인됐어요」를 붙인다. */
   showLoggedIn?: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const defaultHandle = useMemo(
     () => defaultAgentHandle(harness, context.memberHandle),
     [harness, context.memberHandle]
@@ -129,6 +132,9 @@ export function RegisterStepBody({
   }, [guarded, onGuard]);
 
   if (step.step === "confirm") {
+    const titleMsg = confirmTitle(harness, handle === "" ? defaultHandle : handle);
+    const loggedIn = loggedInLine(harness);
+    const createMsg = confirmCreateLabel(handle === "" ? defaultHandle : handle);
     return (
       <form
         className="flex min-w-0 flex-col gap-4"
@@ -141,14 +147,14 @@ export function RegisterStepBody({
       >
         <KomettoGuide
           expression={expressionForState("awaiting")}
-          line={confirmTitle(harness, handle === "" ? defaultHandle : handle)}
-          detail={showLoggedIn ? loggedInLine(harness) : undefined}
+          line={formatMessage(titleMsg.key, titleMsg.values as never)}
+          detail={showLoggedIn ? formatMessage(loggedIn.key, loggedIn.values as never) : undefined}
           lineId={lineId}
           lineTestId="register-line"
         />
         <div className="flex min-w-0 flex-col gap-1">
           <label htmlFor={`${lineId}-name`} className="text-meta text-ink-muted">
-            {CONFIRM_NAME_LABEL}
+            {formatMessage(CONFIRM_NAME_LABEL_KEY)}
           </label>
           <div className="flex min-w-0 items-center gap-2">
             <span aria-hidden="true" className="text-body text-ink-muted">
@@ -175,13 +181,13 @@ export function RegisterStepBody({
             className="break-keep text-meta text-ink-muted"
             data-testid="register-name-hint"
           >
-            {step.problem ?? CONFIRM_NAME_HINT}
+            {formatMessage(step.problem ?? CONFIRM_NAME_HINT_KEY)}
           </p>
         </div>
         <ul className="flex min-w-0 list-disc flex-col gap-1 pl-4 text-meta text-ink-muted">
           {confirmBullets(harness).map((bullet) => (
-            <li key={bullet} className="break-keep">
-              {bullet}
+            <li key={bullet.key} className="break-keep">
+              {formatMessage(bullet.key, bullet.values as never)}
             </li>
           ))}
         </ul>
@@ -193,7 +199,7 @@ export function RegisterStepBody({
             onClick={onClose}
             data-testid="register-later"
           >
-            {CONFIRM_LATER_LABEL}
+            {formatMessage(CONFIRM_LATER_KEY)}
           </Button>
           <Button
             ref={primaryRef}
@@ -201,7 +207,7 @@ export function RegisterStepBody({
             disabled={handle === ""}
             data-testid="register-create"
           >
-            {confirmCreateLabel(handle === "" ? defaultHandle : handle)}
+            {formatMessage(createMsg.key, createMsg.values as never)}
           </Button>
         </div>
       </form>
@@ -209,23 +215,23 @@ export function RegisterStepBody({
   }
 
   if (step.step === "registering") {
-    const stages =
-      harness === "claude"
-        ? [REGISTERING_SERVER_STAGE, registeringCliStage(harness)]
-        : [REGISTERING_SERVER_STAGE];
+    const serverStage: RegisterMessage = { key: REGISTERING_SERVER_STAGE_KEY };
+    const stages: RegisterMessage[] =
+      harness === "claude" ? [serverStage, registeringCliStage(harness)] : [serverStage];
     const at = step.stage === "server" ? 0 : 1;
+    const registering = registeringLine(handle === "" ? defaultHandle : handle);
     return (
       <div className="flex min-w-0 flex-col gap-4" data-testid="register-registering" data-step="registering">
         <KomettoGuide
           expression={expressionForState("preparing")}
-          line={registeringLine(handle === "" ? defaultHandle : handle)}
+          line={formatMessage(registering.key, registering.values as never)}
           lineId={lineId}
           lineTestId="register-line"
         />
         <ol className="flex min-w-0 flex-col gap-1 text-meta text-ink-muted" aria-label="진행 단계">
           {stages.map((label, index) => (
             <li
-              key={label}
+              key={label.key}
               aria-current={index === at ? "step" : undefined}
               className={index === at ? "font-semibold text-ink" : undefined}
               data-state={index < at ? "done" : index === at ? "current" : "todo"}
@@ -235,22 +241,24 @@ export function RegisterStepBody({
               ) : (
                 `${index + 1}. `
               )}
-              {label}
+              {formatMessage(label.key, label.values as never)}
             </li>
           ))}
         </ol>
-        <p className="break-keep text-meta text-ink-muted">{REGISTER_NO_STORE_NOTE}</p>
+        <p className="break-keep text-meta text-ink-muted">{formatMessage(REGISTER_NO_STORE_KEY)}</p>
       </div>
     );
   }
 
   if (step.step === "done") {
+    const doneMsg = doneLine(step.handle);
+    const doneDetailMsg = doneDetail(harness, step.handle);
     return (
       <div className="flex min-w-0 flex-col gap-4" data-testid="register-done" data-step="done">
         <KomettoGuide
           expression={expressionForState("success")}
-          line={doneLine(step.handle)}
-          detail={doneDetail(harness, step.handle)}
+          line={formatMessage(doneMsg.key, doneMsg.values as never)}
+          detail={formatMessage(doneDetailMsg.key, doneDetailMsg.values as never)}
           lineId={lineId}
           lineTestId="register-line"
         />
@@ -265,10 +273,10 @@ export function RegisterStepBody({
             }}
             data-testid="register-agents"
           >
-            {DONE_AGENTS_LABEL}
+            {formatMessage(DONE_AGENTS_KEY)}
           </Button>
           <Button ref={primaryRef} type="button" onClick={onClose} data-testid="register-close">
-            {DONE_CLOSE_LABEL}
+            {formatMessage(DONE_CLOSE_KEY)}
           </Button>
         </div>
       </div>
@@ -276,18 +284,19 @@ export function RegisterStepBody({
   }
 
   if (step.step === "existing") {
+    const existingMsg = existingLine(step.handle);
     return (
       <div className="flex min-w-0 flex-col gap-4" data-testid="register-existing" data-step="existing">
         <KomettoGuide
           expression={expressionForState("success")}
-          line={existingLine(step.handle)}
-          detail={EXISTING_DETAIL}
+          line={formatMessage(existingMsg.key, existingMsg.values as never)}
+          detail={formatMessage(EXISTING_DETAIL_KEY)}
           lineId={lineId}
           lineTestId="register-line"
         />
         <div className="flex justify-end pt-1">
           <Button ref={primaryRef} type="button" onClick={onClose} data-testid="register-close">
-            {DONE_CLOSE_LABEL}
+            {formatMessage(DONE_CLOSE_KEY)}
           </Button>
         </div>
       </div>
@@ -309,8 +318,10 @@ export function RegisterStepBody({
   }
 
   if (step.step === "calm" && isCalmRefusal(step.refusal)) {
-    const badge =
-      step.refusal === "paused" || step.refusal === "disabled" ? CALM_BADGE[step.refusal] : null;
+    const badgeKey =
+      step.refusal === "paused" || step.refusal === "disabled" ? CALM_BADGE_KEYS[step.refusal] : null;
+    const calmLineMsg = calmLine(step.refusal, harness);
+    const calmDetailMsg = calmDetail(step.refusal, harness);
     return (
       <div
         className="flex min-w-0 flex-col gap-4"
@@ -320,33 +331,34 @@ export function RegisterStepBody({
       >
         <KomettoGuide
           expression={expressionForState("skipped")}
-          line={calmLine(step.refusal, harness)}
-          detail={calmDetail(step.refusal, harness)}
+          line={formatMessage(calmLineMsg.key, calmLineMsg.values as never)}
+          detail={formatMessage(calmDetailMsg.key, calmDetailMsg.values as never)}
           lineId={lineId}
           lineTestId="register-line"
         />
-        {badge !== null && (
+        {badgeKey !== null && (
           <p
             className="self-start rounded-full bg-surface-muted px-3 py-1 text-meta text-ink-muted"
             data-testid="register-calm-badge"
           >
-            {badge}
+            {formatMessage(badgeKey)}
           </p>
         )}
         <div className="flex justify-end pt-1">
           <Button ref={primaryRef} type="button" onClick={onClose} data-testid="register-close">
-            {CALM_CLOSE_LABEL}
+            {formatMessage(CALM_CLOSE_KEY)}
           </Button>
         </div>
       </div>
     );
   }
 
+  const failedMsg = failedLine(state.reason === null ? "" : formatMessage(state.reason));
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="register-failed" data-step="failed">
       <KomettoGuide
         expression={expressionForState("trouble")}
-        line={failedLine(state.reason ?? "")}
+        line={formatMessage(failedMsg.key, failedMsg.values as never)}
         lineId={lineId}
         lineTestId="register-line"
       />
@@ -358,7 +370,7 @@ export function RegisterStepBody({
           onClick={onClose}
           data-testid="register-close"
         >
-          {FAILED_CLOSE_LABEL}
+          {formatMessage(FAILED_CLOSE_KEY)}
         </Button>
         <Button
           ref={primaryRef}
@@ -366,7 +378,7 @@ export function RegisterStepBody({
           onClick={() => void controller?.submit()}
           data-testid="register-retry"
         >
-          {FAILED_RETRY_LABEL}
+          {formatMessage(FAILED_RETRY_KEY)}
         </Button>
       </div>
     </div>
@@ -390,6 +402,9 @@ function ManualStep({
   primaryRef: RefObject<HTMLButtonElement>;
   onClose: () => void;
 }) {
+  const formatMessage = useFormatMessage();
+  const lineMsg = manualLine(handle, why);
+  const detailMsg = manualDetail(harness, why);
   // Codex의 두 칸은 이 단계의 본문이라 펼쳐서 연다. 앱이 연결하지 못한 폴백은 접어 둔다.
   const [open, setOpen] = useState(why === "codex");
   const bodyId = `${lineId}-manual`;
@@ -397,8 +412,8 @@ function ManualStep({
     <div className="flex min-w-0 flex-col gap-4" data-testid="register-manual" data-step="manual" data-why={why}>
       <KomettoGuide
         expression={expressionForState(why === "codex" ? "success" : "trouble")}
-        line={manualLine(handle, why)}
-        detail={manualDetail(harness, why)}
+        line={formatMessage(lineMsg.key, lineMsg.values as never)}
+        detail={formatMessage(detailMsg.key, detailMsg.values as never)}
         lineId={lineId}
         lineTestId="register-line"
       />
@@ -411,7 +426,7 @@ function ManualStep({
           onClick={() => setOpen((value) => !value)}
           data-testid="register-manual-toggle"
         >
-          {open ? MANUAL_DISCLOSURE_HIDE_LABEL : MANUAL_DISCLOSURE_LABEL}
+          {formatMessage(open ? MANUAL_DISCLOSURE_HIDE_KEY : MANUAL_DISCLOSURE_KEY)}
         </button>
       )}
       {open && plan !== null && (
@@ -421,7 +436,7 @@ function ManualStep({
       )}
       <div className="flex justify-end pt-1">
         <Button ref={primaryRef} type="button" onClick={onClose} data-testid="register-close">
-          {DONE_CLOSE_LABEL}
+          {formatMessage(DONE_CLOSE_KEY)}
         </Button>
       </div>
     </div>

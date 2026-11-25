@@ -1370,6 +1370,57 @@ export const messageKeys = [
   "onboarding.harnessLogin.waitingBrowser",
   "onboarding.harnessLogin.waitingDetail",
   "onboarding.harnessLogin.waitingDevice",
+  "onboarding.subscriptionRegisterCalm.badgeDisabled",
+  "onboarding.subscriptionRegisterCalm.badgePaused",
+  "onboarding.subscriptionRegisterCalm.detailCleanup",
+  "onboarding.subscriptionRegisterCalm.detailDisabled",
+  "onboarding.subscriptionRegisterCalm.detailForbidden",
+  "onboarding.subscriptionRegisterCalm.detailLimit",
+  "onboarding.subscriptionRegisterCalm.detailPaused",
+  "onboarding.subscriptionRegisterCalm.lineCleanup",
+  "onboarding.subscriptionRegisterCalm.lineDisabled",
+  "onboarding.subscriptionRegisterCalm.lineForbidden",
+  "onboarding.subscriptionRegisterCalm.lineLimit",
+  "onboarding.subscriptionRegisterCalm.linePaused",
+  "onboarding.subscriptionRegisterConfirm.bulletCost",
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn",
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe",
+  "onboarding.subscriptionRegisterConfirm.create",
+  "onboarding.subscriptionRegisterConfirm.later",
+  "onboarding.subscriptionRegisterConfirm.nameHint",
+  "onboarding.subscriptionRegisterConfirm.nameLabel",
+  "onboarding.subscriptionRegisterConfirm.noStore",
+  "onboarding.subscriptionRegisterConfirm.title",
+  "onboarding.subscriptionRegisterDone.agents",
+  "onboarding.subscriptionRegisterDone.close",
+  "onboarding.subscriptionRegisterDone.detail",
+  "onboarding.subscriptionRegisterDone.existing",
+  "onboarding.subscriptionRegisterDone.existingDetail",
+  "onboarding.subscriptionRegisterDone.line",
+  "onboarding.subscriptionRegisterFailed.line",
+  "onboarding.subscriptionRegisterFailed.reasonDefault",
+  "onboarding.subscriptionRegisterFailed.reasonName",
+  "onboarding.subscriptionRegisterManual.detailCliFailed",
+  "onboarding.subscriptionRegisterManual.detailCliMissing",
+  "onboarding.subscriptionRegisterManual.detailCodex",
+  "onboarding.subscriptionRegisterManual.detailUnsupported",
+  "onboarding.subscriptionRegisterManual.disclosure",
+  "onboarding.subscriptionRegisterManual.hide",
+  "onboarding.subscriptionRegisterManual.lineYourself",
+  "onboarding.subscriptionRegisterName.charset",
+  "onboarding.subscriptionRegisterName.invalid",
+  "onboarding.subscriptionRegisterName.required",
+  "onboarding.subscriptionRegisterName.taken",
+  "onboarding.subscriptionRegisterName.tooLong",
+  "onboarding.subscriptionRegisterName.tooShort",
+  "onboarding.subscriptionRegisterProgress.cliStage",
+  "onboarding.subscriptionRegisterProgress.loggedIn",
+  "onboarding.subscriptionRegisterProgress.registering",
+  "onboarding.subscriptionRegisterProgress.serverStage",
+  "onboarding.subscriptionRegisterStart.create",
+  "onboarding.subscriptionRegisterStart.detail",
+  "onboarding.subscriptionRegisterStart.install",
+  "onboarding.subscriptionRegisterStart.title",
   "readState.markUnread.action",
   "readState.markUnread.done",
   "readState.markUnread.failed",
@@ -4411,6 +4462,108 @@ export const argumentSpecs = {
     "cli": "string"
   },
   "onboarding.harnessLogin.waitingDevice": {},
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": {},
+  "onboarding.subscriptionRegisterCalm.badgePaused": {},
+  "onboarding.subscriptionRegisterCalm.detailCleanup": {},
+  "onboarding.subscriptionRegisterCalm.detailDisabled": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.detailForbidden": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.detailLimit": {},
+  "onboarding.subscriptionRegisterCalm.detailPaused": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.lineCleanup": {},
+  "onboarding.subscriptionRegisterCalm.lineDisabled": {},
+  "onboarding.subscriptionRegisterCalm.lineForbidden": {},
+  "onboarding.subscriptionRegisterCalm.lineLimit": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterCalm.linePaused": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterConfirm.bulletCost": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": {},
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": {},
+  "onboarding.subscriptionRegisterConfirm.create": {
+    "handle": "string"
+  },
+  "onboarding.subscriptionRegisterConfirm.later": {},
+  "onboarding.subscriptionRegisterConfirm.nameHint": {},
+  "onboarding.subscriptionRegisterConfirm.nameLabel": {},
+  "onboarding.subscriptionRegisterConfirm.noStore": {},
+  "onboarding.subscriptionRegisterConfirm.title": {
+    "cli": "string",
+    "cliJosa": "string",
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterDone.agents": {},
+  "onboarding.subscriptionRegisterDone.close": {},
+  "onboarding.subscriptionRegisterDone.detail": {
+    "cli": "string",
+    "cliJosa": "string",
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterDone.existing": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterDone.existingDetail": {},
+  "onboarding.subscriptionRegisterDone.line": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterFailed.line": {
+    "reason": "string"
+  },
+  "onboarding.subscriptionRegisterFailed.reasonDefault": {},
+  "onboarding.subscriptionRegisterFailed.reasonName": {},
+  "onboarding.subscriptionRegisterManual.detailCliFailed": {
+    "cli": "string",
+    "cliJosa": "string"
+  },
+  "onboarding.subscriptionRegisterManual.detailCliMissing": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterManual.detailCodex": {
+    "cli": "string",
+    "cliJosa": "string"
+  },
+  "onboarding.subscriptionRegisterManual.detailUnsupported": {},
+  "onboarding.subscriptionRegisterManual.disclosure": {},
+  "onboarding.subscriptionRegisterManual.hide": {},
+  "onboarding.subscriptionRegisterManual.lineYourself": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterName.charset": {},
+  "onboarding.subscriptionRegisterName.invalid": {},
+  "onboarding.subscriptionRegisterName.required": {},
+  "onboarding.subscriptionRegisterName.taken": {},
+  "onboarding.subscriptionRegisterName.tooLong": {},
+  "onboarding.subscriptionRegisterName.tooShort": {},
+  "onboarding.subscriptionRegisterProgress.cliStage": {
+    "cli": "string"
+  },
+  "onboarding.subscriptionRegisterProgress.loggedIn": {
+    "cli": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterProgress.registering": {
+    "handle": "string",
+    "josa": "string"
+  },
+  "onboarding.subscriptionRegisterProgress.serverStage": {},
+  "onboarding.subscriptionRegisterStart.create": {},
+  "onboarding.subscriptionRegisterStart.detail": {},
+  "onboarding.subscriptionRegisterStart.install": {},
+  "onboarding.subscriptionRegisterStart.title": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
   "readState.markUnread.failed": {},
@@ -7592,6 +7745,57 @@ export interface MessageArgs {
   "onboarding.harnessLogin.waitingBrowser": Record<string, never>;
   "onboarding.harnessLogin.waitingDetail": { cli: string };
   "onboarding.harnessLogin.waitingDevice": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.badgePaused": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.detailCleanup": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.detailDisabled": { cli: string };
+  "onboarding.subscriptionRegisterCalm.detailForbidden": { cli: string };
+  "onboarding.subscriptionRegisterCalm.detailLimit": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.detailPaused": { cli: string };
+  "onboarding.subscriptionRegisterCalm.lineCleanup": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.lineDisabled": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.lineForbidden": Record<string, never>;
+  "onboarding.subscriptionRegisterCalm.lineLimit": { cli: string };
+  "onboarding.subscriptionRegisterCalm.linePaused": { cli: string };
+  "onboarding.subscriptionRegisterConfirm.bulletCost": { cli: string };
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.create": { handle: string };
+  "onboarding.subscriptionRegisterConfirm.later": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.nameHint": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.nameLabel": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.noStore": Record<string, never>;
+  "onboarding.subscriptionRegisterConfirm.title": { cli: string; cliJosa: string; handle: string; josa: string };
+  "onboarding.subscriptionRegisterDone.agents": Record<string, never>;
+  "onboarding.subscriptionRegisterDone.close": Record<string, never>;
+  "onboarding.subscriptionRegisterDone.detail": { cli: string; cliJosa: string; handle: string; josa: string };
+  "onboarding.subscriptionRegisterDone.existing": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterDone.existingDetail": Record<string, never>;
+  "onboarding.subscriptionRegisterDone.line": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterFailed.line": { reason: string };
+  "onboarding.subscriptionRegisterFailed.reasonDefault": Record<string, never>;
+  "onboarding.subscriptionRegisterFailed.reasonName": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.detailCliFailed": { cli: string; cliJosa: string };
+  "onboarding.subscriptionRegisterManual.detailCliMissing": { cli: string };
+  "onboarding.subscriptionRegisterManual.detailCodex": { cli: string; cliJosa: string };
+  "onboarding.subscriptionRegisterManual.detailUnsupported": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.disclosure": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.hide": Record<string, never>;
+  "onboarding.subscriptionRegisterManual.lineYourself": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterName.charset": Record<string, never>;
+  "onboarding.subscriptionRegisterName.invalid": Record<string, never>;
+  "onboarding.subscriptionRegisterName.required": Record<string, never>;
+  "onboarding.subscriptionRegisterName.taken": Record<string, never>;
+  "onboarding.subscriptionRegisterName.tooLong": Record<string, never>;
+  "onboarding.subscriptionRegisterName.tooShort": Record<string, never>;
+  "onboarding.subscriptionRegisterProgress.cliStage": { cli: string };
+  "onboarding.subscriptionRegisterProgress.loggedIn": { cli: string; josa: string };
+  "onboarding.subscriptionRegisterProgress.registering": { handle: string; josa: string };
+  "onboarding.subscriptionRegisterProgress.serverStage": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.create": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.detail": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.install": Record<string, never>;
+  "onboarding.subscriptionRegisterStart.title": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
   "readState.markUnread.failed": Record<string, never>;

@@ -10464,6 +10464,596 @@ export const catalog: MessageCatalog = {
       "value": "Enter the code shown in the terminal into your browser."
     }
   ],
+  "onboarding.subscriptionRegisterCalm.badgeDisabled": [
+    {
+      "type": 0,
+      "value": "Off · Server setting"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.badgePaused": [
+    {
+      "type": 0,
+      "value": "Gray · Under inquiry"
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailCleanup": [
+    {
+      "type": 0,
+      "value": "Finish removing the connection on the Agents screen."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailDisabled": [
+    {
+      "type": 0,
+      "value": "It works once the server operator turns it on. Your login is unchanged, and you can still use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on your Mac directly in Terminal."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailForbidden": [
+    {
+      "type": 0,
+      "value": "You're logged in. You can use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on your Mac directly in Terminal. To call it as an agent, ask an admin."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailLimit": [
+    {
+      "type": 0,
+      "value": "Clean up agents you no longer use first."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.detailPaused": [
+    {
+      "type": 0,
+      "value": "The server operator turned this off while asking the service provider about the allowed scope. Your login is unchanged, and you can still use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on your Mac directly in Terminal."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineCleanup": [
+    {
+      "type": 0,
+      "value": "You can create this agent again once its connection is fully removed."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineDisabled": [
+    {
+      "type": 0,
+      "value": "On this server, agents that use a subscription are turned off."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineForbidden": [
+    {
+      "type": 0,
+      "value": "Only a workspace admin can turn this into an agent."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.lineLimit": [
+    {
+      "type": 0,
+      "value": "You already have five agents that use a "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " subscription."
+    }
+  ],
+  "onboarding.subscriptionRegisterCalm.linePaused": [
+    {
+      "type": 0,
+      "value": "On this server, agents that use a "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " subscription are paused for now."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletCost": [
+    {
+      "type": 0,
+      "value": "The cost comes out of your "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " subscription. Team keys aren't used."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletMacOn": [
+    {
+      "type": 0,
+      "value": "It only answers while this Mac is on and oort is open."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.bulletOnlyMe": [
+    {
+      "type": 0,
+      "value": "Only you can call it. If someone else calls it, a notice goes out."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.create": [
+    {
+      "type": 0,
+      "value": "Create @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameHint": [
+    {
+      "type": 0,
+      "value": "Call it in channels as @name. Use lowercase letters, numbers, - and _."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.nameLabel": [
+    {
+      "type": 0,
+      "value": "Agent name"
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.noStore": [
+    {
+      "type": 0,
+      "value": "Login details aren't stored in oort."
+    }
+  ],
+  "onboarding.subscriptionRegisterConfirm.title": [
+    {
+      "type": 0,
+      "value": "Make "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on this Mac callable as @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.agents": [
+    {
+      "type": 0,
+      "value": "View agents"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.close": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.detail": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " once within 15 minutes and it connects. Then call @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": " in a channel. If 15 minutes pass, press again here."
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "euro": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existing": [
+    {
+      "type": 0,
+      "value": "@"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": " already exists."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.existingDetail": [
+    {
+      "type": 0,
+      "value": "It's already an agent on this Mac, so a new one wasn't created."
+    }
+  ],
+  "onboarding.subscriptionRegisterDone.line": [
+    {
+      "type": 0,
+      "value": "Created @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.line": [
+    {
+      "type": 0,
+      "value": "Couldn't create it: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server"
+    }
+  ],
+  "onboarding.subscriptionRegisterFailed.reasonName": [
+    {
+      "type": 0,
+      "value": "That name can't be used"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliFailed": [
+    {
+      "type": 0,
+      "value": "The app couldn't connect "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": ". Run the command below in Terminal once. The connection value is shown only once, now."
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCliMissing": [
+    {
+      "type": 0,
+      "value": "Couldn't find "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " on this Mac, so the app couldn't connect it. Run the command below in Terminal once."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailCodex": [
+    {
+      "type": 0,
+      "value": "To use "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": ", enter this address and connection value into its MCP servers. The connection value is shown only once, now."
+    },
+    {
+      "type": 5,
+      "value": "cliJosa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.detailUnsupported": [
+    {
+      "type": 0,
+      "value": "The app can't connect it in this environment. Run the command below in Terminal once."
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.disclosure": [
+    {
+      "type": 0,
+      "value": "Do it yourself"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.hide": [
+    {
+      "type": 0,
+      "value": "Collapse"
+    }
+  ],
+  "onboarding.subscriptionRegisterManual.lineYourself": [
+    {
+      "type": 0,
+      "value": "Created @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": ". You just need to connect it yourself."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterName.charset": [
+    {
+      "type": 0,
+      "value": "Only lowercase letters, numbers, - and _ are allowed."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.invalid": [
+    {
+      "type": 0,
+      "value": "That name can't be used. Use lowercase letters, numbers, - and _."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.required": [
+    {
+      "type": 0,
+      "value": "Enter a name."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.taken": [
+    {
+      "type": 0,
+      "value": "That name is already in use. Enter a different one."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooLong": [
+    {
+      "type": 0,
+      "value": "Names can be up to 32 characters."
+    }
+  ],
+  "onboarding.subscriptionRegisterName.tooShort": [
+    {
+      "type": 0,
+      "value": "Use at least two characters."
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.cliStage": [
+    {
+      "type": 0,
+      "value": "Connecting to "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.loggedIn": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " is logged in."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.registering": [
+    {
+      "type": 0,
+      "value": "Creating @"
+    },
+    {
+      "type": 1,
+      "value": "handle"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.subscriptionRegisterProgress.serverStage": [
+    {
+      "type": 0,
+      "value": "Creating the agent"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.create": [
+    {
+      "type": 0,
+      "value": "Create as an agent"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.detail": [
+    {
+      "type": 0,
+      "value": "Lets you call the Claude Code or Codex you're logged into on this Mac with @ in a channel. Only you can call it."
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.install": [
+    {
+      "type": 0,
+      "value": "Install guide"
+    }
+  ],
+  "onboarding.subscriptionRegisterStart.title": [
+    {
+      "type": 0,
+      "value": "Create an agent with my subscription"
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,
