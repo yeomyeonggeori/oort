@@ -3,6 +3,7 @@ import {
   type MessageAttachment,
 } from '@momo/core/features/attachments/model';
 import { useCallback, useState } from 'react';
+import { useFormatMessage } from '../../i18n/useFormatMessage';
 import { presentShareSheet } from '../../lib/shareSheet';
 import { downloadAttachmentFile } from './content';
 
@@ -22,6 +23,7 @@ export function useShareAttachment(
   channelId: string,
   attachment: MessageAttachment,
 ): [DownloadState, () => void] {
+  const formatMessage = useFormatMessage();
   const [download, setDownload] = useState<DownloadState>({ status: 'idle' });
   const start = useCallback(() => {
     if (download.status === 'downloading') return;
@@ -32,12 +34,12 @@ export function useShareAttachment(
       .then(file =>
         // `Share.share` 를 곧바로 부르지 않는다: 이 시트는 뒤 화면을 막지 않아서 시트를 닫는 탭이 뒤의 줄·단추에 샌다(#5207, `shareSheet.ts` 머리말).
         presentShareSheet({
-          title: attachmentDisplayName(attachment),
+          title: attachmentDisplayName(formatMessage, attachment),
           url: file.uri,
         }),
       )
       .then(() => setDownload({ status: 'idle' }))
       .catch(() => setDownload({ status: 'failed' }));
-  }, [attachment, channelId, download.status, workspaceId]);
+  }, [attachment, channelId, download.status, formatMessage, workspaceId]);
   return [download, start];
 }

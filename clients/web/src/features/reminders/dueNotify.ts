@@ -1,8 +1,9 @@
-import { notificationBody, type NotifyFormat } from "@momo/core/features/notifications/model";
+import type { LocaleService } from "@momo/core/i18n";
+import { notificationBody } from "@momo/core/features/notifications/model";
 import {
   reminderBacklogNotificationBody,
   reminderPreviewText,
-  REMINDER_NOTIFY_TITLE,
+  REMINDER_NOTIFY_TITLE_KEY,
   type MessageReminder,
 } from "@momo/core/features/reminders/model";
 import { isDesktop, showNotification } from "@/lib/tauri";
@@ -37,17 +38,21 @@ export function reminderNotifyDecision(args: {
   return { show: true };
 }
 
+type FormatMessage = LocaleService["formatMessage"];
+
 export function reminderNotificationBody(
   reminder: MessageReminder,
-  formatMessage: NotifyFormat
+  formatMessage: FormatMessage
 ): string | undefined {
-  return notificationBody(reminderPreviewText(reminder), formatMessage);
+  return notificationBody(reminderPreviewText(formatMessage, reminder), (key, values) =>
+    formatMessage(key, values as never)
+  );
 }
 
 export async function fireReminderNotification(
   reminder: MessageReminder,
   announcedIds: Set<string>,
-  formatMessage: NotifyFormat
+  formatMessage: FormatMessage
 ): Promise<boolean> {
   const decision = reminderNotifyDecision({
     isDesktop: isDesktop(),
@@ -57,7 +62,7 @@ export async function fireReminderNotification(
   announcedIds.add(reminder.id);
   if (!decision.show) return false;
   return showNotification(
-    REMINDER_NOTIFY_TITLE,
+    formatMessage(REMINDER_NOTIFY_TITLE_KEY),
     reminderNotificationBody(reminder, formatMessage)
   );
 }
@@ -65,7 +70,8 @@ export async function fireReminderNotification(
 export async function fireReminderBacklogNotification(
   count: number,
   announcedIds: Set<string>,
-  ids: readonly string[]
+  ids: readonly string[],
+  formatMessage: FormatMessage
 ): Promise<boolean> {
   for (const id of ids) announcedIds.add(id);
   const decision = reminderNotifyDecision({
@@ -75,7 +81,7 @@ export async function fireReminderBacklogNotification(
   });
   if (!decision.show) return false;
   return showNotification(
-    REMINDER_NOTIFY_TITLE,
-    reminderBacklogNotificationBody(count)
+    formatMessage(REMINDER_NOTIFY_TITLE_KEY),
+    reminderBacklogNotificationBody(formatMessage, count)
   );
 }

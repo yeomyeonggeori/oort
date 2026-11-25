@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MessageReminder } from "@momo/core/features/reminders/model";
 import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
-import { createMessageCopy } from "@momo/core/testkit";
-import type { NotifyFormat } from "@momo/core/features/notifications/model";
+import { createMessageService } from "@momo/core/i18n";
 import { reminderNotifyDecision, reminderNotificationBody } from "./dueNotify";
 import { reminderBacklogNotificationBody } from "@momo/core/features/reminders/model";
 
-const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
-const koFormat: NotifyFormat = (key, values) => koCopy(key, values as never);
+const koFormat = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
 
 const reminder: MessageReminder = {
   id: "r-1",
@@ -60,6 +58,6 @@ describe("reminderNotifyDecision", () => {
         messagePreview: "```secret```",
       }, koFormat)
     ).toBe("코드");
-    expect(reminderBacklogNotificationBody(4)).toBe("밀린 알림 4건");
+    expect(reminderBacklogNotificationBody(koFormat, 4)).toBe("밀린 알림 4건");
   });
 });

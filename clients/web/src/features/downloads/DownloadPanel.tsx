@@ -25,6 +25,7 @@ import {
   type RowAction,
 } from "./downloadsModel";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // 상단 오른쪽 다운로드 단추의 패널 (#4587). 표시만 한다: 상태는 스토어가, 행동은 부모가 쥔다.
 //
@@ -68,7 +69,8 @@ function DownloadRow({
   notice: string | undefined;
   onAction: (item: DownloadItem, action: RowAction) => void;
 }) {
-  const title = rowTitle(item);
+  const formatMessage = useFormatMessage();
+  const title = rowTitle(formatMessage, item);
   const { head, tail } = splitFileName(title);
   const FileIcon = isImageMime(item.mime) ? ImageIcon : FileText;
   const missing = item.phase === "done" && item.present === false;

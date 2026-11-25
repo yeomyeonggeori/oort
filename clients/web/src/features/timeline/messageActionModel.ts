@@ -6,7 +6,7 @@ import {
   copyLinkActionKey,
   copyMessageActionKey,
 } from "@momo/core/features/timeline/copyLabels";
-import { REMINDER_MENU_LABEL } from "@momo/core/features/reminders/model";
+import { REMINDER_MENU_KEY } from "@momo/core/features/reminders/model";
 import { MARK_UNREAD_ACTION_KEY } from "@momo/core/features/readState/copy";
 import type { PlainMessageKey } from "@momo/core/i18n";
 
@@ -211,7 +211,7 @@ export function messageActionItems(
     items.push({
       key: "remind",
       testKey: "remind",
-      label: REMINDER_MENU_LABEL,
+      labelKey: REMINDER_MENU_KEY,
       group: MESSAGE_ACTION_GROUP.message,
     });
   }

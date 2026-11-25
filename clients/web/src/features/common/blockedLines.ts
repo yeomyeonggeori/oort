@@ -1,4 +1,4 @@
-import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
+import { COMPOSER_OFFLINE_KEY } from "@momo/core/features/chat/composerCopy";
 import { APPROVAL_OFFLINE_KEY } from "@momo/core/features/timeline/approvalNote";
 import { useConnection } from "@/features/common/connectionContext";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
@@ -22,7 +22,7 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 export function useComposerBlockedLine(): string {
   const { view } = useConnection();
   const formatMessage = useFormatMessage();
-  return view.composerNote === null ? COMPOSER_OFFLINE_COPY : formatMessage(view.composerNote);
+  return formatMessage(view.composerNote ?? COMPOSER_OFFLINE_KEY);
 }
 
 /** 승인을 막았을 때 결정 단추 자리의 한 줄이 말하는 문장. */

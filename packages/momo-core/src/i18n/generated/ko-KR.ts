@@ -30,6 +30,594 @@ export const catalog: MessageCatalog = {
       "value": "단축키 찾기"
     }
   ],
+  "attachments.action.attach": [
+    {
+      "type": 0,
+      "value": "파일 첨부"
+    }
+  ],
+  "attachments.action.clearAll": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "attachments.action.download": [
+    {
+      "type": 0,
+      "value": "첨부파일 내려받기"
+    }
+  ],
+  "attachments.action.downloadNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 첨부파일 내려받기"
+    }
+  ],
+  "attachments.action.expandImage": [
+    {
+      "type": 0,
+      "value": "크게 보기"
+    }
+  ],
+  "attachments.action.expandNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 크게 보기"
+    }
+  ],
+  "attachments.action.expandNamedAt": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " 크게 보기"
+    }
+  ],
+  "attachments.action.remove": [
+    {
+      "type": 0,
+      "value": "첨부 제거"
+    }
+  ],
+  "attachments.action.removeNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 첨부 제거"
+    }
+  ],
+  "attachments.action.retryNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 다시 시도"
+    }
+  ],
+  "attachments.announce.firstGroup": [
+    {
+      "type": 0,
+      "value": "첨부 파일 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.nextGroup": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.pair": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.announce.single": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "attachments.card.aria": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "meta"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "attachments.card.stateIdle": [
+    {
+      "type": 0,
+      "value": "첨부파일 내려받기, 공유하기"
+    }
+  ],
+  "attachments.issue.blocked": [
+    {
+      "type": 0,
+      "value": "이 배포의 보안 정책이 보관소 주소를 막았습니다"
+    }
+  ],
+  "attachments.issue.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "카메라 접근 권한이 꺼져 있어요"
+    }
+  ],
+  "attachments.issue.cameraUnavailable": [
+    {
+      "type": 0,
+      "value": "카메라를 열지 못했어요"
+    }
+  ],
+  "attachments.issue.forbidden": [
+    {
+      "type": 0,
+      "value": "이 채널에 파일을 올릴 수 없습니다"
+    }
+  ],
+  "attachments.issue.mismatch": [
+    {
+      "type": 0,
+      "value": "올라간 파일이 고른 파일과 다릅니다"
+    }
+  ],
+  "attachments.issue.noArchive": [
+    {
+      "type": 0,
+      "value": "파일 보관소가 연결돼 있지 않습니다"
+    }
+  ],
+  "attachments.issue.permissionDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근 권한이 꺼져 있습니다"
+    }
+  ],
+  "attachments.issue.selectionCancelled": [
+    {
+      "type": 0,
+      "value": "선택을 취소했습니다"
+    }
+  ],
+  "attachments.issue.tooLarge": [
+    {
+      "type": 0,
+      "value": "100MB를 초과함"
+    }
+  ],
+  "attachments.issue.unavailable": [
+    {
+      "type": 0,
+      "value": "업로드 실패"
+    }
+  ],
+  "attachments.kind.archive": [
+    {
+      "type": 0,
+      "value": "압축"
+    }
+  ],
+  "attachments.kind.audio": [
+    {
+      "type": 0,
+      "value": "오디오"
+    }
+  ],
+  "attachments.kind.file": [
+    {
+      "type": 0,
+      "value": "파일"
+    }
+  ],
+  "attachments.kind.font": [
+    {
+      "type": 0,
+      "value": "글꼴"
+    }
+  ],
+  "attachments.kind.image": [
+    {
+      "type": 0,
+      "value": "이미지"
+    }
+  ],
+  "attachments.kind.pdf": [
+    {
+      "type": 0,
+      "value": "PDF"
+    }
+  ],
+  "attachments.kind.pdfDocument": [
+    {
+      "type": 0,
+      "value": "PDF 문서"
+    }
+  ],
+  "attachments.kind.text": [
+    {
+      "type": 0,
+      "value": "텍스트"
+    }
+  ],
+  "attachments.kind.video": [
+    {
+      "type": 0,
+      "value": "동영상"
+    }
+  ],
+  "attachments.meta.kindDurationSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.meta.kindSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.next.blocked": [
+    {
+      "type": 0,
+      "value": "서버 설정을 확인하세요"
+    }
+  ],
+  "attachments.next.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "기기 설정에서 카메라 접근을 허용한 뒤 다시 시도해 주세요"
+    }
+  ],
+  "attachments.next.forbidden": [
+    {
+      "type": 0,
+      "value": "채널 관리자에게 문의하세요"
+    }
+  ],
+  "attachments.next.noArchive": [
+    {
+      "type": 0,
+      "value": "서버 관리자에게 알리세요"
+    }
+  ],
+  "attachments.next.permissionDenied": [
+    {
+      "type": 0,
+      "value": "기기 설정에서 사진 접근을 허용한 뒤 다시 시도하세요"
+    }
+  ],
+  "attachments.next.tooLarge": [
+    {
+      "type": 0,
+      "value": "더 작은 파일을 고르세요"
+    }
+  ],
+  "attachments.pdf.notPdf": [
+    {
+      "type": 0,
+      "value": "PDF 형식이 아니어서 열 수 없습니다. 파일을 내려받아 확인하세요."
+    }
+  ],
+  "attachments.pdf.open": [
+    {
+      "type": 0,
+      "value": "새 창에서 PDF 열기"
+    }
+  ],
+  "attachments.pdf.openDesktop": [
+    {
+      "type": 0,
+      "value": "기본 앱에서 PDF 열기"
+    }
+  ],
+  "attachments.pdf.openFailed": [
+    {
+      "type": 0,
+      "value": "PDF를 열지 못했습니다. 다시 시도하거나 파일을 내려받으세요."
+    }
+  ],
+  "attachments.pdf.opening": [
+    {
+      "type": 0,
+      "value": "PDF 여는 중"
+    }
+  ],
+  "attachments.pdf.popupBlocked": [
+    {
+      "type": 0,
+      "value": "새 창이 막혔습니다. 브라우저의 팝업 차단을 풀거나 파일을 내려받으세요."
+    }
+  ],
+  "attachments.preview.failed": [
+    {
+      "type": 0,
+      "value": "미리보기를 불러오지 못했습니다"
+    }
+  ],
+  "attachments.preview.files": [
+    {
+      "type": 0,
+      "value": "파일 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "attachments.preview.loading": [
+    {
+      "type": 0,
+      "value": "미리보기 불러오는 중"
+    }
+  ],
+  "attachments.preview.photos": [
+    {
+      "type": 0,
+      "value": "사진 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "attachments.preview.photosAndFiles": [
+    {
+      "type": 1,
+      "value": "photos"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "files"
+    }
+  ],
+  "attachments.sendBlock.failed": [
+    {
+      "type": 0,
+      "value": "실패한 첨부를 지운 뒤 보낼 수 있습니다."
+    }
+  ],
+  "attachments.sendBlock.retryable": [
+    {
+      "type": 0,
+      "value": "실패한 첨부를 다시 시도하거나 지운 뒤 보낼 수 있습니다."
+    }
+  ],
+  "attachments.sendBlock.uploading": [
+    {
+      "type": 0,
+      "value": "업로드가 끝나면 보낼 수 있습니다."
+    }
+  ],
+  "attachments.status.downloadFailed": [
+    {
+      "type": 0,
+      "value": "내려받기 실패"
+    }
+  ],
+  "attachments.status.downloading": [
+    {
+      "type": 0,
+      "value": "내려받는 중"
+    }
+  ],
+  "attachments.status.downloadingPercent": [
+    {
+      "type": 0,
+      "value": "내려받는 중 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "attachments.status.failedWithNext": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    }
+  ],
+  "attachments.status.pairDot": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.status.queued": [
+    {
+      "type": 0,
+      "value": "대기 중"
+    }
+  ],
+  "attachments.status.sizeAndWord": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.status.uploaded": [
+    {
+      "type": 0,
+      "value": "업로드 완료"
+    }
+  ],
+  "attachments.status.uploading": [
+    {
+      "type": 0,
+      "value": "업로드 중"
+    }
+  ],
+  "attachments.status.uploadingNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 업로드 중"
+    }
+  ],
+  "attachments.tray.countLabel": [
+    {
+      "type": 0,
+      "value": "첨부 파일 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "attachments.tray.folderRejected": [
+    {
+      "type": 0,
+      "value": "폴더는 붙일 수 없습니다. 안에 있는 파일을 골라 주세요."
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
@@ -64,6 +652,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 첨부 빼기"
+    }
+  ],
+  "attachments.tray.title": [
+    {
+      "type": 0,
+      "value": "첨부 파일"
     }
   ],
   "attachments.video.cardLabel": [
@@ -3694,6 +4288,76 @@ export const catalog: MessageCatalog = {
       "value": "자 이내여야 합니다."
     }
   ],
+  "chat.composer.fieldLabelPerson": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 보낼 메시지"
+    }
+  ],
+  "chat.composer.fieldLabelPlace": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에 보낼 메시지"
+    }
+  ],
+  "chat.composer.mentionAffordance": [
+    {
+      "type": 0,
+      "value": "@⁠로 부르기"
+    }
+  ],
+  "chat.composer.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있습니다."
+    }
+  ],
+  "chat.composer.placeholderPerson": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 메시지 보내기"
+    }
+  ],
+  "chat.composer.placeholderPlace": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에 메시지 보내기"
+    }
+  ],
+  "chat.hint.composerKeys": [
+    {
+      "type": 0,
+      "value": "Enter로 보내기 · Shift+Enter로 줄바꿈"
+    }
+  ],
+  "chat.hint.editorKeys": [
+    {
+      "type": 0,
+      "value": "Enter로 저장 · Shift+Enter로 줄바꿈 · Esc로 취소"
+    }
+  ],
+  "chat.thread.placeholder": [
+    {
+      "type": 0,
+      "value": "답글 쓰기"
+    }
+  ],
   "cliLogin.consent.approve": [
     {
       "type": 0,
@@ -5932,6 +6596,120 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "정지됨"
+    }
+  ],
+  "emoji.catalog.emptyDetail": [
+    {
+      "type": 0,
+      "value": "다른 이름이나 :code:로 검색하세요."
+    }
+  ],
+  "emoji.catalog.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "찾는 이모티콘이 없습니다"
+    }
+  ],
+  "emoji.catalog.error": [
+    {
+      "type": 0,
+      "value": "이모티콘 목록을 불러오지 못했습니다."
+    }
+  ],
+  "emoji.catalog.offline": [
+    {
+      "type": 0,
+      "value": "지금 오프라인입니다. 연결되면 다시 여세요."
+    }
+  ],
+  "emoji.category.activity": [
+    {
+      "type": 0,
+      "value": "활동"
+    }
+  ],
+  "emoji.category.flags": [
+    {
+      "type": 0,
+      "value": "깃발"
+    }
+  ],
+  "emoji.category.foods": [
+    {
+      "type": 0,
+      "value": "음식"
+    }
+  ],
+  "emoji.category.frequent": [
+    {
+      "type": 0,
+      "value": "자주 씀"
+    }
+  ],
+  "emoji.category.nature": [
+    {
+      "type": 0,
+      "value": "자연"
+    }
+  ],
+  "emoji.category.objects": [
+    {
+      "type": 0,
+      "value": "물건"
+    }
+  ],
+  "emoji.category.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "emoji.category.places": [
+    {
+      "type": 0,
+      "value": "장소"
+    }
+  ],
+  "emoji.category.symbols": [
+    {
+      "type": 0,
+      "value": "기호"
+    }
+  ],
+  "emoji.tone.dark": [
+    {
+      "type": 0,
+      "value": "어두운 피부"
+    }
+  ],
+  "emoji.tone.default": [
+    {
+      "type": 0,
+      "value": "기본 피부"
+    }
+  ],
+  "emoji.tone.light": [
+    {
+      "type": 0,
+      "value": "밝은 피부"
+    }
+  ],
+  "emoji.tone.medium": [
+    {
+      "type": 0,
+      "value": "중간 피부"
+    }
+  ],
+  "emoji.tone.mediumDark": [
+    {
+      "type": 0,
+      "value": "중간 어두운 피부"
+    }
+  ],
+  "emoji.tone.mediumLight": [
+    {
+      "type": 0,
+      "value": "중간 밝은 피부"
     }
   ],
   "expressions.add.adminsOnly": [
@@ -13976,6 +14754,234 @@ export const catalog: MessageCatalog = {
       "value": " 공개"
     }
   ],
+  "reminders.action.complete": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "reminders.action.custom": [
+    {
+      "type": 0,
+      "value": "날짜와 시간 고르기"
+    }
+  ],
+  "reminders.action.delete": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "reminders.action.snooze": [
+    {
+      "type": 0,
+      "value": "미루기"
+    }
+  ],
+  "reminders.action.snoozeCommit": [
+    {
+      "type": 0,
+      "value": "알림 미루기"
+    }
+  ],
+  "reminders.channel.unknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 채널"
+    }
+  ],
+  "reminders.confirm.detail": [
+    {
+      "type": 0,
+      "value": "완료한 알림은 목록에서 사라지고 되돌릴 수 없습니다."
+    }
+  ],
+  "reminders.confirm.title": [
+    {
+      "type": 0,
+      "value": "이 알림을 완료할까요?"
+    }
+  ],
+  "reminders.due.days": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일 후"
+    }
+  ],
+  "reminders.due.hours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 후"
+    }
+  ],
+  "reminders.due.minutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 후"
+    }
+  ],
+  "reminders.due.overdue": [
+    {
+      "type": 0,
+      "value": "기한 지남"
+    }
+  ],
+  "reminders.due.soon": [
+    {
+      "type": 0,
+      "value": "곧"
+    }
+  ],
+  "reminders.empty.detail": [
+    {
+      "type": 0,
+      "value": "메시지 메뉴에서 나중에 알림을 누르면 여기 모입니다."
+    }
+  ],
+  "reminders.empty.headline": [
+    {
+      "type": 0,
+      "value": "아직 나중에 볼 메시지가 없습니다."
+    }
+  ],
+  "reminders.error.completeFailed": [
+    {
+      "type": 0,
+      "value": "알림을 완료하지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.error.deleteFailed": [
+    {
+      "type": 0,
+      "value": "알림을 지우지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.error.forbiddenChange": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 그 알림을 바꿀 수 없습니다."
+    }
+  ],
+  "reminders.error.forbiddenCreate": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 알림을 만들 수 없습니다."
+    }
+  ],
+  "reminders.error.loadFailed": [
+    {
+      "type": 0,
+      "value": "나중에 볼 메시지를 불러오지 못했습니다."
+    }
+  ],
+  "reminders.error.notFound": [
+    {
+      "type": 0,
+      "value": "그 알림을 찾지 못했습니다. 목록을 다시 불러 보세요."
+    }
+  ],
+  "reminders.error.pastTime": [
+    {
+      "type": 0,
+      "value": "지난 시각은 고를 수 없습니다. 다른 시각을 고르세요."
+    }
+  ],
+  "reminders.error.saveFailed": [
+    {
+      "type": 0,
+      "value": "알림을 저장하지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.error.snoozeFailed": [
+    {
+      "type": 0,
+      "value": "알림을 미루지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.item.fallbackPreview": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "reminders.menu.remind": [
+    {
+      "type": 0,
+      "value": "나중에 알림"
+    }
+  ],
+  "reminders.notify.backlog": [
+    {
+      "type": 0,
+      "value": "밀린 알림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건"
+    }
+  ],
+  "reminders.notify.title": [
+    {
+      "type": 0,
+      "value": "나중에 알림"
+    }
+  ],
+  "reminders.preset.in1h": [
+    {
+      "type": 0,
+      "value": "1시간 후"
+    }
+  ],
+  "reminders.preset.in30m": [
+    {
+      "type": 0,
+      "value": "30분 후"
+    }
+  ],
+  "reminders.preset.in3h": [
+    {
+      "type": 0,
+      "value": "3시간 후"
+    }
+  ],
+  "reminders.preset.nextMonday9": [
+    {
+      "type": 0,
+      "value": "다음 주 월요일 오전 9시"
+    }
+  ],
+  "reminders.preset.tomorrow9": [
+    {
+      "type": 0,
+      "value": "내일 오전 9시"
+    }
+  ],
+  "reminders.tab.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -14066,6 +15072,1074 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이 답글이 달린 스레드 열기"
+    }
+  ],
+  "scheduled.action.change": [
+    {
+      "type": 0,
+      "value": "시간 바꾸기"
+    }
+  ],
+  "scheduled.action.copy": [
+    {
+      "type": 0,
+      "value": "내용 복사"
+    }
+  ],
+  "scheduled.action.delete": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "scheduled.action.edit": [
+    {
+      "type": 0,
+      "value": "고치기"
+    }
+  ],
+  "scheduled.action.rearm": [
+    {
+      "type": 0,
+      "value": "다시 예약"
+    }
+  ],
+  "scheduled.action.review": [
+    {
+      "type": 0,
+      "value": "내용 확인"
+    }
+  ],
+  "scheduled.action.rowMenu": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": " 예약 동작"
+    }
+  ],
+  "scheduled.action.sendNow": [
+    {
+      "type": 0,
+      "value": "지금 보내기"
+    }
+  ],
+  "scheduled.banner.action": [
+    {
+      "type": 0,
+      "value": "보기"
+    }
+  ],
+  "scheduled.banner.failed": [
+    {
+      "type": 0,
+      "value": "예약한 메시지 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 보내지 못했어요"
+    }
+  ],
+  "scheduled.banner.pending": [
+    {
+      "type": 0,
+      "value": "이 "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "dm": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "스레드"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 예약된 메시지 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "scheduled.block.titleTwoLines": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "scheduled.delete.body": [
+    {
+      "type": 0,
+      "value": "지우면 이 메시지는 보내지 않아요. 되돌릴 수 없어요."
+    }
+  ],
+  "scheduled.delete.confirm": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "scheduled.delete.pending": [
+    {
+      "type": 0,
+      "value": "지우는 중"
+    }
+  ],
+  "scheduled.delete.title": [
+    {
+      "type": 0,
+      "value": "예약을 지울까요?"
+    }
+  ],
+  "scheduled.dialog.commit": [
+    {
+      "type": 0,
+      "value": "예약하기"
+    }
+  ],
+  "scheduled.dialog.commitChange": [
+    {
+      "type": 0,
+      "value": "변경하기"
+    }
+  ],
+  "scheduled.dialog.date": [
+    {
+      "type": 0,
+      "value": "날짜"
+    }
+  ],
+  "scheduled.dialog.description": [
+    {
+      "type": 0,
+      "value": "고른 시각에 이 메시지를 보내요. 내 기기가 꺼져 있어도 보내요."
+    }
+  ],
+  "scheduled.dialog.errFar": [
+    {
+      "type": 0,
+      "value": "120일 안에서 골라 주세요"
+    }
+  ],
+  "scheduled.dialog.errInvalid": [
+    {
+      "type": 0,
+      "value": "날짜와 시간을 확인해 주세요"
+    }
+  ],
+  "scheduled.dialog.errSoon": [
+    {
+      "type": 0,
+      "value": "1분 뒤부터 예약할 수 있어요"
+    }
+  ],
+  "scheduled.dialog.offline": [
+    {
+      "type": 0,
+      "value": "연결이 없어서 지금은 할 수 없어요. 연결되면 다시 눌러 주세요."
+    }
+  ],
+  "scheduled.dialog.preview": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 보내요"
+    }
+  ],
+  "scheduled.dialog.saving": [
+    {
+      "type": 0,
+      "value": "예약 중"
+    }
+  ],
+  "scheduled.dialog.time": [
+    {
+      "type": 0,
+      "value": "시간"
+    }
+  ],
+  "scheduled.dialog.title": [
+    {
+      "type": 0,
+      "value": "보낼 시각 고르기"
+    }
+  ],
+  "scheduled.dialog.titleChange": [
+    {
+      "type": 0,
+      "value": "보낼 시각 바꾸기"
+    }
+  ],
+  "scheduled.dialog.titleRearm": [
+    {
+      "type": 0,
+      "value": "다시 예약하기"
+    }
+  ],
+  "scheduled.disabled.attachFailedNextRemove": [
+    {
+      "type": 0,
+      "value": "지우면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.attachFailedNextRetry": [
+    {
+      "type": 0,
+      "value": "다시 올리거나 지우면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.attachFailedReason": [
+    {
+      "type": 0,
+      "value": "올리지 못한 파일이 있어요"
+    }
+  ],
+  "scheduled.disabled.attachUploadingNext": [
+    {
+      "type": 0,
+      "value": "끝나면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.attachUploadingReason": [
+    {
+      "type": 0,
+      "value": "파일이 올라가는 중이에요"
+    }
+  ],
+  "scheduled.disabled.commandNext": [
+    {
+      "type": 0,
+      "value": "명령을 지우면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.commandReason": [
+    {
+      "type": 0,
+      "value": "명령은 예약할 수 없어요"
+    }
+  ],
+  "scheduled.disabled.emptyReason": [
+    {
+      "type": 0,
+      "value": "보낼 내용을 쓰면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.limit": [
+    {
+      "type": 0,
+      "value": "예약은 50개까지 걸 수 있어요. 대기 중인 예약을 지우거나 지금 보낸 뒤에 다시 해 보세요."
+    }
+  ],
+  "scheduled.disabled.personalCallNext": [
+    {
+      "type": 0,
+      "value": "호출을 빼면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.personalCallReason": [
+    {
+      "type": 0,
+      "value": "개인 에이전트 호출은 예약할 수 없어요"
+    }
+  ],
+  "scheduled.disabled.quoteNext": [
+    {
+      "type": 0,
+      "value": "인용을 지우면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.disabled.quoteReason": [
+    {
+      "type": 0,
+      "value": "인용 답장은 예약할 수 없어요"
+    }
+  ],
+  "scheduled.disabled.unavailableNext": [
+    {
+      "type": 0,
+      "value": "관리자에게 물어보세요"
+    }
+  ],
+  "scheduled.disabled.unavailableReason": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 예약을 쓸 수 없어요"
+    }
+  ],
+  "scheduled.dm.conversationLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "과"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "와"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "의 대화"
+    }
+  ],
+  "scheduled.edit.attachNote": [
+    {
+      "type": 0,
+      "value": "첨부는 바꿀 수 없어요. 바꾸려면 지우고 다시 예약해 주세요."
+    }
+  ],
+  "scheduled.edit.commit": [
+    {
+      "type": 0,
+      "value": "저장하기"
+    }
+  ],
+  "scheduled.edit.title": [
+    {
+      "type": 0,
+      "value": "예약한 메시지 고치기"
+    }
+  ],
+  "scheduled.empty.action": [
+    {
+      "type": 0,
+      "value": "대화로 돌아가기"
+    }
+  ],
+  "scheduled.empty.bodyPhone": [
+    {
+      "type": 0,
+      "value": "보내기 단추를 길게 누르면 예약할 수 있어요"
+    }
+  ],
+  "scheduled.empty.bodyWeb": [
+    {
+      "type": 0,
+      "value": "메시지를 쓰고 보내기 옆 화살표에서 시각을 고르면 예약돼요"
+    }
+  ],
+  "scheduled.empty.title": [
+    {
+      "type": 0,
+      "value": "예약한 메시지가 없어요"
+    }
+  ],
+  "scheduled.error.tooLate": [
+    {
+      "type": 0,
+      "value": "곧 보내서 바꿀 수 없어요. 지금 보내거나 지울 수 있어요."
+    }
+  ],
+  "scheduled.errors.alreadySent": [
+    {
+      "type": 0,
+      "value": "이미 보냈어요"
+    }
+  ],
+  "scheduled.errors.attachmentReserved": [
+    {
+      "type": 0,
+      "value": "이 파일은 다른 예약에 쓰이고 있어요. 다른 파일을 고르거나 그 예약을 지워 주세요."
+    }
+  ],
+  "scheduled.errors.attachmentUnusable": [
+    {
+      "type": 0,
+      "value": "첨부한 파일을 쓸 수 없어요. 다시 올려 주세요."
+    }
+  ],
+  "scheduled.errors.busyAct": [
+    {
+      "type": 0,
+      "value": "지금 보내는 중이에요. 잠시 뒤에 목록을 새로 불러와 주세요."
+    }
+  ],
+  "scheduled.errors.busyEdit": [
+    {
+      "type": 0,
+      "value": "지금 보내는 중이라 바꿀 수 없어요. 잠시 뒤에 다시 해 주세요."
+    }
+  ],
+  "scheduled.errors.createBadRequest": [
+    {
+      "type": 0,
+      "value": "첨부 개수나 답하려는 메시지를 확인해 주세요. 첨부는 20개까지, 같은 파일은 한 번만 넣을 수 있어요."
+    }
+  ],
+  "scheduled.errors.createForbidden": [
+    {
+      "type": 0,
+      "value": "이 "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 예약할 수 없어요. 들어가 있는 "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "인지, 첨부가 내 파일인지 확인해 주세요."
+    }
+  ],
+  "scheduled.errors.createNotFound": [
+    {
+      "type": 0,
+      "value": "답하려던 메시지나 첨부를 찾을 수 없어요. 내용을 확인하고 다시 해 주세요."
+    }
+  ],
+  "scheduled.errors.emptyMessage": [
+    {
+      "type": 0,
+      "value": "보낼 글이나 첨부를 넣어 주세요"
+    }
+  ],
+  "scheduled.errors.otherCreate": [
+    {
+      "type": 0,
+      "value": "예약하지 못했어요. 다시 해 주세요."
+    }
+  ],
+  "scheduled.errors.otherWrite": [
+    {
+      "type": 0,
+      "value": "처리하지 못했어요. 목록을 새로 불러와 다시 해 주세요."
+    }
+  ],
+  "scheduled.errors.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 많아요. 잠시 뒤에 다시 해 주세요."
+    }
+  ],
+  "scheduled.errors.rowNotFound": [
+    {
+      "type": 0,
+      "value": "예약을 찾을 수 없어요. 이미 지워졌을 수 있어요."
+    }
+  ],
+  "scheduled.errors.unknownCreate": [
+    {
+      "type": 0,
+      "value": "예약됐는지 확인하지 못했어요. 연결을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "scheduled.errors.unknownDelete": [
+    {
+      "type": 0,
+      "value": "지워졌는지 확인하지 못했어요. 연결을 확인하고 목록을 새로 불러와 주세요."
+    }
+  ],
+  "scheduled.errors.unknownEdit": [
+    {
+      "type": 0,
+      "value": "바뀌었는지 확인하지 못했어요. 연결을 확인하고 목록을 새로 불러와 주세요."
+    }
+  ],
+  "scheduled.errors.unknownSendNow": [
+    {
+      "type": 0,
+      "value": "보냈는지 확인하지 못했어요. 연결을 확인하고 목록을 새로 불러와 주세요."
+    }
+  ],
+  "scheduled.failure.attachmentUnavailableNext": [
+    {
+      "type": 0,
+      "value": "파일을 다시 올려서 새로 예약해 주세요"
+    }
+  ],
+  "scheduled.failure.attachmentUnavailableReason": [
+    {
+      "type": 0,
+      "value": "첨부한 파일을 쓸 수 없어서 보내지 못했어요"
+    }
+  ],
+  "scheduled.failure.authorInactiveNext": [
+    {
+      "type": 0,
+      "value": "정지가 풀린 뒤에 다시 예약해 주세요"
+    }
+  ],
+  "scheduled.failure.authorInactiveReason": [
+    {
+      "type": 0,
+      "value": "계정이 정지돼 있어서 보내지 못했어요"
+    }
+  ],
+  "scheduled.failure.missedNext": [
+    {
+      "type": 0,
+      "value": "지금 보내거나 다시 예약할 수 있어요"
+    }
+  ],
+  "scheduled.failure.missedReason": [
+    {
+      "type": 0,
+      "value": "예약한 시각이 많이 지나서 보내지 않았어요"
+    }
+  ],
+  "scheduled.failure.notAllowedNext": [
+    {
+      "type": 0,
+      "value": "관리자에게 물어보세요"
+    }
+  ],
+  "scheduled.failure.notAllowedReason": [
+    {
+      "type": 0,
+      "value": "이 "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "의 규칙 때문에 보내지 못했어요"
+    }
+  ],
+  "scheduled.failure.notMemberNext": [
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 다시 들어간 뒤에 보낼 수 있어요"
+    }
+  ],
+  "scheduled.failure.notMemberReason": [
+    {
+      "type": 0,
+      "value": "이 "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에서 나가서 보내지 못했어요"
+    }
+  ],
+  "scheduled.failure.rootUnavailableNext": [
+    {
+      "type": 0,
+      "value": "내용을 복사해서 "
+    },
+    {
+      "type": 5,
+      "value": "place",
+      "options": {
+        "channel": {
+          "value": [
+            {
+              "type": 0,
+              "value": "채널"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "대화"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 새로 보내 주세요"
+    }
+  ],
+  "scheduled.failure.rootUnavailableReason": [
+    {
+      "type": 0,
+      "value": "답하려던 메시지가 지워져서 보내지 못했어요"
+    }
+  ],
+  "scheduled.failure.sendErrorNext": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 지금 보내기로 다시 해 볼 수 있어요"
+    }
+  ],
+  "scheduled.failure.sendErrorReason": [
+    {
+      "type": 0,
+      "value": "서버 문제로 보내지 못했어요"
+    }
+  ],
+  "scheduled.failure.sessionsEndedNext": [
+    {
+      "type": 0,
+      "value": "내용을 확인하고 보내거나 다시 예약해 주세요"
+    }
+  ],
+  "scheduled.failure.sessionsEndedReason": [
+    {
+      "type": 0,
+      "value": "로그인이 끝나서 예약을 멈췄어요"
+    }
+  ],
+  "scheduled.list.attachments": [
+    {
+      "type": 0,
+      "value": "첨부 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "scheduled.list.copyFailedNext": [
+    {
+      "type": 0,
+      "value": "고치기에서 글을 열어 복사할 수 있어요"
+    }
+  ],
+  "scheduled.list.copyFailedReason": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요"
+    }
+  ],
+  "scheduled.list.count": [
+    {
+      "type": 0,
+      "value": "내 예약 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "scheduled.list.filter": [
+    {
+      "type": 1,
+      "value": "placeLabel"
+    },
+    {
+      "type": 0,
+      "value": " 예약만 보고 있어요"
+    }
+  ],
+  "scheduled.list.filterAction": [
+    {
+      "type": 0,
+      "value": "모두 보기"
+    }
+  ],
+  "scheduled.list.sectionFailed": [
+    {
+      "type": 0,
+      "value": "보내지 못함"
+    }
+  ],
+  "scheduled.list.sectionPending": [
+    {
+      "type": 0,
+      "value": "보낼 예정"
+    }
+  ],
+  "scheduled.list.soon": [
+    {
+      "type": 0,
+      "value": "곧 보내요"
+    }
+  ],
+  "scheduled.list.title": [
+    {
+      "type": 0,
+      "value": "예약됨"
+    }
+  ],
+  "scheduled.list.when": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 보내요"
+    }
+  ],
+  "scheduled.load.error": [
+    {
+      "type": 0,
+      "value": "예약 목록을 불러오지 못했어요"
+    }
+  ],
+  "scheduled.lock.reason": [
+    {
+      "type": 0,
+      "value": "곧 보내서 바꿀 수 없어요"
+    }
+  ],
+  "scheduled.menu.custom": [
+    {
+      "type": 0,
+      "value": "직접 고르기…"
+    }
+  ],
+  "scheduled.menu.customDetail": [
+    {
+      "type": 0,
+      "value": "날짜와 시간을 골라요"
+    }
+  ],
+  "scheduled.menu.routingNote": [
+    {
+      "type": 0,
+      "value": "모델 지정은 예약에 담기지 않아요"
+    }
+  ],
+  "scheduled.menu.zone": [
+    {
+      "type": 1,
+      "value": "zone"
+    },
+    {
+      "type": 0,
+      "value": " 기준이에요"
+    }
+  ],
+  "scheduled.nav.badgeLabel": [
+    {
+      "type": 0,
+      "value": "보내지 못한 예약 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "scheduled.nav.label": [
+    {
+      "type": 0,
+      "value": "예약됨"
+    }
+  ],
+  "scheduled.offline.list": [
+    {
+      "type": 0,
+      "value": "연결이 없어요. 연결되면 예약을 바꿀 수 있어요."
+    }
+  ],
+  "scheduled.preset.nextMonday": [
+    {
+      "type": 0,
+      "value": "다음 주 월요일"
+    }
+  ],
+  "scheduled.preset.tomorrow": [
+    {
+      "type": 0,
+      "value": "내일"
+    }
+  ],
+  "scheduled.review.attachments": [
+    {
+      "type": 0,
+      "value": "첨부 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개: "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "scheduled.review.body": [
+    {
+      "type": 0,
+      "value": "로그인이 끝나서 멈춘 예약이에요. 내가 쓴 글이 맞는지 확인한 뒤에 보내 주세요."
+    }
+  ],
+  "scheduled.review.bodyLabel": [
+    {
+      "type": 0,
+      "value": "예약한 메시지 본문"
+    }
+  ],
+  "scheduled.review.title": [
+    {
+      "type": 0,
+      "value": "내용을 확인해 주세요"
+    }
+  ],
+  "scheduled.review.when": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 보내려던 예약이에요"
+    }
+  ],
+  "scheduled.row.ariaNoPreview": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "tail"
+    }
+  ],
+  "scheduled.row.ariaWithPreview": [
+    {
+      "type": 1,
+      "value": "channelLabel"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "tail"
+    }
+  ],
+  "scheduled.secretKey.lead": [
+    {
+      "type": 0,
+      "value": "키는 채팅에 붙여 넣지 마세요. 이 메시지는 예약하지 않았어요."
+    }
+  ],
+  "scheduled.status.scheduled": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 보낼게요"
+    }
+  ],
+  "scheduled.status.sentNow": [
+    {
+      "type": 0,
+      "value": "메시지를 보냈어요"
+    }
+  ],
+  "scheduled.trigger.hint": [
+    {
+      "type": 0,
+      "value": "길게 눌러 예약"
+    }
+  ],
+  "scheduled.trigger.label": [
+    {
+      "type": 0,
+      "value": "예약해서 보내기"
     }
   ],
   "search.entry.thisChannel": [

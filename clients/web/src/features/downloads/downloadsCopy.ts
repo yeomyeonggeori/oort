@@ -1,4 +1,5 @@
 import { attachmentDisplayName, formatBytes } from "@momo/core/features/attachments/model";
+import type { LocaleService } from "@momo/core/i18n";
 import {
   isActive,
   itemRatio,
@@ -60,8 +61,8 @@ export function rowActionLabel(action: RowAction): string {
 }
 
 /** 행의 제목: 디스크에 놓인 이름이 있으면 그것이다(Finder에서 찾을 이름). */
-export function rowTitle(item: DownloadItem): string {
-  return item.fileName ?? attachmentDisplayName(item);
+export function rowTitle(formatMessage: LocaleService["formatMessage"], item: DownloadItem): string {
+  return item.fileName ?? attachmentDisplayName(formatMessage, item);
 }
 
 /**
@@ -103,11 +104,15 @@ export function downloadButtonLabel(view: DownloadButtonView): string {
  * 막 끝난 건을 낭독할 한 줄. 이전 목록과 지금 목록을 비교해 **새로 끝난** 첫 건을 말한다(끝난 것이
  * 없거나 아무것도 안 바뀌면 null). 점은 색이라 이 낭독이 없으면 보조기술은 끝난 줄을 모른다.
  */
-export function finishedAnnouncement(before: DownloadList, after: DownloadList): string | null {
+export function finishedAnnouncement(
+  formatMessage: LocaleService["formatMessage"],
+  before: DownloadList,
+  after: DownloadList
+): string | null {
   for (const item of after) {
     const previous = before.find((candidate) => candidate.id === item.id);
     if (previous === undefined || !isActive(previous) || isActive(item)) continue;
-    const name = rowTitle(item);
+    const name = rowTitle(formatMessage, item);
     return item.phase === "done" ? `${name} 받기를 마쳤어요` : `${name} 받지 못했어요`;
   }
   return null;

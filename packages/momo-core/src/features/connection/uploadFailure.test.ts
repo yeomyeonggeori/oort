@@ -4,14 +4,25 @@ import { NetworkError } from "../../lib/http";
 import {
   admitDrafts,
   beginUpload,
-  draftAnnouncement,
+  draftAnnouncement as draftAnnouncementWith,
   draftFor,
-  draftStatusLine,
-  draftStatusWord,
+  draftStatusLine as draftStatusLineWith,
+  draftStatusWord as draftStatusWordWith,
   failUpload,
   requeueUpload,
 } from "../attachments/model";
 import { uploadReasonKey, verdictForRequestFailure, verdictForTransferFailure } from "./uploadFailure";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
+
+// 문장은 사전(`attachments.json`)에 있고 모델은 키를 돌려주거나 말하는 함수가 언어 서비스를 받는다(#6058). 이 시험은 제품과 같은
+// 한국어 생성물로 풀어서 예전 한국어 문장을 그대로 단정한다.
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+const draftAnnouncement = (...args: Tail<Parameters<typeof draftAnnouncementWith>>) => draftAnnouncementWith(formatMessage, ...args);
+const draftStatusLine = (...args: Tail<Parameters<typeof draftStatusLineWith>>) => draftStatusLineWith(formatMessage, ...args);
+const draftStatusWord = (...args: Tail<Parameters<typeof draftStatusWordWith>>) => draftStatusWordWith(formatMessage, ...args);
 
 // 올리기 실패를 상태 코드 대신 분류로 말한다. 502·503이 「파일 보관소 없음」이던 것이 이 시험의 중심이다: 기다리면 되는 일에
 // 관리자를 부르지 않는다.

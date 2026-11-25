@@ -7,7 +7,7 @@ import {
   type MailboxFilter,
 } from "@momo/core/features/inbox/mailbox";
 import type { FilterTabsSpec, FilterTabText } from "@momo/core/features/common/filterTabs";
-import { REMINDER_TAB_LABEL } from "@momo/core/features/reminders/model";
+import { REMINDER_TAB_KEY } from "@momo/core/features/reminders/model";
 
 /** 웹 인박스의 탭: 메일함 필터 여섯 + 맨 끝의 「나중에」(리마인더). */
 export type WebMailboxFilter = MailboxFilter | "reminders";
@@ -38,7 +38,7 @@ export function parseWebMailboxFilter(
 
 function labelFor(filter: WebMailboxFilter): FilterTabText {
   return filter === "reminders"
-    ? REMINDER_TAB_LABEL
+    ? { key: REMINDER_TAB_KEY }
     : { key: mailboxFilterLabelKey(filter) };
 }
 function tabIdFor(filter: WebMailboxFilter): string {

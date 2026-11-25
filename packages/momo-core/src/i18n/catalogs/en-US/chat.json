@@ -1,0 +1,11 @@
+{
+  "chat.composer.offline": "You're offline, so you can't send right now. Your draft stays here, and you can send it once you're connected.",
+  "chat.composer.placeholderPlace": "Message {name}",
+  "chat.composer.placeholderPerson": "Message {name}",
+  "chat.composer.mentionAffordance": "type @ to mention",
+  "chat.composer.fieldLabelPlace": "Message to {name}",
+  "chat.composer.fieldLabelPerson": "Message to {name}",
+  "chat.thread.placeholder": "Write a reply",
+  "chat.hint.composerKeys": "Enter to send · Shift+Enter for a new line",
+  "chat.hint.editorKeys": "Enter to save · Shift+Enter for a new line · Esc to cancel"
+}

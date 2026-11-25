@@ -27,7 +27,7 @@ import type {
   ScheduledPatch,
 } from "@momo/core/features/scheduled/types";
 import {
-  SCHEDULED_UNKNOWN_CHANNEL_LABEL,
+  SCHEDULED_UNKNOWN_CHANNEL_KEY,
   dmConversationLabel,
   errorPlaceWord,
   placeWord,
@@ -35,6 +35,7 @@ import {
   type PlaceWord,
 } from "@momo/core/features/scheduled/copy";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   channelLabelParts,
   useChannels,
@@ -380,13 +381,14 @@ export function useScheduledPlaces(): (channelId: string) => ScheduledPlaceInfo 
   const { directory } = useDirectory(workspaceId);
   const groups = channelsQuery.groups;
   const selfId = session.member.id;
+  const formatMessage = useFormatMessage();
   return useCallback(
     (channelId: string): ScheduledPlaceInfo => {
       const channel = [...groups.channels, ...groups.dms].find((entry) => uuidEq(entry.id, channelId));
       if (channel === undefined) {
         return {
-          label: SCHEDULED_UNKNOWN_CHANNEL_LABEL,
-          markedLabel: SCHEDULED_UNKNOWN_CHANNEL_LABEL,
+          label: formatMessage(SCHEDULED_UNKNOWN_CHANNEL_KEY),
+          markedLabel: formatMessage(SCHEDULED_UNKNOWN_CHANNEL_KEY),
           kind: undefined,
           isAgent: false,
           peer: null,
@@ -397,7 +399,8 @@ export function useScheduledPlaces(): (channelId: string) => ScheduledPlaceInfo 
       }
       const parts = channelLabelParts(channel, directory, selfId);
       const isDm = channel.kind === "dm";
-      const label = isDm ? dmConversationLabel(parts.text) : parts.text;
+      const dmRef = dmConversationLabel(parts.text);
+      const label = isDm ? formatMessage(dmRef.key, dmRef.values) : parts.text;
       return {
         label,
         markedLabel: isDm ? label : `#${label}`,
@@ -409,6 +412,6 @@ export function useScheduledPlaces(): (channelId: string) => ScheduledPlaceInfo 
         errorWord: errorPlaceWord(channel.kind),
       };
     },
-    [groups, directory, selfId]
+    [groups, directory, selfId, formatMessage]
   );
 }

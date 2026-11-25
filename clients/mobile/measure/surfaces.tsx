@@ -196,8 +196,8 @@ import {
   type Palette,
 } from '../src/design/tokens';
 import {
-  composerPlaceholder,
-  composerPlaceholderClauses,
+  composerPlaceholder as composerPlaceholderWith,
+  composerPlaceholderClauses as composerPlaceholderClausesWith,
 } from '@momo/core/features/chat/composerCopy';
 import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import {PullProbe} from './pullProbe';
@@ -256,6 +256,11 @@ import type {
   WorkHost,
   WorkSession,
 } from '@momo/core/lib/api';
+// 계측 하네스는 한국어 문장으로 잰다(문장은 사전에 있다, #6058).
+const composerPlaceholder = (label: string, recipient: 'place' | 'person') =>
+  composerPlaceholderWith(MEASURE_FORMAT_MESSAGE, label, recipient);
+const composerPlaceholderClauses = (label: string, recipient: 'place' | 'person') =>
+  composerPlaceholderClausesWith(MEASURE_FORMAT_MESSAGE, label, recipient);
 // 측정 하네스는 한국어 화면을 잰다(#6044): 인용 낱말도 한국어 사전으로 푼다.
 const MEASURE_FORMAT_MESSAGE = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 

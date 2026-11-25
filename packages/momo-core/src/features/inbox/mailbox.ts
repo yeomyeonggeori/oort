@@ -187,7 +187,7 @@ function bodyLine(formatMessage: FormatMessage, message: Message): string {
   if (body.length > 0) return body;
   // 글 없이 사진·파일만 보낸 메시지(#4294): 「내용 없는 메시지」가 아니라 무엇이 왔는지 말한다.
   return (
-    attachmentPreviewLine(message.attachments) ??
+    attachmentPreviewLine((key, values) => formatMessage(key, values as never), message.attachments) ??
     formatMessage("inbox.preview.empty")
   );
 }

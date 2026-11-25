@@ -1,0 +1,21 @@
+{
+  "emoji.catalog.error": "Couldn't load the emoji list.",
+  "emoji.catalog.offline": "You're offline. Open this again once you're connected.",
+  "emoji.catalog.emptyHeadline": "No emoji found",
+  "emoji.catalog.emptyDetail": "Search by another name or :code:.",
+  "emoji.tone.default": "Default skin tone",
+  "emoji.tone.light": "Light skin tone",
+  "emoji.tone.mediumLight": "Medium-light skin tone",
+  "emoji.tone.medium": "Medium skin tone",
+  "emoji.tone.mediumDark": "Medium-dark skin tone",
+  "emoji.tone.dark": "Dark skin tone",
+  "emoji.category.frequent": "Frequently used",
+  "emoji.category.people": "People",
+  "emoji.category.nature": "Nature",
+  "emoji.category.foods": "Food",
+  "emoji.category.activity": "Activities",
+  "emoji.category.places": "Places",
+  "emoji.category.objects": "Objects",
+  "emoji.category.symbols": "Symbols",
+  "emoji.category.flags": "Flags"
+}

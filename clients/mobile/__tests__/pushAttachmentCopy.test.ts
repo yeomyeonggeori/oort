@@ -1,10 +1,22 @@
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
-import {
-  ATTACH_PREVIEW_COPY,
-  attachmentPreviewLine,
-} from '@momo/core/features/attachments/model';
+import {attachmentPreviewLine as attachmentPreviewLineWith} from '@momo/core/features/attachments/model';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 문구는 사전(`attachments.preview.*`)에 있다(#6058). Swift 확장의 틀과 맞대는 쪽은 그 사전을 한국어로 푼 글이다.
+const {formatMessage} = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
+const ko = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+const ATTACH_PREVIEW_COPY = {
+  photos: (count: number) => ko('attachments.preview.photos', {count}),
+  files: (count: number) => ko('attachments.preview.files', {count}),
+  // 섞일 때 두 줄 사이의 글자: 「{photos}, {files}」에서 두 자리 사이를 읽는다.
+  separator: ko('attachments.preview.photosAndFiles', {photos: '\u0001', files: '\u0002'}).slice(1, -1),
+};
+const attachmentPreviewLine = (mimes: Parameters<typeof attachmentPreviewLineWith>[1]) =>
+  attachmentPreviewLineWith(formatMessage, mimes);
 
 // =============================================================================
 // #4294 - 글 없이 사진만 보낸 메시지의 푸시 본문.

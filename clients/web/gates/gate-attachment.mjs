@@ -58,6 +58,24 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * 문장은 사전에 있다(#6058): 코어의 표와 판정은 키를 돌려주고, 게이트는 한국어 사전(`ko-KR`)에서 그 키의 값을 읽는다.
+ * 게이트의 브라우저는 `locale: "ko-KR"`로 열려 화면이 그 한국어를 그린다.
+ */
+function koText(key) {
+  const read = (file) =>
+    JSON.parse(
+      readFileSync(
+        resolve(webRoot, "../../packages/momo-core/src/i18n/catalogs/ko-KR", file),
+        "utf8"
+      )
+    );
+  const catalog = { ...read("attachments.json"), ...read("common.json") };
+  const value = catalog[key];
+  if (typeof value !== "string") throw new Error(`사전에 ${key}가 없다`);
+  return value;
+}
+
 /** 첨부 문구의 정본은 코어다. 게이트가 베껴 적으면 두 벌이 갈라진다. */
 function attachCopy() {
   const source = readFileSync(
@@ -67,12 +85,12 @@ function attachCopy() {
     ),
     "utf8"
   );
-  const block = source.match(/export const ATTACH_COPY = \{([\s\S]*?)\n\} as const;/);
+  const block = source.match(/export const ATTACH_COPY = \{([\s\S]*?)\n\} as const satisfies/);
   if (block === null) throw new Error("코어의 ATTACH_COPY를 읽지 못했다");
   const copy = {};
   for (const line of block[1].split("\n")) {
     const entry = line.match(/^\s{2}(\w+):\s*"([^"]+)",\s*$/);
-    if (entry !== null) copy[entry[1]] = entry[2];
+    if (entry !== null) copy[entry[1]] = koText(entry[2]);
   }
   for (const key of ["uploading", "verifying", "uploaded", "retry", "sendBlocked"]) {
     if (typeof copy[key] !== "string") {
@@ -82,7 +100,7 @@ function attachCopy() {
   return copy;
 }
 
-/** 실패 문구도 코어가 갖는다. `uploadIssueCopy`의 switch 를 그대로 읽는다. */
+/** 실패 문구도 코어가 갖는다. `uploadIssueKey`의 switch 를 읽어 그 키의 한국어 값을 돌려준다. */
 function issueCopy(issue) {
   const source = readFileSync(
     resolve(
@@ -94,8 +112,8 @@ function issueCopy(issue) {
   const found = source.match(
     new RegExp(`case "${issue}":\\s*\\n\\s*return "([^"]+)";`)
   );
-  if (found === null) throw new Error(`uploadIssueCopy(${issue})를 읽지 못했다`);
-  return found[1];
+  if (found === null) throw new Error(`uploadIssueKey(${issue})를 읽지 못했다`);
+  return koText(found[1]);
 }
 
 /** 트레이 상한의 정본은 `tokens.css` 다 (B-2). 여기 베껴 적으면 갈라진다. */
@@ -127,11 +145,11 @@ function issueNext(issue) {
   const found = block.match(
     new RegExp(`case "${issue}":\\s*\\n\\s*return "([^"]+)";`)
   );
-  if (found === null) throw new Error(`uploadIssueNext(${issue})를 읽지 못했다`);
-  return found[1];
+  if (found === null) throw new Error(`uploadIssueNextKey(${issue})를 읽지 못했다`);
+  return koText(found[1]);
 }
 
-/** `text/plain` 이 화면에서 불리는 이름. 정본은 코어의 `formatMimeLabel` 이다. */
+/** `text/plain` 이 화면에서 불리는 이름. 정본은 코어의 `mimeLabelKey` 다. */
 function mimeLabelText() {
   const source = readFileSync(
     resolve(
@@ -140,10 +158,10 @@ function mimeLabelText() {
     ),
     "utf8"
   );
-  const block = source.slice(source.indexOf("export function formatMimeLabel"));
+  const block = source.slice(source.indexOf("export function mimeLabelKey"));
   const found = block.match(/case "text":\s*\n\s*return "([^"]+)";/);
-  if (found === null) throw new Error("formatMimeLabel 의 text 갈래를 읽지 못했다");
-  return found[1];
+  if (found === null) throw new Error("mimeLabelKey 의 text 갈래를 읽지 못했다");
+  return koText(found[1]);
 }
 
 const COPY = attachCopy();
@@ -768,6 +786,7 @@ function expect(condition, message) {
 async function exerciseComposer(browser) {
   const archive = createArchive();
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
@@ -975,6 +994,7 @@ async function exerciseFailure(browser) {
   const archive = createArchive();
   archive.setCompleteStatus(409);
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
@@ -1085,6 +1105,7 @@ async function exerciseFailure(browser) {
 async function exerciseTimeline(browser) {
   const archive = createArchive();
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
@@ -1226,6 +1247,7 @@ async function exerciseTimeline(browser) {
 async function exercisePreview(browser) {
   const archive = createArchive();
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
@@ -1358,6 +1380,7 @@ async function exerciseHero(browser) {
   for (const scheme of ["light", "dark"]) {
     const archive = createArchive();
     const context = await browser.newContext({
+      locale: "ko-KR",
       viewport: { width: 1280, height: 900 },
       colorScheme: scheme,
       reducedMotion: "no-preference",
@@ -1446,6 +1469,7 @@ async function exerciseProgress(browser) {
   const sink = startByteSink(sinkPort);
   const archive = createArchive();
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
@@ -1530,6 +1554,7 @@ async function exerciseNarrow(browser) {
     const archive = createArchive();
     archive.setCompleteStatus(409);
     const context = await browser.newContext({
+      locale: "ko-KR",
       viewport: { width, height: 844 },
       reducedMotion: "reduce",
     });
@@ -1608,6 +1633,7 @@ async function exerciseNarrow(browser) {
 async function exerciseOverflow(browser) {
   const archive = createArchive();
   const context = await browser.newContext({
+    locale: "ko-KR",
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
   });
@@ -1732,6 +1758,7 @@ async function captureShots(browser) {
     if (options.completeStatus) archive.setCompleteStatus(options.completeStatus);
     const sink = options.realUpload ? startByteSink(options.sinkPort) : undefined;
     const context = await browser.newContext({
+      locale: "ko-KR",
       viewport: options.viewport ?? { width: 1280, height: 900 },
       reducedMotion: "reduce",
       colorScheme: options.scheme,

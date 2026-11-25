@@ -23,6 +23,7 @@ import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { useTransientStatus } from "@/features/common/useTransientStatus";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { ScheduleDialog } from "./ScheduleDialog";
 import { ScheduledRow } from "./ScheduledRow";
 import {
@@ -70,6 +71,7 @@ interface OpenDialog {
 }
 
 export function ScheduledRoute() {
+  const formatMessage = useFormatMessage();
   const data = useScheduled();
   const places = useScheduledPlaces();
   const offline = useOffline();
@@ -170,7 +172,7 @@ export function ScheduledRoute() {
     const landing = focusAfterRemoval(order, row.id);
     try {
       await data.mutations.sendNow(row.id);
-      announce(SCHEDULED_COPY.status.sentNow);
+      announce(formatMessage(SCHEDULED_COPY.status.sentNow));
       pendingLanding.current = { landing, viaDialog: fromDialog };
       closeDialog();
     } catch (error) {
@@ -252,7 +254,7 @@ export function ScheduledRoute() {
   const clearFilter = () => setParams({}, { replace: true });
   const filterLabel =
     channelParam === null
-      ? SCHEDULED_COPY.nav.label
+      ? formatMessage(SCHEDULED_COPY.nav.label)
       : threadParam === null
         ? places(channelParam).markedLabel
         : `${places(channelParam).markedLabel} 스레드`;
@@ -292,7 +294,7 @@ export function ScheduledRoute() {
             data-testid="scheduled-heading"
             className="text-body font-semibold focus-visible:focus-ring"
           >
-            {SCHEDULED_COPY.list.title}
+            {formatMessage(SCHEDULED_COPY.list.title)}
           </h1>
         </div>
         {/* 머리 오른쪽의 고정 자리: 「내 예약 N개」가 서는 곳이다. 「메시지를 보냈어요」는 3초 동안 이 자리를 **대신** 쓰고
@@ -302,7 +304,7 @@ export function ScheduledRoute() {
         {!absent && !data.isPending && !data.isError && (
           status === null ? (
             <span className="text-meta text-ink-muted" data-numeric data-testid="scheduled-count">
-              {SCHEDULED_COPY.list.count(total)}
+              {formatMessage(SCHEDULED_COPY.list.count, { count: total })}
             </span>
           ) : (
             <span
@@ -324,15 +326,15 @@ export function ScheduledRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message={SCHEDULED_COPY.offline.list}
+          message={formatMessage(SCHEDULED_COPY.offline.list)}
           testId="scheduled-offline"
         />
       )}
       {filtered && (
         <InlineBanner
           tone="neutral"
-          message={SCHEDULED_COPY.list.filter(filterLabel)}
-          actionLabel={SCHEDULED_COPY.list.filterAction}
+          message={formatMessage(SCHEDULED_COPY.list.filter, { placeLabel: filterLabel })}
+          actionLabel={formatMessage(SCHEDULED_COPY.list.filterAction)}
           onAction={clearFilter}
           testId="scheduled-filter"
         />
@@ -342,8 +344,8 @@ export function ScheduledRoute() {
         {absent ? (
           // 이 서버에는 예약이 없다(구서버): 입구는 서지 않았고, 옛 링크로 온 사람에게만 이 줄이 보인다.
           <EmptyInvite
-            headline={SCHEDULED_COPY.disabled.unavailable.reason}
-            detail={SCHEDULED_COPY.disabled.unavailable.next}
+            headline={formatMessage(SCHEDULED_COPY.disabled.unavailable.reason)}
+            detail={formatMessage(SCHEDULED_COPY.disabled.unavailable.next)}
             testId="scheduled-absent"
             actions={
               <Button
@@ -352,7 +354,7 @@ export function ScheduledRoute() {
                 data-testid="scheduled-absent-back"
                 onClick={() => navigate("/")}
               >
-                {SCHEDULED_COPY.empty.action}
+                {formatMessage(SCHEDULED_COPY.empty.action)}
               </Button>
             }
           />
@@ -360,15 +362,15 @@ export function ScheduledRoute() {
           <Skeleton ready={!data.isPending} rows={3} className="p-4">
             {data.isPending ? null : data.isError ? (
               <InlineBanner
-                message={SCHEDULED_COPY.load.error}
-                actionLabel={SCHEDULED_COPY.load.retry}
+                message={formatMessage(SCHEDULED_COPY.load.error)}
+                actionLabel={formatMessage(SCHEDULED_COPY.load.retry)}
                 onAction={data.refetch}
                 testId="scheduled-error"
               />
             ) : total === 0 ? (
               <EmptyInvite
-                headline={SCHEDULED_COPY.empty.title}
-                detail={SCHEDULED_COPY.empty.bodyWeb}
+                headline={formatMessage(SCHEDULED_COPY.empty.title)}
+                detail={formatMessage(SCHEDULED_COPY.empty.bodyWeb)}
                 testId="scheduled-empty"
                 actions={
                   <Button
@@ -377,14 +379,14 @@ export function ScheduledRoute() {
                     data-testid="scheduled-empty-back"
                     onClick={() => navigate(channelParam === null ? "/" : `/c/${encodeURIComponent(channelParam)}`)}
                   >
-                    {SCHEDULED_COPY.empty.action}
+                    {formatMessage(SCHEDULED_COPY.empty.action)}
                   </Button>
                 }
               />
             ) : (
               <>
-                {renderSection(SCHEDULED_COPY.list.sectionFailed, sections.failed, "scheduled-section-failed")}
-                {renderSection(SCHEDULED_COPY.list.sectionPending, sections.pending, "scheduled-section-pending")}
+                {renderSection(formatMessage(SCHEDULED_COPY.list.sectionFailed), sections.failed, "scheduled-section-failed")}
+                {renderSection(formatMessage(SCHEDULED_COPY.list.sectionPending), sections.pending, "scheduled-section-pending")}
               </>
             )}
           </Skeleton>

@@ -7,8 +7,19 @@ import {
   scheduleBlockTitle,
   scheduleGate,
   type ScheduleBlock,
+  type ScheduleGate,
   type ScheduleGateInput,
 } from "./gate";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`scheduled.json`)에 있고 판정은 키를 돌려준다(#6058). 단정은 예전 한국어 문장 그대로이고, 제품과 같은 한국어
+// 생성물로 키를 풀어 견준다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+const spoken = (lines: ScheduleGate["lines"]) =>
+  lines === null ? null : { reason: ko(lines.reason), next: lines.next === null ? null : ko(lines.next) };
 
 function draft(overrides: Partial<AttachmentDraft> = {}): AttachmentDraft {
   return {
@@ -182,31 +193,31 @@ describe("the two lines of each reason (UI spec 0.4 and 3.1)", () => {
     const gate = scheduleGate(input({ offline: true }));
     expect(gate.block).toBe("offline");
     expect(gate.lines).toBeNull();
-    expect(scheduleBlockTitle(gate.lines)).toBeNull();
+    expect(scheduleBlockTitle(formatMessage, gate.lines)).toBeNull();
   });
 
   it("gives each other reason a reason line and a next-action line in the spec's words", () => {
-    expect(scheduleGate(input({ schedulerDisabled: true })).lines).toEqual({
+    expect(spoken(scheduleGate(input({ schedulerDisabled: true })).lines)).toEqual({
       reason: "이 서버에서는 예약을 쓸 수 없어요",
       next: "관리자에게 물어보세요",
     });
-    expect(scheduleGate(input({ commandDraft: true })).lines).toEqual({
+    expect(spoken(scheduleGate(input({ commandDraft: true })).lines)).toEqual({
       reason: "명령은 예약할 수 없어요",
       next: "명령을 지우면 예약할 수 있어요",
     });
-    expect(scheduleGate(input({ personalCall: true })).lines).toEqual({
+    expect(spoken(scheduleGate(input({ personalCall: true })).lines)).toEqual({
       reason: "개인 에이전트 호출은 예약할 수 없어요",
       next: "호출을 빼면 예약할 수 있어요",
     });
-    expect(scheduleGate(input({ quoting: true })).lines).toEqual({
+    expect(spoken(scheduleGate(input({ quoting: true })).lines)).toEqual({
       reason: "인용 답장은 예약할 수 없어요",
       next: "인용을 지우면 예약할 수 있어요",
     });
-    expect(scheduleGate(input({ attachments: [draft({ status: "uploading", progress: 0.3 })] })).lines).toEqual({
+    expect(spoken(scheduleGate(input({ attachments: [draft({ status: "uploading", progress: 0.3 })] })).lines)).toEqual({
       reason: "파일이 올라가는 중이에요",
       next: "끝나면 예약할 수 있어요",
     });
-    expect(scheduleGate(input({ text: "" })).lines).toEqual({
+    expect(spoken(scheduleGate(input({ text: "" })).lines)).toEqual({
       reason: "보낼 내용을 쓰면 예약할 수 있어요",
       next: null,
     });
@@ -214,28 +225,28 @@ describe("the two lines of each reason (UI spec 0.4 and 3.1)", () => {
 
   it("offers 다시 올리거나 지우면 only when a failed file can be uploaded again, else 지우면", () => {
     for (const issue of ["mismatch", "unavailable"] as const) {
-      expect(scheduleGate(input({ attachments: [failedDraft(issue)] })).lines).toEqual({
+      expect(spoken(scheduleGate(input({ attachments: [failedDraft(issue)] })).lines)).toEqual({
         reason: "올리지 못한 파일이 있어요",
         next: "다시 올리거나 지우면 예약할 수 있어요",
       });
     }
     for (const issue of ["too-large", "forbidden", "no-archive", "blocked"] as const) {
-      expect(scheduleGate(input({ attachments: [failedDraft(issue)] })).lines, issue).toEqual({
+      expect(spoken(scheduleGate(input({ attachments: [failedDraft(issue)] })).lines), issue).toEqual({
         reason: "올리지 못한 파일이 있어요",
         next: "지우면 예약할 수 있어요",
       });
     }
     // 다시 올릴 수 있는 실패가 하나라도 있으면 그쪽이 이긴다(보내기의 발치 문장과 같은 판정).
     expect(
-      scheduleGate(input({ attachments: [failedDraft("too-large"), failedDraft("mismatch")] })).lines?.next
+      spoken(scheduleGate(input({ attachments: [failedDraft("too-large"), failedDraft("mismatch")] })).lines)?.next
     ).toBe("다시 올리거나 지우면 예약할 수 있어요");
   });
 
   it("joins the two lines for title and aria-describedby, a full stop after each of two sentences and none after one", () => {
-    expect(scheduleBlockTitle({ reason: "인용 답장은 예약할 수 없어요", next: "인용을 지우면 예약할 수 있어요" })).toBe(
+    expect(scheduleBlockTitle(formatMessage, { reason: "scheduled.disabled.quoteReason", next: "scheduled.disabled.quoteNext" })).toBe(
       "인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요."
     );
-    expect(scheduleBlockTitle({ reason: "보낼 내용을 쓰면 예약할 수 있어요", next: null })).toBe(
+    expect(scheduleBlockTitle(formatMessage, { reason: "scheduled.disabled.emptyReason", next: null })).toBe(
       "보낼 내용을 쓰면 예약할 수 있어요"
     );
   });

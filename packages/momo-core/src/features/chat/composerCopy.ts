@@ -1,4 +1,8 @@
-import { attachRecipient, type RecipientKind } from "../../lib/koreanParticle";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
+import type { RecipientKind } from "../../lib/koreanParticle";
+
+type FormatMessage = LocaleService["formatMessage"];
 
 // =============================================================================
 // 컴포저가 「지금은 못 보낸다」고 말하는 한 문장 (U4-6 리뷰 H-1).
@@ -60,8 +64,7 @@ import { attachRecipient, type RecipientKind } from "../../lib/koreanParticle";
  * `connection.composer.*`: 기기 오프라인 / 서버에 닿지 못함) 그 원인의 문장을 쓴다. 이 문장은 원인을 모를 때
  * (로그인 만료 등)와 원인 문장을 아직 읽지 않는 클라이언트의 몫이다.
  */
-export const COMPOSER_OFFLINE_COPY =
-  "연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있습니다.";
+export const COMPOSER_OFFLINE_KEY = "chat.composer.offline" satisfies PlainMessageKey;
 
 // =============================================================================
 // 컴포저가 「여기서 무엇을 할 수 있는가」를 말하는 자리 (#1384 CRUN-3).
@@ -198,7 +201,7 @@ export const COMPOSER_OFFLINE_COPY =
  * 소리도 없으며, 하는 일은 그 자리의 줄바꿈 기회를 지우는 것 하나다 — 위 절이
  * 그 결정과 기각된 대안들을 든다.
  */
-export const MENTION_AFFORDANCE = "@⁠로 부르기";
+export const MENTION_AFFORDANCE_KEY = "chat.composer.mentionAffordance" satisfies PlainMessageKey;
 
 // =============================================================================
 // 넘칠 때 **무엇이** 사라지는가 — 절 단위 생략 (#1422, #1418 이월).
@@ -391,15 +394,20 @@ export interface ComposerPlaceholderClause {
  * 있었다. 사람은 에가 아니라 에게 받는다 — 규칙은 `lib/koreanParticle` 에 있다.
  */
 export function composerPlaceholderClauses(
+  formatMessage: FormatMessage,
   channelLabel: string,
   recipient: RecipientKind
 ): readonly ComposerPlaceholderClause[] {
   return [
     {
       id: "destination",
-      text: `${attachRecipient(channelLabel, recipient)} 메시지 보내기`,
+      // 에/에게는 받는 이의 종류가 정한다(이름의 받침이 아니다). 종류마다 문장이 따로다.
+      text: formatMessage(
+        recipient === "person" ? "chat.composer.placeholderPerson" : "chat.composer.placeholderPlace",
+        { name: channelLabel }
+      ),
     },
-    { id: "mention-affordance", text: MENTION_AFFORDANCE },
+    { id: "mention-affordance", text: formatMessage(MENTION_AFFORDANCE_KEY) },
   ];
 }
 
@@ -436,10 +444,11 @@ export function fitComposerPlaceholder(
  * 서는 그대로이고, 좁은 상자를 아직 안 재 본 자리의 출발값이기도 하다.
  */
 export function composerPlaceholder(
+  formatMessage: FormatMessage,
   channelLabel: string,
   recipient: RecipientKind
 ): string {
-  return composerPlaceholderClauses(channelLabel, recipient)
+  return composerPlaceholderClauses(formatMessage, channelLabel, recipient)
     .map((clause) => clause.text)
     .join(COMPOSER_PLACEHOLDER_JOINER);
 }
@@ -452,10 +461,14 @@ export function composerPlaceholder(
  * 「@로 부르기」까지 이름으로 읽어 주면 필드 이름이 사용법이 된다.
  */
 export function composerFieldLabel(
+  formatMessage: FormatMessage,
   channelLabel: string,
   recipient: RecipientKind
 ): string {
-  return `${attachRecipient(channelLabel, recipient)} 보낼 메시지`;
+  return formatMessage(
+    recipient === "person" ? "chat.composer.fieldLabelPerson" : "chat.composer.fieldLabelPlace",
+    { name: channelLabel }
+  );
 }
 
 /**
@@ -480,7 +493,7 @@ export function composerFieldLabel(
  * 두 표면이 함께 하는 일뿐이고, 웹이 못 하는 일을 여기 실으면 그 문장은 절반의
  * 화면에서 거짓말이 된다.
  */
-export const THREAD_COMPOSER_PLACEHOLDER = "답글 쓰기";
+export const THREAD_COMPOSER_PLACEHOLDER_KEY = "chat.thread.placeholder" satisfies PlainMessageKey;
 
 // =============================================================================
 // 키보드 힌트의 표기법 — 한 벌 (#1384 CRUN-3).
@@ -550,9 +563,7 @@ export const HINT_SEPARATOR = " · ";
  * 컴포저의 키 배치 설명. **처음 한 번만 선다** — 소비하는 클라가 「배웠다」의
  * 정의를 갖는다(웹 `features/chat/sendHint.ts`: ↵ 로 한 번 보낸 순간).
  */
-export const COMPOSER_KEYS_HINT = ["Enter로 보내기", "Shift+Enter로 줄바꿈"].join(
-  HINT_SEPARATOR
-);
+export const COMPOSER_KEYS_HINT_KEY = "chat.hint.composerKeys" satisfies PlainMessageKey;
 
 /**
  * 보낸 메시지를 고치는 입력창의 키 배치 설명.
@@ -560,8 +571,4 @@ export const COMPOSER_KEYS_HINT = ["Enter로 보내기", "Shift+Enter로 줄바�
  * 세 조각인 것은 이 상자에만 Esc 가 있어서다: 컴포저의 Esc 는 멘션 목록과 인용을
  * 닫는 키라(`composerKeys.ts`) 「취소」가 아니고, 여기서는 편집 자체를 버린다.
  */
-export const MESSAGE_EDITOR_KEYS_HINT = [
-  "Enter로 저장",
-  "Shift+Enter로 줄바꿈",
-  "Esc로 취소",
-].join(HINT_SEPARATOR);
+export const MESSAGE_EDITOR_KEYS_HINT_KEY = "chat.hint.editorKeys" satisfies PlainMessageKey;

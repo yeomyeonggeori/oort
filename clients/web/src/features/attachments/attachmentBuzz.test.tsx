@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 
 // 첨부 미리보기를 Buzz 처럼 (#3820).
 //
@@ -51,6 +53,25 @@ const HASH_PDF = { ...PDF, id: "pdf-2", name: `${HASH}.pdf` };
 let host: HTMLDivElement;
 let root: Root;
 
+// 첫 묶음(Buzz 모양)은 한국어 이름 「이미지」·「PDF 문서」를 단정한다. 문구가 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러나므로
+// 그 묶음만 한국어 언어 객체로 감싼다. 라이트박스 묶음은 영어 문구를 단정하므로 감싸지 않는다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+function renderKo(
+  attachments: Parameters<typeof AttachmentList>[0]["attachments"],
+  extra: Partial<Parameters<typeof AttachmentList>[0]> = {}
+) {
+  act(() => {
+    root.render(
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: <AttachmentList channelId="ch" attachments={attachments} {...extra} />,
+      })
+    );
+  });
+}
 function render(
   attachments: Parameters<typeof AttachmentList>[0]["attachments"],
   extra: Partial<Parameters<typeof AttachmentList>[0]> = {}
@@ -81,19 +102,19 @@ afterEach(() => {
 
 describe("timeline attachments, Buzz style", () => {
   it("never prints a random-token file name anywhere in the DOM", () => {
-    render([img("i1"), HASH_PDF]);
+    renderKo([img("i1"), HASH_PDF]);
     expect(host.innerHTML).not.toContain("geGngQ");
     expect(host.textContent).toContain("PDF 문서");
     expect(q('[data-testid="attachment-image"] img')?.getAttribute("alt")).toBe("이미지");
   });
 
   it("keeps a name a person wrote on a file card", () => {
-    render([PDF]);
+    renderKo([PDF]);
     expect(host.textContent).toContain("Q3-온보딩-리뷰.pdf");
   });
 
   it("gives an inline image no caption, no name, no size", () => {
-    render([img("i1")]);
+    renderKo([img("i1")]);
     expect(q('[data-testid="attachment-meta"]')).toBeNull();
     expect(host.querySelector("figcaption")).toBeNull();
     expect(host.textContent).not.toMatch(/KB|이미지 ·/);
@@ -101,7 +122,7 @@ describe("timeline attachments, Buzz style", () => {
   });
 
   it("reveals download and expand on hover and takes them away on leave", () => {
-    render([img("i1")]);
+    renderKo([img("i1")]);
     const figure = q('[data-testid="attachment-image"]');
     expect(q('[data-testid="attachment-download"]')).toBeNull();
     hover(figure);
@@ -112,7 +133,7 @@ describe("timeline attachments, Buzz style", () => {
   });
 
   it("opens the lightbox on click and closes it with Escape", () => {
-    render([img("i1")]);
+    renderKo([img("i1")]);
     act(() => {
       q('[data-testid="attachment-image"] button')?.click();
     });
@@ -128,7 +149,7 @@ describe("timeline attachments, Buzz style", () => {
   });
 
   it("groups several images into a grid and opens the tapped one", () => {
-    render([img("i1"), img("i2"), img("i3")]);
+    renderKo([img("i1"), img("i2"), img("i3")]);
     const grid = q('[data-testid="attachment-image-grid"]');
     expect(grid?.getAttribute("data-columns")).toBe("2");
     const tiles = grid!.querySelectorAll('[data-testid="attachment-image"] button');
@@ -140,7 +161,7 @@ describe("timeline attachments, Buzz style", () => {
   });
 
   it("offers preview and download on a PDF card only while hovered", () => {
-    render([PDF]);
+    renderKo([PDF]);
     const card = q('[data-testid="attachment-card"]');
     expect(q('[data-testid="attachment-open-pdf"]')).toBeNull();
     expect(q('[data-testid="attachment-download"]')).toBeNull();
@@ -150,7 +171,7 @@ describe("timeline attachments, Buzz style", () => {
   });
 
   it("reaches a file card's actions by keyboard alone", () => {
-    render([PDF]);
+    renderKo([PDF]);
     const card = q('[data-testid="attachment-card"]')!;
     expect(card.tabIndex).toBe(0);
     expect(q('[data-testid="attachment-open-pdf"]')).toBeNull();
@@ -160,7 +181,7 @@ describe("timeline attachments, Buzz style", () => {
   });
 
   it("reaches an image's actions by keyboard and tells repeated images apart", () => {
-    render([img("i1"), img("i2")]);
+    renderKo([img("i1"), img("i2")]);
     const figure = q('[data-testid="attachment-image"]')!;
     act(() => q("button", figure)!.focus());
     expect(q('[data-testid="attachment-download"]', figure)).not.toBeNull();

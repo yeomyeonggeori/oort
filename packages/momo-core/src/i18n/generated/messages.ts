@@ -4,9 +4,79 @@ export const messageKeys = [
   "app.shortcutHelp.empty",
   "app.shortcutHelp.reopenHint",
   "app.shortcutHelp.search",
+  "attachments.action.attach",
+  "attachments.action.clearAll",
+  "attachments.action.download",
+  "attachments.action.downloadNamed",
+  "attachments.action.expandImage",
+  "attachments.action.expandNamed",
+  "attachments.action.expandNamedAt",
+  "attachments.action.remove",
+  "attachments.action.removeNamed",
+  "attachments.action.retryNamed",
+  "attachments.announce.firstGroup",
+  "attachments.announce.nextGroup",
+  "attachments.announce.pair",
+  "attachments.announce.single",
+  "attachments.card.aria",
+  "attachments.card.stateIdle",
+  "attachments.issue.blocked",
+  "attachments.issue.cameraPermissionDenied",
+  "attachments.issue.cameraUnavailable",
+  "attachments.issue.forbidden",
+  "attachments.issue.mismatch",
+  "attachments.issue.noArchive",
+  "attachments.issue.permissionDenied",
+  "attachments.issue.selectionCancelled",
+  "attachments.issue.tooLarge",
+  "attachments.issue.unavailable",
+  "attachments.kind.archive",
+  "attachments.kind.audio",
+  "attachments.kind.file",
+  "attachments.kind.font",
+  "attachments.kind.image",
+  "attachments.kind.pdf",
+  "attachments.kind.pdfDocument",
+  "attachments.kind.text",
+  "attachments.kind.video",
+  "attachments.meta.kindDurationSize",
+  "attachments.meta.kindSize",
+  "attachments.next.blocked",
+  "attachments.next.cameraPermissionDenied",
+  "attachments.next.forbidden",
+  "attachments.next.noArchive",
+  "attachments.next.permissionDenied",
+  "attachments.next.tooLarge",
+  "attachments.pdf.notPdf",
+  "attachments.pdf.open",
+  "attachments.pdf.openDesktop",
+  "attachments.pdf.openFailed",
+  "attachments.pdf.opening",
+  "attachments.pdf.popupBlocked",
+  "attachments.preview.failed",
+  "attachments.preview.files",
+  "attachments.preview.loading",
+  "attachments.preview.photos",
+  "attachments.preview.photosAndFiles",
+  "attachments.sendBlock.failed",
+  "attachments.sendBlock.retryable",
+  "attachments.sendBlock.uploading",
+  "attachments.status.downloadFailed",
+  "attachments.status.downloading",
+  "attachments.status.downloadingPercent",
+  "attachments.status.failedWithNext",
+  "attachments.status.pairDot",
+  "attachments.status.queued",
+  "attachments.status.sizeAndWord",
+  "attachments.status.uploaded",
+  "attachments.status.uploading",
+  "attachments.status.uploadingNamed",
+  "attachments.tray.countLabel",
+  "attachments.tray.folderRejected",
   "attachments.tray.noticeDismiss",
   "attachments.tray.overflow",
   "attachments.tray.removeNamed",
+  "attachments.tray.title",
   "attachments.video.cardLabel",
   "attachments.video.cardLabelNoDuration",
   "attachments.video.failed",
@@ -519,6 +589,15 @@ export const messageKeys = [
   "channels.rename.submit",
   "channels.rename.title",
   "channels.topic.tooLong",
+  "chat.composer.fieldLabelPerson",
+  "chat.composer.fieldLabelPlace",
+  "chat.composer.mentionAffordance",
+  "chat.composer.offline",
+  "chat.composer.placeholderPerson",
+  "chat.composer.placeholderPlace",
+  "chat.hint.composerKeys",
+  "chat.hint.editorKeys",
+  "chat.thread.placeholder",
   "cliLogin.consent.approve",
   "cliLogin.consent.approveBusy",
   "cliLogin.consent.checkNote",
@@ -824,6 +903,25 @@ export const messageKeys = [
   "directory.status.inactive",
   "directory.status.invited",
   "directory.status.suspended",
+  "emoji.catalog.emptyDetail",
+  "emoji.catalog.emptyHeadline",
+  "emoji.catalog.error",
+  "emoji.catalog.offline",
+  "emoji.category.activity",
+  "emoji.category.flags",
+  "emoji.category.foods",
+  "emoji.category.frequent",
+  "emoji.category.nature",
+  "emoji.category.objects",
+  "emoji.category.people",
+  "emoji.category.places",
+  "emoji.category.symbols",
+  "emoji.tone.dark",
+  "emoji.tone.default",
+  "emoji.tone.light",
+  "emoji.tone.medium",
+  "emoji.tone.mediumDark",
+  "emoji.tone.mediumLight",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -1958,6 +2056,40 @@ export const messageKeys = [
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
+  "reminders.action.complete",
+  "reminders.action.custom",
+  "reminders.action.delete",
+  "reminders.action.snooze",
+  "reminders.action.snoozeCommit",
+  "reminders.channel.unknown",
+  "reminders.confirm.detail",
+  "reminders.confirm.title",
+  "reminders.due.days",
+  "reminders.due.hours",
+  "reminders.due.minutes",
+  "reminders.due.overdue",
+  "reminders.due.soon",
+  "reminders.empty.detail",
+  "reminders.empty.headline",
+  "reminders.error.completeFailed",
+  "reminders.error.deleteFailed",
+  "reminders.error.forbiddenChange",
+  "reminders.error.forbiddenCreate",
+  "reminders.error.loadFailed",
+  "reminders.error.notFound",
+  "reminders.error.pastTime",
+  "reminders.error.saveFailed",
+  "reminders.error.snoozeFailed",
+  "reminders.item.fallbackPreview",
+  "reminders.menu.remind",
+  "reminders.notify.backlog",
+  "reminders.notify.title",
+  "reminders.preset.in1h",
+  "reminders.preset.in30m",
+  "reminders.preset.in3h",
+  "reminders.preset.nextMonday9",
+  "reminders.preset.tomorrow9",
+  "reminders.tab.later",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -1972,6 +2104,127 @@ export const messageKeys = [
   "reply.home.headerSelf",
   "reply.home.headerUnknown",
   "reply.home.open",
+  "scheduled.action.change",
+  "scheduled.action.copy",
+  "scheduled.action.delete",
+  "scheduled.action.edit",
+  "scheduled.action.rearm",
+  "scheduled.action.review",
+  "scheduled.action.rowMenu",
+  "scheduled.action.sendNow",
+  "scheduled.banner.action",
+  "scheduled.banner.failed",
+  "scheduled.banner.pending",
+  "scheduled.block.titleTwoLines",
+  "scheduled.delete.body",
+  "scheduled.delete.confirm",
+  "scheduled.delete.pending",
+  "scheduled.delete.title",
+  "scheduled.dialog.commit",
+  "scheduled.dialog.commitChange",
+  "scheduled.dialog.date",
+  "scheduled.dialog.description",
+  "scheduled.dialog.errFar",
+  "scheduled.dialog.errInvalid",
+  "scheduled.dialog.errSoon",
+  "scheduled.dialog.offline",
+  "scheduled.dialog.preview",
+  "scheduled.dialog.saving",
+  "scheduled.dialog.time",
+  "scheduled.dialog.title",
+  "scheduled.dialog.titleChange",
+  "scheduled.dialog.titleRearm",
+  "scheduled.disabled.attachFailedNextRemove",
+  "scheduled.disabled.attachFailedNextRetry",
+  "scheduled.disabled.attachFailedReason",
+  "scheduled.disabled.attachUploadingNext",
+  "scheduled.disabled.attachUploadingReason",
+  "scheduled.disabled.commandNext",
+  "scheduled.disabled.commandReason",
+  "scheduled.disabled.emptyReason",
+  "scheduled.disabled.limit",
+  "scheduled.disabled.personalCallNext",
+  "scheduled.disabled.personalCallReason",
+  "scheduled.disabled.quoteNext",
+  "scheduled.disabled.quoteReason",
+  "scheduled.disabled.unavailableNext",
+  "scheduled.disabled.unavailableReason",
+  "scheduled.dm.conversationLabel",
+  "scheduled.edit.attachNote",
+  "scheduled.edit.commit",
+  "scheduled.edit.title",
+  "scheduled.empty.action",
+  "scheduled.empty.bodyPhone",
+  "scheduled.empty.bodyWeb",
+  "scheduled.empty.title",
+  "scheduled.error.tooLate",
+  "scheduled.errors.alreadySent",
+  "scheduled.errors.attachmentReserved",
+  "scheduled.errors.attachmentUnusable",
+  "scheduled.errors.busyAct",
+  "scheduled.errors.busyEdit",
+  "scheduled.errors.createBadRequest",
+  "scheduled.errors.createForbidden",
+  "scheduled.errors.createNotFound",
+  "scheduled.errors.emptyMessage",
+  "scheduled.errors.otherCreate",
+  "scheduled.errors.otherWrite",
+  "scheduled.errors.rateLimited",
+  "scheduled.errors.rowNotFound",
+  "scheduled.errors.unknownCreate",
+  "scheduled.errors.unknownDelete",
+  "scheduled.errors.unknownEdit",
+  "scheduled.errors.unknownSendNow",
+  "scheduled.failure.attachmentUnavailableNext",
+  "scheduled.failure.attachmentUnavailableReason",
+  "scheduled.failure.authorInactiveNext",
+  "scheduled.failure.authorInactiveReason",
+  "scheduled.failure.missedNext",
+  "scheduled.failure.missedReason",
+  "scheduled.failure.notAllowedNext",
+  "scheduled.failure.notAllowedReason",
+  "scheduled.failure.notMemberNext",
+  "scheduled.failure.notMemberReason",
+  "scheduled.failure.rootUnavailableNext",
+  "scheduled.failure.rootUnavailableReason",
+  "scheduled.failure.sendErrorNext",
+  "scheduled.failure.sendErrorReason",
+  "scheduled.failure.sessionsEndedNext",
+  "scheduled.failure.sessionsEndedReason",
+  "scheduled.list.attachments",
+  "scheduled.list.copyFailedNext",
+  "scheduled.list.copyFailedReason",
+  "scheduled.list.count",
+  "scheduled.list.filter",
+  "scheduled.list.filterAction",
+  "scheduled.list.sectionFailed",
+  "scheduled.list.sectionPending",
+  "scheduled.list.soon",
+  "scheduled.list.title",
+  "scheduled.list.when",
+  "scheduled.load.error",
+  "scheduled.lock.reason",
+  "scheduled.menu.custom",
+  "scheduled.menu.customDetail",
+  "scheduled.menu.routingNote",
+  "scheduled.menu.zone",
+  "scheduled.nav.badgeLabel",
+  "scheduled.nav.label",
+  "scheduled.offline.list",
+  "scheduled.preset.nextMonday",
+  "scheduled.preset.tomorrow",
+  "scheduled.review.attachments",
+  "scheduled.review.body",
+  "scheduled.review.bodyLabel",
+  "scheduled.review.title",
+  "scheduled.review.when",
+  "scheduled.row.ariaNoPreview",
+  "scheduled.row.ariaWithPreview",
+  "scheduled.secretKey.lead",
+  "scheduled.status.scheduled",
+  "scheduled.status.sentNow",
+  "scheduled.trigger.hint",
+  "scheduled.trigger.label",
   "search.entry.thisChannel",
   "search.entry.thisChannelQuery",
   "search.entry.thisDm",
@@ -2905,6 +3158,131 @@ export const argumentSpecs = {
     "key": "string"
   },
   "app.shortcutHelp.search": {},
+  "attachments.action.attach": {},
+  "attachments.action.clearAll": {},
+  "attachments.action.download": {},
+  "attachments.action.downloadNamed": {
+    "name": "string"
+  },
+  "attachments.action.expandImage": {},
+  "attachments.action.expandNamed": {
+    "label": "string"
+  },
+  "attachments.action.expandNamedAt": {
+    "label": "string",
+    "position": "string"
+  },
+  "attachments.action.remove": {},
+  "attachments.action.removeNamed": {
+    "name": "string"
+  },
+  "attachments.action.retryNamed": {
+    "name": "string"
+  },
+  "attachments.announce.firstGroup": {
+    "count": "number",
+    "word": "string"
+  },
+  "attachments.announce.nextGroup": {
+    "count": "number",
+    "word": "string"
+  },
+  "attachments.announce.pair": {
+    "first": "string",
+    "second": "string"
+  },
+  "attachments.announce.single": {
+    "name": "string",
+    "status": "string"
+  },
+  "attachments.card.aria": {
+    "label": "string",
+    "meta": "string",
+    "state": "string"
+  },
+  "attachments.card.stateIdle": {},
+  "attachments.issue.blocked": {},
+  "attachments.issue.cameraPermissionDenied": {},
+  "attachments.issue.cameraUnavailable": {},
+  "attachments.issue.forbidden": {},
+  "attachments.issue.mismatch": {},
+  "attachments.issue.noArchive": {},
+  "attachments.issue.permissionDenied": {},
+  "attachments.issue.selectionCancelled": {},
+  "attachments.issue.tooLarge": {},
+  "attachments.issue.unavailable": {},
+  "attachments.kind.archive": {},
+  "attachments.kind.audio": {},
+  "attachments.kind.file": {},
+  "attachments.kind.font": {},
+  "attachments.kind.image": {},
+  "attachments.kind.pdf": {},
+  "attachments.kind.pdfDocument": {},
+  "attachments.kind.text": {},
+  "attachments.kind.video": {},
+  "attachments.meta.kindDurationSize": {
+    "duration": "string",
+    "kind": "string",
+    "size": "string"
+  },
+  "attachments.meta.kindSize": {
+    "kind": "string",
+    "size": "string"
+  },
+  "attachments.next.blocked": {},
+  "attachments.next.cameraPermissionDenied": {},
+  "attachments.next.forbidden": {},
+  "attachments.next.noArchive": {},
+  "attachments.next.permissionDenied": {},
+  "attachments.next.tooLarge": {},
+  "attachments.pdf.notPdf": {},
+  "attachments.pdf.open": {},
+  "attachments.pdf.openDesktop": {},
+  "attachments.pdf.openFailed": {},
+  "attachments.pdf.opening": {},
+  "attachments.pdf.popupBlocked": {},
+  "attachments.preview.failed": {},
+  "attachments.preview.files": {
+    "count": "number"
+  },
+  "attachments.preview.loading": {},
+  "attachments.preview.photos": {
+    "count": "number"
+  },
+  "attachments.preview.photosAndFiles": {
+    "files": "string",
+    "photos": "string"
+  },
+  "attachments.sendBlock.failed": {},
+  "attachments.sendBlock.retryable": {},
+  "attachments.sendBlock.uploading": {},
+  "attachments.status.downloadFailed": {},
+  "attachments.status.downloading": {},
+  "attachments.status.downloadingPercent": {
+    "percent": "number"
+  },
+  "attachments.status.failedWithNext": {
+    "next": "string",
+    "reason": "string"
+  },
+  "attachments.status.pairDot": {
+    "first": "string",
+    "second": "string"
+  },
+  "attachments.status.queued": {},
+  "attachments.status.sizeAndWord": {
+    "size": "string",
+    "word": "string"
+  },
+  "attachments.status.uploaded": {},
+  "attachments.status.uploading": {},
+  "attachments.status.uploadingNamed": {
+    "name": "string"
+  },
+  "attachments.tray.countLabel": {
+    "count": "number"
+  },
+  "attachments.tray.folderRejected": {},
   "attachments.tray.noticeDismiss": {},
   "attachments.tray.overflow": {
     "count": "number",
@@ -2913,6 +3291,7 @@ export const argumentSpecs = {
   "attachments.tray.removeNamed": {
     "name": "string"
   },
+  "attachments.tray.title": {},
   "attachments.video.cardLabel": {
     "duration": "string",
     "name": "string"
@@ -3555,6 +3934,23 @@ export const argumentSpecs = {
   "channels.topic.tooLong": {
     "max": "number"
   },
+  "chat.composer.fieldLabelPerson": {
+    "name": "string"
+  },
+  "chat.composer.fieldLabelPlace": {
+    "name": "string"
+  },
+  "chat.composer.mentionAffordance": {},
+  "chat.composer.offline": {},
+  "chat.composer.placeholderPerson": {
+    "name": "string"
+  },
+  "chat.composer.placeholderPlace": {
+    "name": "string"
+  },
+  "chat.hint.composerKeys": {},
+  "chat.hint.editorKeys": {},
+  "chat.thread.placeholder": {},
   "cliLogin.consent.approve": {},
   "cliLogin.consent.approveBusy": {},
   "cliLogin.consent.checkNote": {},
@@ -3981,6 +4377,25 @@ export const argumentSpecs = {
   "directory.status.inactive": {},
   "directory.status.invited": {},
   "directory.status.suspended": {},
+  "emoji.catalog.emptyDetail": {},
+  "emoji.catalog.emptyHeadline": {},
+  "emoji.catalog.error": {},
+  "emoji.catalog.offline": {},
+  "emoji.category.activity": {},
+  "emoji.category.flags": {},
+  "emoji.category.foods": {},
+  "emoji.category.frequent": {},
+  "emoji.category.nature": {},
+  "emoji.category.objects": {},
+  "emoji.category.people": {},
+  "emoji.category.places": {},
+  "emoji.category.symbols": {},
+  "emoji.tone.dark": {},
+  "emoji.tone.default": {},
+  "emoji.tone.light": {},
+  "emoji.tone.medium": {},
+  "emoji.tone.mediumDark": {},
+  "emoji.tone.mediumLight": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -5409,6 +5824,48 @@ export const argumentSpecs = {
   "releaseNotes.version.releasedOn": {
     "date": "string"
   },
+  "reminders.action.complete": {},
+  "reminders.action.custom": {},
+  "reminders.action.delete": {},
+  "reminders.action.snooze": {},
+  "reminders.action.snoozeCommit": {},
+  "reminders.channel.unknown": {},
+  "reminders.confirm.detail": {},
+  "reminders.confirm.title": {},
+  "reminders.due.days": {
+    "count": "number"
+  },
+  "reminders.due.hours": {
+    "count": "number"
+  },
+  "reminders.due.minutes": {
+    "count": "number"
+  },
+  "reminders.due.overdue": {},
+  "reminders.due.soon": {},
+  "reminders.empty.detail": {},
+  "reminders.empty.headline": {},
+  "reminders.error.completeFailed": {},
+  "reminders.error.deleteFailed": {},
+  "reminders.error.forbiddenChange": {},
+  "reminders.error.forbiddenCreate": {},
+  "reminders.error.loadFailed": {},
+  "reminders.error.notFound": {},
+  "reminders.error.pastTime": {},
+  "reminders.error.saveFailed": {},
+  "reminders.error.snoozeFailed": {},
+  "reminders.item.fallbackPreview": {},
+  "reminders.menu.remind": {},
+  "reminders.notify.backlog": {
+    "count": "number"
+  },
+  "reminders.notify.title": {},
+  "reminders.preset.in1h": {},
+  "reminders.preset.in30m": {},
+  "reminders.preset.in3h": {},
+  "reminders.preset.nextMonday9": {},
+  "reminders.preset.tomorrow9": {},
+  "reminders.tab.later": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -5427,6 +5884,179 @@ export const argumentSpecs = {
   "reply.home.headerSelf": {},
   "reply.home.headerUnknown": {},
   "reply.home.open": {},
+  "scheduled.action.change": {},
+  "scheduled.action.copy": {},
+  "scheduled.action.delete": {},
+  "scheduled.action.edit": {},
+  "scheduled.action.rearm": {},
+  "scheduled.action.review": {},
+  "scheduled.action.rowMenu": {
+    "channelLabel": "string",
+    "when": "string"
+  },
+  "scheduled.action.sendNow": {},
+  "scheduled.banner.action": {},
+  "scheduled.banner.failed": {
+    "count": "number"
+  },
+  "scheduled.banner.pending": {
+    "count": "number",
+    "place": "string"
+  },
+  "scheduled.block.titleTwoLines": {
+    "next": "string",
+    "reason": "string"
+  },
+  "scheduled.delete.body": {},
+  "scheduled.delete.confirm": {},
+  "scheduled.delete.pending": {},
+  "scheduled.delete.title": {},
+  "scheduled.dialog.commit": {},
+  "scheduled.dialog.commitChange": {},
+  "scheduled.dialog.date": {},
+  "scheduled.dialog.description": {},
+  "scheduled.dialog.errFar": {},
+  "scheduled.dialog.errInvalid": {},
+  "scheduled.dialog.errSoon": {},
+  "scheduled.dialog.offline": {},
+  "scheduled.dialog.preview": {
+    "when": "string"
+  },
+  "scheduled.dialog.saving": {},
+  "scheduled.dialog.time": {},
+  "scheduled.dialog.title": {},
+  "scheduled.dialog.titleChange": {},
+  "scheduled.dialog.titleRearm": {},
+  "scheduled.disabled.attachFailedNextRemove": {},
+  "scheduled.disabled.attachFailedNextRetry": {},
+  "scheduled.disabled.attachFailedReason": {},
+  "scheduled.disabled.attachUploadingNext": {},
+  "scheduled.disabled.attachUploadingReason": {},
+  "scheduled.disabled.commandNext": {},
+  "scheduled.disabled.commandReason": {},
+  "scheduled.disabled.emptyReason": {},
+  "scheduled.disabled.limit": {},
+  "scheduled.disabled.personalCallNext": {},
+  "scheduled.disabled.personalCallReason": {},
+  "scheduled.disabled.quoteNext": {},
+  "scheduled.disabled.quoteReason": {},
+  "scheduled.disabled.unavailableNext": {},
+  "scheduled.disabled.unavailableReason": {},
+  "scheduled.dm.conversationLabel": {
+    "josa": "string",
+    "name": "string"
+  },
+  "scheduled.edit.attachNote": {},
+  "scheduled.edit.commit": {},
+  "scheduled.edit.title": {},
+  "scheduled.empty.action": {},
+  "scheduled.empty.bodyPhone": {},
+  "scheduled.empty.bodyWeb": {},
+  "scheduled.empty.title": {},
+  "scheduled.error.tooLate": {},
+  "scheduled.errors.alreadySent": {},
+  "scheduled.errors.attachmentReserved": {},
+  "scheduled.errors.attachmentUnusable": {},
+  "scheduled.errors.busyAct": {},
+  "scheduled.errors.busyEdit": {},
+  "scheduled.errors.createBadRequest": {},
+  "scheduled.errors.createForbidden": {
+    "place": "string"
+  },
+  "scheduled.errors.createNotFound": {},
+  "scheduled.errors.emptyMessage": {},
+  "scheduled.errors.otherCreate": {},
+  "scheduled.errors.otherWrite": {},
+  "scheduled.errors.rateLimited": {},
+  "scheduled.errors.rowNotFound": {},
+  "scheduled.errors.unknownCreate": {},
+  "scheduled.errors.unknownDelete": {},
+  "scheduled.errors.unknownEdit": {},
+  "scheduled.errors.unknownSendNow": {},
+  "scheduled.failure.attachmentUnavailableNext": {},
+  "scheduled.failure.attachmentUnavailableReason": {},
+  "scheduled.failure.authorInactiveNext": {},
+  "scheduled.failure.authorInactiveReason": {},
+  "scheduled.failure.missedNext": {},
+  "scheduled.failure.missedReason": {},
+  "scheduled.failure.notAllowedNext": {},
+  "scheduled.failure.notAllowedReason": {
+    "place": "string"
+  },
+  "scheduled.failure.notMemberNext": {
+    "place": "string"
+  },
+  "scheduled.failure.notMemberReason": {
+    "place": "string"
+  },
+  "scheduled.failure.rootUnavailableNext": {
+    "place": "string"
+  },
+  "scheduled.failure.rootUnavailableReason": {},
+  "scheduled.failure.sendErrorNext": {},
+  "scheduled.failure.sendErrorReason": {},
+  "scheduled.failure.sessionsEndedNext": {},
+  "scheduled.failure.sessionsEndedReason": {},
+  "scheduled.list.attachments": {
+    "count": "number"
+  },
+  "scheduled.list.copyFailedNext": {},
+  "scheduled.list.copyFailedReason": {},
+  "scheduled.list.count": {
+    "count": "number"
+  },
+  "scheduled.list.filter": {
+    "placeLabel": "string"
+  },
+  "scheduled.list.filterAction": {},
+  "scheduled.list.sectionFailed": {},
+  "scheduled.list.sectionPending": {},
+  "scheduled.list.soon": {},
+  "scheduled.list.title": {},
+  "scheduled.list.when": {
+    "when": "string"
+  },
+  "scheduled.load.error": {},
+  "scheduled.lock.reason": {},
+  "scheduled.menu.custom": {},
+  "scheduled.menu.customDetail": {},
+  "scheduled.menu.routingNote": {},
+  "scheduled.menu.zone": {
+    "zone": "string"
+  },
+  "scheduled.nav.badgeLabel": {
+    "count": "number"
+  },
+  "scheduled.nav.label": {},
+  "scheduled.offline.list": {},
+  "scheduled.preset.nextMonday": {},
+  "scheduled.preset.tomorrow": {},
+  "scheduled.review.attachments": {
+    "count": "number",
+    "names": "string"
+  },
+  "scheduled.review.body": {},
+  "scheduled.review.bodyLabel": {},
+  "scheduled.review.title": {},
+  "scheduled.review.when": {
+    "when": "string"
+  },
+  "scheduled.row.ariaNoPreview": {
+    "channelLabel": "string",
+    "tail": "string"
+  },
+  "scheduled.row.ariaWithPreview": {
+    "channelLabel": "string",
+    "preview": "string",
+    "tail": "string"
+  },
+  "scheduled.secretKey.lead": {},
+  "scheduled.status.scheduled": {
+    "when": "string"
+  },
+  "scheduled.status.sentNow": {},
+  "scheduled.trigger.hint": {},
+  "scheduled.trigger.label": {},
   "search.entry.thisChannel": {},
   "search.entry.thisChannelQuery": {
     "query": "string"
@@ -6898,9 +7528,79 @@ export interface MessageArgs {
   "app.shortcutHelp.empty": Record<string, never>;
   "app.shortcutHelp.reopenHint": { key: string };
   "app.shortcutHelp.search": Record<string, never>;
+  "attachments.action.attach": Record<string, never>;
+  "attachments.action.clearAll": Record<string, never>;
+  "attachments.action.download": Record<string, never>;
+  "attachments.action.downloadNamed": { name: string };
+  "attachments.action.expandImage": Record<string, never>;
+  "attachments.action.expandNamed": { label: string };
+  "attachments.action.expandNamedAt": { label: string; position: string };
+  "attachments.action.remove": Record<string, never>;
+  "attachments.action.removeNamed": { name: string };
+  "attachments.action.retryNamed": { name: string };
+  "attachments.announce.firstGroup": { count: number; word: string };
+  "attachments.announce.nextGroup": { count: number; word: string };
+  "attachments.announce.pair": { first: string; second: string };
+  "attachments.announce.single": { name: string; status: string };
+  "attachments.card.aria": { label: string; meta: string; state: string };
+  "attachments.card.stateIdle": Record<string, never>;
+  "attachments.issue.blocked": Record<string, never>;
+  "attachments.issue.cameraPermissionDenied": Record<string, never>;
+  "attachments.issue.cameraUnavailable": Record<string, never>;
+  "attachments.issue.forbidden": Record<string, never>;
+  "attachments.issue.mismatch": Record<string, never>;
+  "attachments.issue.noArchive": Record<string, never>;
+  "attachments.issue.permissionDenied": Record<string, never>;
+  "attachments.issue.selectionCancelled": Record<string, never>;
+  "attachments.issue.tooLarge": Record<string, never>;
+  "attachments.issue.unavailable": Record<string, never>;
+  "attachments.kind.archive": Record<string, never>;
+  "attachments.kind.audio": Record<string, never>;
+  "attachments.kind.file": Record<string, never>;
+  "attachments.kind.font": Record<string, never>;
+  "attachments.kind.image": Record<string, never>;
+  "attachments.kind.pdf": Record<string, never>;
+  "attachments.kind.pdfDocument": Record<string, never>;
+  "attachments.kind.text": Record<string, never>;
+  "attachments.kind.video": Record<string, never>;
+  "attachments.meta.kindDurationSize": { duration: string; kind: string; size: string };
+  "attachments.meta.kindSize": { kind: string; size: string };
+  "attachments.next.blocked": Record<string, never>;
+  "attachments.next.cameraPermissionDenied": Record<string, never>;
+  "attachments.next.forbidden": Record<string, never>;
+  "attachments.next.noArchive": Record<string, never>;
+  "attachments.next.permissionDenied": Record<string, never>;
+  "attachments.next.tooLarge": Record<string, never>;
+  "attachments.pdf.notPdf": Record<string, never>;
+  "attachments.pdf.open": Record<string, never>;
+  "attachments.pdf.openDesktop": Record<string, never>;
+  "attachments.pdf.openFailed": Record<string, never>;
+  "attachments.pdf.opening": Record<string, never>;
+  "attachments.pdf.popupBlocked": Record<string, never>;
+  "attachments.preview.failed": Record<string, never>;
+  "attachments.preview.files": { count: number };
+  "attachments.preview.loading": Record<string, never>;
+  "attachments.preview.photos": { count: number };
+  "attachments.preview.photosAndFiles": { files: string; photos: string };
+  "attachments.sendBlock.failed": Record<string, never>;
+  "attachments.sendBlock.retryable": Record<string, never>;
+  "attachments.sendBlock.uploading": Record<string, never>;
+  "attachments.status.downloadFailed": Record<string, never>;
+  "attachments.status.downloading": Record<string, never>;
+  "attachments.status.downloadingPercent": { percent: number };
+  "attachments.status.failedWithNext": { next: string; reason: string };
+  "attachments.status.pairDot": { first: string; second: string };
+  "attachments.status.queued": Record<string, never>;
+  "attachments.status.sizeAndWord": { size: string; word: string };
+  "attachments.status.uploaded": Record<string, never>;
+  "attachments.status.uploading": Record<string, never>;
+  "attachments.status.uploadingNamed": { name: string };
+  "attachments.tray.countLabel": { count: number };
+  "attachments.tray.folderRejected": Record<string, never>;
   "attachments.tray.noticeDismiss": Record<string, never>;
   "attachments.tray.overflow": { count: number; max: number };
   "attachments.tray.removeNamed": { name: string };
+  "attachments.tray.title": Record<string, never>;
   "attachments.video.cardLabel": { duration: string; name: string };
   "attachments.video.cardLabelNoDuration": { name: string };
   "attachments.video.failed": Record<string, never>;
@@ -7413,6 +8113,15 @@ export interface MessageArgs {
   "channels.rename.submit": Record<string, never>;
   "channels.rename.title": Record<string, never>;
   "channels.topic.tooLong": { max: number };
+  "chat.composer.fieldLabelPerson": { name: string };
+  "chat.composer.fieldLabelPlace": { name: string };
+  "chat.composer.mentionAffordance": Record<string, never>;
+  "chat.composer.offline": Record<string, never>;
+  "chat.composer.placeholderPerson": { name: string };
+  "chat.composer.placeholderPlace": { name: string };
+  "chat.hint.composerKeys": Record<string, never>;
+  "chat.hint.editorKeys": Record<string, never>;
+  "chat.thread.placeholder": Record<string, never>;
   "cliLogin.consent.approve": Record<string, never>;
   "cliLogin.consent.approveBusy": Record<string, never>;
   "cliLogin.consent.checkNote": Record<string, never>;
@@ -7718,6 +8427,25 @@ export interface MessageArgs {
   "directory.status.inactive": Record<string, never>;
   "directory.status.invited": Record<string, never>;
   "directory.status.suspended": Record<string, never>;
+  "emoji.catalog.emptyDetail": Record<string, never>;
+  "emoji.catalog.emptyHeadline": Record<string, never>;
+  "emoji.catalog.error": Record<string, never>;
+  "emoji.catalog.offline": Record<string, never>;
+  "emoji.category.activity": Record<string, never>;
+  "emoji.category.flags": Record<string, never>;
+  "emoji.category.foods": Record<string, never>;
+  "emoji.category.frequent": Record<string, never>;
+  "emoji.category.nature": Record<string, never>;
+  "emoji.category.objects": Record<string, never>;
+  "emoji.category.people": Record<string, never>;
+  "emoji.category.places": Record<string, never>;
+  "emoji.category.symbols": Record<string, never>;
+  "emoji.tone.dark": Record<string, never>;
+  "emoji.tone.default": Record<string, never>;
+  "emoji.tone.light": Record<string, never>;
+  "emoji.tone.medium": Record<string, never>;
+  "emoji.tone.mediumDark": Record<string, never>;
+  "emoji.tone.mediumLight": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
@@ -8852,6 +9580,40 @@ export interface MessageArgs {
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
+  "reminders.action.complete": Record<string, never>;
+  "reminders.action.custom": Record<string, never>;
+  "reminders.action.delete": Record<string, never>;
+  "reminders.action.snooze": Record<string, never>;
+  "reminders.action.snoozeCommit": Record<string, never>;
+  "reminders.channel.unknown": Record<string, never>;
+  "reminders.confirm.detail": Record<string, never>;
+  "reminders.confirm.title": Record<string, never>;
+  "reminders.due.days": { count: number };
+  "reminders.due.hours": { count: number };
+  "reminders.due.minutes": { count: number };
+  "reminders.due.overdue": Record<string, never>;
+  "reminders.due.soon": Record<string, never>;
+  "reminders.empty.detail": Record<string, never>;
+  "reminders.empty.headline": Record<string, never>;
+  "reminders.error.completeFailed": Record<string, never>;
+  "reminders.error.deleteFailed": Record<string, never>;
+  "reminders.error.forbiddenChange": Record<string, never>;
+  "reminders.error.forbiddenCreate": Record<string, never>;
+  "reminders.error.loadFailed": Record<string, never>;
+  "reminders.error.notFound": Record<string, never>;
+  "reminders.error.pastTime": Record<string, never>;
+  "reminders.error.saveFailed": Record<string, never>;
+  "reminders.error.snoozeFailed": Record<string, never>;
+  "reminders.item.fallbackPreview": Record<string, never>;
+  "reminders.menu.remind": Record<string, never>;
+  "reminders.notify.backlog": { count: number };
+  "reminders.notify.title": Record<string, never>;
+  "reminders.preset.in1h": Record<string, never>;
+  "reminders.preset.in30m": Record<string, never>;
+  "reminders.preset.in3h": Record<string, never>;
+  "reminders.preset.nextMonday9": Record<string, never>;
+  "reminders.preset.tomorrow9": Record<string, never>;
+  "reminders.tab.later": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;
@@ -8866,6 +9628,127 @@ export interface MessageArgs {
   "reply.home.headerSelf": Record<string, never>;
   "reply.home.headerUnknown": Record<string, never>;
   "reply.home.open": Record<string, never>;
+  "scheduled.action.change": Record<string, never>;
+  "scheduled.action.copy": Record<string, never>;
+  "scheduled.action.delete": Record<string, never>;
+  "scheduled.action.edit": Record<string, never>;
+  "scheduled.action.rearm": Record<string, never>;
+  "scheduled.action.review": Record<string, never>;
+  "scheduled.action.rowMenu": { channelLabel: string; when: string };
+  "scheduled.action.sendNow": Record<string, never>;
+  "scheduled.banner.action": Record<string, never>;
+  "scheduled.banner.failed": { count: number };
+  "scheduled.banner.pending": { count: number; place: string };
+  "scheduled.block.titleTwoLines": { next: string; reason: string };
+  "scheduled.delete.body": Record<string, never>;
+  "scheduled.delete.confirm": Record<string, never>;
+  "scheduled.delete.pending": Record<string, never>;
+  "scheduled.delete.title": Record<string, never>;
+  "scheduled.dialog.commit": Record<string, never>;
+  "scheduled.dialog.commitChange": Record<string, never>;
+  "scheduled.dialog.date": Record<string, never>;
+  "scheduled.dialog.description": Record<string, never>;
+  "scheduled.dialog.errFar": Record<string, never>;
+  "scheduled.dialog.errInvalid": Record<string, never>;
+  "scheduled.dialog.errSoon": Record<string, never>;
+  "scheduled.dialog.offline": Record<string, never>;
+  "scheduled.dialog.preview": { when: string };
+  "scheduled.dialog.saving": Record<string, never>;
+  "scheduled.dialog.time": Record<string, never>;
+  "scheduled.dialog.title": Record<string, never>;
+  "scheduled.dialog.titleChange": Record<string, never>;
+  "scheduled.dialog.titleRearm": Record<string, never>;
+  "scheduled.disabled.attachFailedNextRemove": Record<string, never>;
+  "scheduled.disabled.attachFailedNextRetry": Record<string, never>;
+  "scheduled.disabled.attachFailedReason": Record<string, never>;
+  "scheduled.disabled.attachUploadingNext": Record<string, never>;
+  "scheduled.disabled.attachUploadingReason": Record<string, never>;
+  "scheduled.disabled.commandNext": Record<string, never>;
+  "scheduled.disabled.commandReason": Record<string, never>;
+  "scheduled.disabled.emptyReason": Record<string, never>;
+  "scheduled.disabled.limit": Record<string, never>;
+  "scheduled.disabled.personalCallNext": Record<string, never>;
+  "scheduled.disabled.personalCallReason": Record<string, never>;
+  "scheduled.disabled.quoteNext": Record<string, never>;
+  "scheduled.disabled.quoteReason": Record<string, never>;
+  "scheduled.disabled.unavailableNext": Record<string, never>;
+  "scheduled.disabled.unavailableReason": Record<string, never>;
+  "scheduled.dm.conversationLabel": { josa: string; name: string };
+  "scheduled.edit.attachNote": Record<string, never>;
+  "scheduled.edit.commit": Record<string, never>;
+  "scheduled.edit.title": Record<string, never>;
+  "scheduled.empty.action": Record<string, never>;
+  "scheduled.empty.bodyPhone": Record<string, never>;
+  "scheduled.empty.bodyWeb": Record<string, never>;
+  "scheduled.empty.title": Record<string, never>;
+  "scheduled.error.tooLate": Record<string, never>;
+  "scheduled.errors.alreadySent": Record<string, never>;
+  "scheduled.errors.attachmentReserved": Record<string, never>;
+  "scheduled.errors.attachmentUnusable": Record<string, never>;
+  "scheduled.errors.busyAct": Record<string, never>;
+  "scheduled.errors.busyEdit": Record<string, never>;
+  "scheduled.errors.createBadRequest": Record<string, never>;
+  "scheduled.errors.createForbidden": { place: string };
+  "scheduled.errors.createNotFound": Record<string, never>;
+  "scheduled.errors.emptyMessage": Record<string, never>;
+  "scheduled.errors.otherCreate": Record<string, never>;
+  "scheduled.errors.otherWrite": Record<string, never>;
+  "scheduled.errors.rateLimited": Record<string, never>;
+  "scheduled.errors.rowNotFound": Record<string, never>;
+  "scheduled.errors.unknownCreate": Record<string, never>;
+  "scheduled.errors.unknownDelete": Record<string, never>;
+  "scheduled.errors.unknownEdit": Record<string, never>;
+  "scheduled.errors.unknownSendNow": Record<string, never>;
+  "scheduled.failure.attachmentUnavailableNext": Record<string, never>;
+  "scheduled.failure.attachmentUnavailableReason": Record<string, never>;
+  "scheduled.failure.authorInactiveNext": Record<string, never>;
+  "scheduled.failure.authorInactiveReason": Record<string, never>;
+  "scheduled.failure.missedNext": Record<string, never>;
+  "scheduled.failure.missedReason": Record<string, never>;
+  "scheduled.failure.notAllowedNext": Record<string, never>;
+  "scheduled.failure.notAllowedReason": { place: string };
+  "scheduled.failure.notMemberNext": { place: string };
+  "scheduled.failure.notMemberReason": { place: string };
+  "scheduled.failure.rootUnavailableNext": { place: string };
+  "scheduled.failure.rootUnavailableReason": Record<string, never>;
+  "scheduled.failure.sendErrorNext": Record<string, never>;
+  "scheduled.failure.sendErrorReason": Record<string, never>;
+  "scheduled.failure.sessionsEndedNext": Record<string, never>;
+  "scheduled.failure.sessionsEndedReason": Record<string, never>;
+  "scheduled.list.attachments": { count: number };
+  "scheduled.list.copyFailedNext": Record<string, never>;
+  "scheduled.list.copyFailedReason": Record<string, never>;
+  "scheduled.list.count": { count: number };
+  "scheduled.list.filter": { placeLabel: string };
+  "scheduled.list.filterAction": Record<string, never>;
+  "scheduled.list.sectionFailed": Record<string, never>;
+  "scheduled.list.sectionPending": Record<string, never>;
+  "scheduled.list.soon": Record<string, never>;
+  "scheduled.list.title": Record<string, never>;
+  "scheduled.list.when": { when: string };
+  "scheduled.load.error": Record<string, never>;
+  "scheduled.lock.reason": Record<string, never>;
+  "scheduled.menu.custom": Record<string, never>;
+  "scheduled.menu.customDetail": Record<string, never>;
+  "scheduled.menu.routingNote": Record<string, never>;
+  "scheduled.menu.zone": { zone: string };
+  "scheduled.nav.badgeLabel": { count: number };
+  "scheduled.nav.label": Record<string, never>;
+  "scheduled.offline.list": Record<string, never>;
+  "scheduled.preset.nextMonday": Record<string, never>;
+  "scheduled.preset.tomorrow": Record<string, never>;
+  "scheduled.review.attachments": { count: number; names: string };
+  "scheduled.review.body": Record<string, never>;
+  "scheduled.review.bodyLabel": Record<string, never>;
+  "scheduled.review.title": Record<string, never>;
+  "scheduled.review.when": { when: string };
+  "scheduled.row.ariaNoPreview": { channelLabel: string; tail: string };
+  "scheduled.row.ariaWithPreview": { channelLabel: string; preview: string; tail: string };
+  "scheduled.secretKey.lead": Record<string, never>;
+  "scheduled.status.scheduled": { when: string };
+  "scheduled.status.sentNow": Record<string, never>;
+  "scheduled.trigger.hint": Record<string, never>;
+  "scheduled.trigger.label": Record<string, never>;
   "search.entry.thisChannel": Record<string, never>;
   "search.entry.thisChannelQuery": { query: string };
   "search.entry.thisDm": Record<string, never>;

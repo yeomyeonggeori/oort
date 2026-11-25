@@ -29,7 +29,7 @@ import {
   draftStatusWord,
   formatBytes,
   isRetryableIssue,
-  sendBlockCopy,
+  sendBlockKey,
   splitFileName,
   type AttachmentDraft,
   type UploadReasonFor,
@@ -155,6 +155,7 @@ function CardProgress({
   draft: AttachmentDraft;
   measured: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     // `li` 기준이다(면은 위치가 없다). 가장자리에서 12px 들인 이유: 둥근 모서리(반경 10) 밖으로 막대 끝이
     // 삐져나오지 않게 한다. `progress` 의 폭(100%)은 전역 규칙이라 래퍼가 폭을 준다.
@@ -165,7 +166,9 @@ function CardProgress({
         className="block h-marker w-full"
         // `value` 를 **아예 달지 않는다**: 그것이 indeterminate 다.
         {...(measured ? { value: draft.progress, max: 1 } : {})}
-        aria-label={`${attachmentDisplayName(draft)} ${ATTACH_COPY.uploading}`}
+        aria-label={formatMessage("attachments.status.uploadingNamed", {
+          name: attachmentDisplayName(formatMessage, draft),
+        })}
       />
     </span>
   );
@@ -221,10 +224,11 @@ function DraftCard({
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const reasonFor = useUploadReasonFor();
-  const line = draftStatusLine(draft, reasonFor);
+  const line = draftStatusLine(formatMessage, draft, reasonFor);
   const thumbnail = useDraftThumbnail(draft);
-  const label = attachmentDisplayName(draft);
+  const label = attachmentDisplayName(formatMessage, draft);
   const shape = cardShape(draft, thumbnail.status);
   const Icon = KIND_ICON[cardKind(draft.mime)];
   const uploading = draft.status === "uploading";
@@ -337,9 +341,9 @@ function DraftCard({
               <span
                 className="line-clamp-2 min-w-0 flex-1 break-keep text-meta text-danger"
                 data-testid="attachment-chip-status"
-                title={draftStatusWord(draft, reasonFor)}
+                title={draftStatusWord(formatMessage, draft, reasonFor)}
               >
-                {draftStatusWord(draft, reasonFor)}
+                {draftStatusWord(formatMessage, draft, reasonFor)}
               </span>
               {retryable && (
                 // 글자 단추는 이 카드에 들지 않는다. 아이콘 단추이고 이름은 낭독이 읽는다.
@@ -349,7 +353,7 @@ function DraftCard({
                   variant="ghost"
                   size="icon"
                   onClick={() => onRetry(draft.localId)}
-                  aria-label={ATTACH_COPY.retry}
+                  aria-label={formatMessage(ATTACH_COPY.retry)}
                   data-testid="attachment-chip-retry"
                   className="size-control-sm shrink-0 bg-surface shadow-sm"
                 >
@@ -385,6 +389,7 @@ export function AttachButton({
   disabled?: boolean;
   className?: string;
 }) {
+  const formatMessage = useFormatMessage();
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -404,7 +409,7 @@ export function AttachButton({
           onPick(picked);
         }}
       />
-      <Tooltip label={ATTACH_COPY.attach} side="top">
+      <Tooltip label={formatMessage(ATTACH_COPY.attach)} side="top">
         <Button
           type="button"
           variant="ghost"
@@ -412,7 +417,7 @@ export function AttachButton({
           className={cn("tap-target", className)}
           disabled={disabled ?? false}
           onClick={() => inputRef.current?.click()}
-          aria-label={ATTACH_COPY.attach}
+          aria-label={formatMessage(ATTACH_COPY.attach)}
           data-testid="composer-attach"
         >
           <Plus />
@@ -437,12 +442,13 @@ export function AttachButton({
 function useAttachmentAnnouncement(drafts: AttachmentDraft[]): string {
   const previous = useRef<AttachmentDraft[]>([]);
   const [sentence, setSentence] = useState("");
+  const formatMessage = useFormatMessage();
   const reasonFor = useUploadReasonFor();
   useEffect(() => {
-    const next = draftAnnouncement(previous.current, drafts, reasonFor);
+    const next = draftAnnouncement(formatMessage, previous.current, drafts, reasonFor);
     previous.current = drafts;
     if (next !== null) setSentence(next);
-  }, [drafts, reasonFor]);
+  }, [drafts, formatMessage, reasonFor]);
   return sentence;
 }
 
@@ -496,7 +502,8 @@ export function AttachmentTray({
   const counts = trayCounts(drafts, rejected, folders);
   // 비활성 버튼은 자기가 왜 비활성인지 말하지 못한다. 그 문장이 사는 자리는
   // 버튼 옆이 아니라 줄 발치이고, 그 규율은 오프라인 줄이 이미 세워 뒀다.
-  const blockedCopy = sendBlockCopy(drafts);
+  const blockedKey = sendBlockKey(drafts);
+  const blockedCopy = blockedKey === null ? null : formatMessage(blockedKey);
   const ids = useMemo(() => drafts.map((draft) => draft.localId), [drafts]);
   const hasCards = drafts.length > 0;
 
@@ -628,7 +635,7 @@ export function AttachmentTray({
       {hasCards && (
         <ul
           ref={listRef}
-          aria-label={`${ATTACH_COPY.tray} ${drafts.length}`}
+          aria-label={formatMessage("attachments.tray.countLabel", { count: drafts.length })}
           data-testid="attachment-list-scroll"
           data-fade={fade}
           onScroll={syncFade}
@@ -640,7 +647,7 @@ export function AttachmentTray({
               draft={draft}
               stop={draft.localId === stop}
               removeLabel={formatMessage("attachments.tray.removeNamed", {
-                name: attachmentDisplayName(draft),
+                name: attachmentDisplayName(formatMessage, draft),
               })}
               registerNode={registerNode}
               onFocusCard={setRemembered}
@@ -667,7 +674,7 @@ export function AttachmentTray({
               })}
             </span>
           )}
-          {counts.folders > 0 && <span>{ATTACH_COPY.folderRejected}</span>}
+          {counts.folders > 0 && <span>{formatMessage(ATTACH_COPY.folderRejected)}</span>}
           <button
             type="button"
             onClick={onAcknowledgeNotices}
@@ -705,7 +712,7 @@ export function AttachmentTray({
               data-testid="attachment-clear"
               className="touch-target shrink-0 rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
             >
-              {ATTACH_COPY.clearAll}
+              {formatMessage(ATTACH_COPY.clearAll)}
             </button>
           )}
         </div>

@@ -18,12 +18,13 @@ import {
 } from "@momo/core/features/reminders/presets";
 import {
   clampReminderNote,
-  REMINDER_CUSTOM_LABEL,
-  REMINDER_MENU_LABEL,
+  REMINDER_CUSTOM_KEY,
+  REMINDER_MENU_KEY,
   REMINDER_NOTE_MAX,
-  REMINDER_SNOOZE_COMMIT_LABEL,
+  REMINDER_SNOOZE_COMMIT_KEY,
 } from "@momo/core/features/reminders/model";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: message overflow / inbox snooze dialog for internal team
 // users on web+Tauri, density 7/10, motion 2/10.
@@ -45,6 +46,7 @@ export function RemindDialog({
   error: string | null;
   onCommit: (dueAtMs: number, note: string) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const noteId = useId();
   const dateId = useId();
   const timeId = useId();
@@ -83,7 +85,7 @@ export function RemindDialog({
     onCommit(dueAtMs, clampReminderNote(note));
   };
 
-  const title = mode === "snooze" ? "알림 미루기" : REMINDER_MENU_LABEL;
+  const title = mode === "snooze" ? "알림 미루기" : formatMessage(REMINDER_MENU_KEY);
   const description =
     mode === "snooze"
       ? "이 알림을 다시 볼 시각을 고릅니다."
@@ -145,13 +147,13 @@ export function RemindDialog({
               onClick={() => commitPreset(preset.id)}
               data-testid={`remind-preset-${preset.id}`}
             >
-              {preset.label}
+              {formatMessage(preset.labelKey)}
             </Button>
           ))}
         </div>
 
         <div className="flex min-w-0 flex-col gap-2 border-t border-line pt-3">
-          <p className="text-meta text-ink-muted">{REMINDER_CUSTOM_LABEL}</p>
+          <p className="text-meta text-ink-muted">{formatMessage(REMINDER_CUSTOM_KEY)}</p>
           <div className="flex flex-wrap gap-2">
             <div className="flex min-w-0 flex-col gap-1">
               <label htmlFor={dateId} className="text-meta text-ink-muted">
@@ -207,7 +209,7 @@ export function RemindDialog({
                 ? "미루는 중…"
                 : "저장 중…"
               : mode === "snooze"
-                ? REMINDER_SNOOZE_COMMIT_LABEL
+                ? formatMessage(REMINDER_SNOOZE_COMMIT_KEY)
                 : "이 시각에 알림"}
           </Button>
         </div>

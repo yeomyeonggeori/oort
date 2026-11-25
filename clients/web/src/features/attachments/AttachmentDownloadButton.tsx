@@ -9,6 +9,7 @@ import {
 } from "@momo/core/features/attachments/model";
 import { Tooltip } from "@/design/ui/tooltip";
 import { useRowTipSide } from "@/features/timeline/rowTipSide";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // 타임라인 카드와 라이트박스가 같은 내려받기 상태를 쓴다. 바쁜 동안에도 버튼을
 // 비활성화하지 않는 이유는 AttachmentList의 기존 계약 그대로다: 비활성은
@@ -48,6 +49,7 @@ export function AttachmentDownloadButton({
   onStarted?: () => void;
   onFailed?: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [localBusy, setLocalBusy] = useState(false);
   const busy = controlledBusy ?? localBusy;
   const tip = useRowTipSide();
@@ -58,7 +60,7 @@ export function AttachmentDownloadButton({
   };
 
   return (
-    <Tooltip label={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download} side={byRow ? tip.side : tooltipSide}>
+    <Tooltip label={formatMessage(busy ? ATTACH_COPY.downloading : ATTACH_COPY.download)} side={byRow ? tip.side : tooltipSide}>
       <button
         type="button"
         aria-busy={busy || undefined}
@@ -74,7 +76,9 @@ export function AttachmentDownloadButton({
             .catch(() => onFailed?.())
             .finally(() => setBusy(false));
         }}
-        aria-label={`${attachmentDisplayName(attachment)} ${ATTACH_COPY.download}`}
+        aria-label={formatMessage("attachments.action.downloadNamed", {
+          name: attachmentDisplayName(formatMessage, attachment),
+        })}
         data-testid="attachment-download"
         data-busy={busy ? "" : undefined}
         data-row-action={joinsMessageRow ? "" : undefined}

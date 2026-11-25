@@ -23,7 +23,7 @@ import {
   type SendBundleMessage,
 } from "@momo/core/features/expressions/sendBundle";
 import type { Expression } from "@momo/core/features/expressions/types";
-import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
+import { THREAD_COMPOSER_PLACEHOLDER_KEY } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { mentionRoutingTarget, calledAgents } from "@momo/core/features/routing/mentionTargets";
@@ -58,7 +58,7 @@ import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
 import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import {
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { COMPOSER_MAX_ROWS, useAutoGrow } from "./useAutoGrow";
@@ -278,7 +278,8 @@ export function ThreadComposer({
     addFiles(trayKey, attachTarget, files, batch);
   const drop = useComposerDropZone(onFiles);
   const attachBlock = sendBlockReason(tray.drafts);
-  const attachBlockCopy = sendBlockCopy(tray.drafts);
+  const attachBlockKey = sendBlockKey(tray.drafts);
+  const attachBlockCopy = attachBlockKey === null ? null : formatMessage(attachBlockKey);
 
   // 답글도 한 줄로 끝나지 않는다. 메인 컴포저가 1행에서 6행까지 자라는 것과 같은
   // 규칙이다 (R2 M4) — 다른 것은 이 창이 320px 패널 안에 있어서 접히는 줄이 더
@@ -475,7 +476,7 @@ export function ThreadComposer({
             testId="thread-composer-secret-block"
             cardAvailable={hasLocalCardHost(channelId)}
             surface="thread"
-            {...(secretVia === "schedule" ? { lead: SCHEDULED_COPY.secretKey.lead } : {})}
+            {...(secretVia === "schedule" ? { lead: formatMessage(SCHEDULED_COPY.secretKey.lead) } : {})}
           />
         )}
         {agentNotice !== null && (
@@ -557,8 +558,8 @@ export function ThreadComposer({
               // 공유 문구는 아직 「답글 쓰기」만 말한다. C-1 코어 파도와 충돌하지
               // 않도록 이 goal은 코어 문장을 건드리지 않고, 실제 @ 동작만 웹과 폰에
               // 맞춘다. 다음 코어 카피 정리에서 광고 절을 한 벌로 올릴 수 있다.
-              placeholder={THREAD_COMPOSER_PLACEHOLDER}
-              aria-label={THREAD_COMPOSER_PLACEHOLDER}
+              placeholder={formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY)}
+              aria-label={formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY)}
               aria-describedby={
                 secretBlocked ? "thread-composer-secret-block" : followHintId
               }

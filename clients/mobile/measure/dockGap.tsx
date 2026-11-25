@@ -1,6 +1,11 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
-import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
+import {THREAD_COMPOSER_PLACEHOLDER_KEY} from '@momo/core/features/chat/composerCopy';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n';
+
+// 계측 하네스는 한국어 문장으로 잰다(문장은 사전에 있다, #6058).
+const THREAD_COMPOSER_PLACEHOLDER = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY);
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useEffect, useRef, useState} from 'react';

@@ -4,12 +4,12 @@ import { SCHEDULED_COPY, failureLines } from "@momo/core/features/scheduled/copy
 import type { ScheduledErrorLine } from "@momo/core/features/scheduled/errors";
 import { isScheduledStub } from "@momo/core/features/scheduled/events";
 import {
-  actionLabel,
-  attachmentChipLine,
+  actionLabelKey,
+  attachmentChipRef,
   rowActions,
   rowAriaName,
   rowMenuAriaName,
-  rowWhenLine,
+  rowWhenRef,
   scheduledPreview,
   type ScheduledActionId,
 } from "@momo/core/features/scheduled/model";
@@ -31,6 +31,7 @@ import {
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { MemberAvatar } from "@/features/common/MemberAvatar";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { ScheduledPlaceInfo } from "./useScheduled";
 
 // =============================================================================
@@ -91,6 +92,7 @@ export interface ScheduledRowProps {
 }
 
 export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction }: ScheduledRowProps) {
+  const formatMessage = useFormatMessage();
   const actions = rowActions(row, nowMs);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const chosen = useRef<ScheduledActionId | null>(null);
@@ -104,10 +106,14 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
     void copyBody.copy().then((ok) => setCopyFailed(!ok));
   };
   const preview = scheduledPreview(row);
-  const attachments = attachmentChipLine(row);
+  const attachmentsRef = attachmentChipRef(row);
+  const attachments =
+    attachmentsRef === null ? null : formatMessage(attachmentsRef.key, attachmentsRef.values as never);
   const failed = row.status === "failed";
   const lines = failed ? failureLines(row.failureReason, place.errorWord) : null;
-  const name = rowAriaName(row, place.label, nowMs, place.errorWord);
+  const name = rowAriaName(formatMessage, row, place.label, nowMs, place.errorWord);
+  const whenRef = rowWhenRef(row, nowMs);
+  const menuName = rowMenuAriaName(formatMessage, row, place.label, nowMs);
 
   // 본문이 아직 없는 행(이벤트로만 안 행)은 복사할 것이 없다.
   const unavailable = (action: ScheduledActionId): boolean =>
@@ -140,10 +146,10 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
       >
         {sending && <Loader2 aria-hidden="true" className="spinner-busy" />}
         {sending
-          ? SCHEDULED_COPY.list.sending
+          ? formatMessage(SCHEDULED_COPY.list.sending)
           : action === "copy" && copyBody.copied
             ? "복사됨"
-            : actionLabel(action)}
+            : formatMessage(actionLabelKey(action))}
       </Button>
     );
   };
@@ -186,9 +192,9 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
           {/* 흐린 것은 **낱말**뿐이다. 항목을 통째로 흐리면 둘째 줄(왜 흐린가)이 한 번 더 흐려져 읽히지 않는다
               (`ink-muted`의 50%는 라이트 2.2:1, design-review #4215 M2): 그 줄은 이 항목이 왜 흐린지를 말하는 유일한 문장이다. */}
           <span className={cn(dim && "opacity-50")}>
-            {action === "copy" && copyBody.copied ? "복사됨" : actionLabel(action)}
+            {action === "copy" && copyBody.copied ? "복사됨" : formatMessage(actionLabelKey(action))}
           </span>
-          {lockedReason && <span className="text-meta text-ink-muted">{SCHEDULED_COPY.lock.reason}</span>}
+          {lockedReason && <span className="text-meta text-ink-muted">{formatMessage(SCHEDULED_COPY.lock.reason)}</span>}
         </Item>
       );
     });
@@ -244,23 +250,27 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
               )}
               {lines === null ? (
                 <p className="text-meta text-ink-muted" data-numeric data-testid="scheduled-row-when">
-                  {rowWhenLine(row, nowMs)}
+                  {whenRef === null ? "" : formatMessage(whenRef.key, whenRef.values as never)}
                 </p>
               ) : (
                 <>
                   <p className="break-keep text-meta text-danger" data-testid="scheduled-row-reason">
-                    {lines.reason}
+                    {formatMessage(lines.reason.key, lines.reason.values as never)}
                   </p>
                   <p className="break-keep text-meta text-ink-muted" data-testid="scheduled-row-next">
-                    {lines.next}
+                    {formatMessage(lines.next.key, lines.next.values as never)}
                   </p>
                 </>
               )}
               {error !== null && (
                 <div className="flex flex-col gap-1" role="alert" data-testid="scheduled-row-error">
-                  <p className="break-keep text-meta text-danger">{error.text}</p>
+                  <p className="break-keep text-meta text-danger">
+                    {formatMessage(error.text.key, error.text.values as never)}
+                  </p>
                   {error.next !== undefined && (
-                    <p className="break-keep text-meta text-ink-muted">{error.next}</p>
+                    <p className="break-keep text-meta text-ink-muted">
+                      {formatMessage(error.next.key, error.next.values as never)}
+                    </p>
                   )}
                 </div>
               )}
@@ -272,8 +282,8 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
               {/* 실패 줄은 단추 **아래**에 선다: 위에 서면 방금 누른 단추가 44px 밀려 포인터 밑에서 움직인다(design-review 재확인 Nitpick). */}
               {copyFailed && (
                 <div className="flex flex-col gap-1" role="alert" data-testid="scheduled-row-copy-error">
-                  <p className="break-keep text-meta text-danger">{SCHEDULED_COPY.list.copyFailed.reason}</p>
-                  <p className="break-keep text-meta text-ink-muted">{SCHEDULED_COPY.list.copyFailed.next}</p>
+                  <p className="break-keep text-meta text-danger">{formatMessage(SCHEDULED_COPY.list.copyFailed.reason)}</p>
+                  <p className="break-keep text-meta text-ink-muted">{formatMessage(SCHEDULED_COPY.list.copyFailed.next)}</p>
                 </div>
               )}
             </div>
@@ -283,7 +293,7 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
                   <button
                     ref={triggerRef}
                     type="button"
-                    aria-label={rowMenuAriaName(row, place.label, nowMs)}
+                    aria-label={menuName}
                     data-testid="scheduled-row-menu"
                     className="tap-target flex size-control items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
                   >
@@ -304,7 +314,7 @@ export function ScheduledRow({ row, place, nowMs, offline, busy, error, onAction
       </ContextMenuTrigger>
       <ContextMenuContent
         data-testid="scheduled-row-context-panel"
-        aria-label={rowMenuAriaName(row, place.label, nowMs)}
+        aria-label={menuName}
         onCloseAutoFocus={onMenuClosed}
       >
         {renderMenuItems(ContextItem, "scheduled-row-context")}

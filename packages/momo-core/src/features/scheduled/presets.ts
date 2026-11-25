@@ -5,7 +5,7 @@ import {
   localTimeInputValue,
   nextMondayLocalHour,
 } from "../reminders/presets";
-import { SCHEDULED_COPY } from "./copy";
+import { SCHEDULED_COPY, type ScheduledPlainKey, type ScheduledRef } from "./copy";
 import { SCHEDULED_MAX_LEAD_MS, SCHEDULED_MIN_LEAD_MS } from "./types";
 
 // =============================================================================
@@ -122,9 +122,9 @@ export function scheduledZoneLabel(atMs: number, zoneName: string = deviceZoneNa
   return zoneName === "" ? offset : `${zoneName} (${offset})`;
 }
 
-/** 메뉴·대화상자의 안내 줄 한 문장: 「Asia/Seoul (UTC+9) 기준이에요」. */
-export function scheduledZoneLine(atMs: number, zoneName?: string): string {
-  return SCHEDULED_COPY.menu.zone(scheduledZoneLabel(atMs, zoneName));
+/** 메뉴·대화상자의 안내 줄 한 문장 「Asia/Seoul (UTC+9) 기준이에요」의 키와 값. */
+export function scheduledZoneLine(atMs: number, zoneName?: string): ScheduledRef {
+  return { key: SCHEDULED_COPY.menu.zone, values: { zone: scheduledZoneLabel(atMs, zoneName) } };
 }
 
 // ---- 프리셋 -----------------------------------------------------------------------
@@ -133,8 +133,8 @@ export type ScheduledPresetId = "tomorrow" | "next-monday";
 
 export interface ScheduledPreset {
   id: ScheduledPresetId;
-  /** 이름: 「내일」·「다음 주 월요일」. */
-  label: string;
+  /** 이름 「내일」·「다음 주 월요일」의 키. */
+  labelKey: ScheduledPlainKey;
   atMs: number;
   /** 「오전 9:00」. */
   time: string;
@@ -148,7 +148,7 @@ function presetFor(id: ScheduledPresetId, atMs: number, nowMs: number): Schedule
   const parts = formatScheduledAt(atMs, nowMs);
   return {
     id,
-    label: id === "tomorrow" ? SCHEDULED_COPY.preset.tomorrow : SCHEDULED_COPY.preset.nextMonday,
+    labelKey: id === "tomorrow" ? SCHEDULED_COPY.preset.tomorrow : SCHEDULED_COPY.preset.nextMonday,
     atMs,
     time: parts.time,
     date: formatScheduledDate(atMs, nowMs),
@@ -187,15 +187,15 @@ export function validateSendAt(atMs: number | null, nowMs: number): SendAtProble
   return null;
 }
 
-/** 검증 결과의 오류 줄 문장. */
-export function sendAtProblemSentence(problem: SendAtProblem): string {
+/** 검증 결과의 오류 줄 문장의 키. */
+export function sendAtProblemRef(problem: SendAtProblem): ScheduledRef {
   switch (problem) {
     case "soon":
-      return SCHEDULED_COPY.dialog.errSoon;
+      return { key: SCHEDULED_COPY.dialog.errSoon };
     case "far":
-      return SCHEDULED_COPY.dialog.errFar;
+      return { key: SCHEDULED_COPY.dialog.errFar };
     case "invalid":
-      return SCHEDULED_COPY.dialog.errInvalid;
+      return { key: SCHEDULED_COPY.dialog.errInvalid };
   }
 }
 

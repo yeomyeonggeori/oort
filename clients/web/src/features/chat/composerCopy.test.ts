@@ -101,7 +101,7 @@ describe("컴포저 카피가 한 벌이다 (#1384)", () => {
     expect(CODE_ONLY).toMatch(
       /useFittedComposerPlaceholder\(\s*inputRef,\s*channelLabel,\s*recipient\s*\)/
     );
-    expect(CODE_ONLY).toContain("composerFieldLabel(channelLabel, recipient)");
+    expect(CODE_ONLY).toContain("composerFieldLabel(formatMessage, channelLabel, recipient)");
   });
 
   it("절도 손으로 짓지 않는다 — 자만 이 클라의 것이다 (#1422)", () => {
@@ -109,7 +109,7 @@ describe("컴포저 카피가 한 벌이다 (#1384)", () => {
     // 절을 잇는 이음쇠도, 버리는 순서도 코어의 값이라 여기 사본이 있으면
     // 안 된다 — 코어가 문장을 세 절로 늘리는 날 그 사본만 두 절로 남는다.
     const fit = codeOf("./placeholderFit.ts");
-    expect(fit).toContain("composerPlaceholderClauses(channelLabel, recipient)");
+    expect(fit).toContain("composerPlaceholderClauses(formatMessage, channelLabel, recipient)");
     expect(fit).toContain("fitComposerPlaceholder(");
     expect(fit).toContain('from "@momo/core/features/chat/composerCopy"');
     // 뒷절의 값도, 이음쇠도 이 파일에 없다.

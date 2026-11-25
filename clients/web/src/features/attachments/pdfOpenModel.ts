@@ -3,6 +3,7 @@ import type { PdfOpenFailure } from "@/features/attachments/content";
 import {
   ATTACH_COPY,
   isPdfAttachment,
+  type AttachPlainKey,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
 
@@ -25,11 +26,11 @@ export function canOpenPdf(attachment: Pick<MessageAttachment, "mime">): boolean
   return isPdfAttachment(attachment);
 }
 
-export function pdfOpenLabel(mode: PdfOpenMode): string {
+export function pdfOpenLabelKey(mode: PdfOpenMode): AttachPlainKey {
   return mode === "desktop" ? ATTACH_COPY.openPdfDesktop : ATTACH_COPY.openPdf;
 }
 
-export function pdfOpenFailureCopy(reason: PdfOpenFailure): string {
+export function pdfOpenFailureKey(reason: PdfOpenFailure): AttachPlainKey {
   switch (reason) {
     case "blocked":
       return ATTACH_COPY.pdfPopupBlocked;

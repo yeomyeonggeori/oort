@@ -1,4 +1,11 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { arrayField, num, record, str, WireShapeError } from "../../lib/wire";
+
+/** 알림 칸의 값 없는 문장의 키(#6058). */
+export type ReminderPlainKey = Extract<PlainMessageKey, `reminders.${string}`>;
+
+type FormatMessage = LocaleService["formatMessage"];
 
 // =============================================================================
 // Message reminder domain (ADR-0175 / A-41). Pure: wire parse, copy, watermark
@@ -78,26 +85,26 @@ export function reminderIsOverdue(
   return reminderIsPending(reminder) && reminder.dueAtMs <= nowMs;
 }
 
-export function reminderPreviewText(reminder: MessageReminder): string {
+export function reminderPreviewText(formatMessage: FormatMessage, reminder: MessageReminder): string {
   const preview = reminder.messagePreview?.replace(/\s+/g, " ").trim();
   if (preview) return preview;
   const note = reminder.note?.replace(/\s+/g, " ").trim();
   if (note) return note;
-  return "메시지";
+  return formatMessage("reminders.item.fallbackPreview");
 }
 
 /**
  * Relative due copy. Past due is a status, not a countdown; future values
  * count forward so a list of upcoming reminders is not all "방금".
  */
-export function reminderDueLabel(dueAtMs: number, nowMs: number): string {
-  if (dueAtMs <= nowMs) return "기한 지남";
+export function reminderDueLabel(formatMessage: FormatMessage, dueAtMs: number, nowMs: number): string {
+  if (dueAtMs <= nowMs) return formatMessage("reminders.due.overdue");
   const minutes = Math.round((dueAtMs - nowMs) / 60_000);
-  if (minutes < 1) return "곧";
-  if (minutes < 60) return `${minutes}분 후`;
+  if (minutes < 1) return formatMessage("reminders.due.soon");
+  if (minutes < 60) return formatMessage("reminders.due.minutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 후`;
-  return `${Math.round(hours / 24)}일 후`;
+  if (hours < 24) return formatMessage("reminders.due.hours", { count: hours });
+  return formatMessage("reminders.due.days", { count: Math.round(hours / 24) });
 }
 
 export interface DueArrivalPlan {
@@ -161,53 +168,44 @@ export function dueArrivalPlan(args: {
 
 export type ReminderFailureVerb = "create" | "snooze" | "complete" | "delete";
 
-export function reminderFailureMessage(
+export function reminderFailureKey(
   error: unknown,
   verb: ReminderFailureVerb = "create"
-): string {
+): ReminderPlainKey {
   const status =
     error && typeof error === "object" && "status" in error
       ? Number((error as { status: unknown }).status)
       : undefined;
-  if (status === 400) return "지난 시각은 고를 수 없습니다. 다른 시각을 고르세요.";
-  if (status === 404) {
-    return "그 알림을 찾지 못했습니다. 목록을 다시 불러 보세요.";
-  }
+  if (status === 400) return "reminders.error.pastTime";
+  if (status === 404) return "reminders.error.notFound";
   if (status === 403) {
-    return verb === "create"
-      ? "이 계정으로는 알림을 만들 수 없습니다."
-      : "이 계정으로는 그 알림을 바꿀 수 없습니다.";
+    return verb === "create" ? "reminders.error.forbiddenCreate" : "reminders.error.forbiddenChange";
   }
-  if (verb === "snooze") return "알림을 미루지 못했습니다. 다시 시도하세요.";
-  if (verb === "complete") return "알림을 완료하지 못했습니다. 다시 시도하세요.";
-  if (verb === "delete") return "알림을 지우지 못했습니다. 다시 시도하세요.";
-  return "알림을 저장하지 못했습니다. 다시 시도하세요.";
+  if (verb === "snooze") return "reminders.error.snoozeFailed";
+  if (verb === "complete") return "reminders.error.completeFailed";
+  if (verb === "delete") return "reminders.error.deleteFailed";
+  return "reminders.error.saveFailed";
 }
 
-export function reminderBacklogNotificationBody(count: number): string {
-  return `밀린 알림 ${count}건`;
+export function reminderBacklogNotificationBody(formatMessage: FormatMessage, count: number): string {
+  return formatMessage("reminders.notify.backlog", { count });
 }
 
-export function reminderLoadFailureMessage(): string {
-  return "나중에 볼 메시지를 불러오지 못했습니다.";
-}
+export const REMINDER_LOAD_FAILURE_KEY = "reminders.error.loadFailed" satisfies ReminderPlainKey;
 
-export const REMINDER_EMPTY_HEADLINE =
-  "아직 나중에 볼 메시지가 없습니다.";
-export const REMINDER_EMPTY_DETAIL =
-  "메시지 메뉴에서 나중에 알림을 누르면 여기 모입니다.";
-export const REMINDER_MENU_LABEL = "나중에 알림";
-export const REMINDER_TAB_LABEL = "나중에";
-export const REMINDER_NOTIFY_TITLE = "나중에 알림";
-export const REMINDER_COMPLETE_LABEL = "완료";
-export const REMINDER_SNOOZE_LABEL = "미루기";
-export const REMINDER_DELETE_LABEL = "지우기";
-export const REMINDER_CUSTOM_LABEL = "날짜와 시간 고르기";
-export const REMINDER_SNOOZE_COMMIT_LABEL = "알림 미루기";
-export const REMINDER_UNKNOWN_CHANNEL_LABEL = "알 수 없는 채널";
-export const REMINDER_COMPLETE_CONFIRM_TITLE = "이 알림을 완료할까요?";
-export const REMINDER_COMPLETE_CONFIRM_DETAIL =
-  "완료한 알림은 목록에서 사라지고 되돌릴 수 없습니다.";
+export const REMINDER_EMPTY_HEADLINE_KEY = "reminders.empty.headline" satisfies ReminderPlainKey;
+export const REMINDER_EMPTY_DETAIL_KEY = "reminders.empty.detail" satisfies ReminderPlainKey;
+export const REMINDER_MENU_KEY = "reminders.menu.remind" satisfies ReminderPlainKey;
+export const REMINDER_TAB_KEY = "reminders.tab.later" satisfies ReminderPlainKey;
+export const REMINDER_NOTIFY_TITLE_KEY = "reminders.notify.title" satisfies ReminderPlainKey;
+export const REMINDER_COMPLETE_KEY = "reminders.action.complete" satisfies ReminderPlainKey;
+export const REMINDER_SNOOZE_KEY = "reminders.action.snooze" satisfies ReminderPlainKey;
+export const REMINDER_DELETE_KEY = "reminders.action.delete" satisfies ReminderPlainKey;
+export const REMINDER_CUSTOM_KEY = "reminders.action.custom" satisfies ReminderPlainKey;
+export const REMINDER_SNOOZE_COMMIT_KEY = "reminders.action.snoozeCommit" satisfies ReminderPlainKey;
+export const REMINDER_UNKNOWN_CHANNEL_KEY = "reminders.channel.unknown" satisfies ReminderPlainKey;
+export const REMINDER_COMPLETE_CONFIRM_TITLE_KEY = "reminders.confirm.title" satisfies ReminderPlainKey;
+export const REMINDER_COMPLETE_CONFIRM_DETAIL_KEY = "reminders.confirm.detail" satisfies ReminderPlainKey;
 
 function optionalMs(source: unknown, key: string): number | undefined {
   const value = num(source, key);

@@ -3,13 +3,22 @@ import type { MessageAttachment } from "../../lib/api";
 import {
   attachmentImageSizeOf,
   attachmentMediaOf,
-  attachmentMetaLine,
+  attachmentMetaLine as attachmentMetaLineWith,
   formatVideoDuration,
   isInAppPlayableVideo,
   isVideoAttachment,
   showsInlinePreview,
   videoCardSize,
 } from "./model";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n";
+
+// 문장은 사전(`attachments.json`)에 있고 모델은 키를 돌려주거나 말하는 함수가 언어 서비스를 받는다(#6058). 이 시험은 제품과 같은
+// 한국어 생성물로 풀어서 예전 한국어 문장을 그대로 단정한다.
+const { formatMessage } = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+type Tail<T extends unknown[]> = T extends [unknown, ...infer R] ? R : never;
+const attachmentMetaLine = (...args: Tail<Parameters<typeof attachmentMetaLineWith>>) => attachmentMetaLineWith(formatMessage, ...args);
 
 // 영상 첨부의 읽기 모델 (#5208). 폰이 카드·재생 화면을 그리고 웹이 같은 모델을 쓸 수 있게 코어에 둔다.
 

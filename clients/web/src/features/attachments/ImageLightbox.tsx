@@ -86,6 +86,7 @@ function LightboxImage({
   /** 사진 둘레의 빈 무대를 눌렀을 때(바깥 클릭: 닫기). */
   onStageClick: (event: MouseEvent<HTMLElement>) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
@@ -173,7 +174,7 @@ function LightboxImage({
           onLoad={onReady}
           onError={onUnavailable}
           src={preview.dataUrl}
-          alt={attachmentDisplayName(attachment)}
+          alt={attachmentDisplayName(formatMessage, attachment)}
           draggable={false}
           data-zoomed={photo.zoomed ? "" : undefined}
           data-dragging={photo.dragging ? "" : undefined}
@@ -357,7 +358,7 @@ export function ImageLightbox({
     : false;
   const copyFailed = selected ? copyFailureIds.has(selected.id) : false;
   const fileName = selected
-    ? attachmentDisplayName(selected)
+    ? attachmentDisplayName(formatMessage, selected)
     : "이미지 미리보기";
   const info = selected
     ? lightboxInfoLines({ senderName, sentAtMs, fileName })

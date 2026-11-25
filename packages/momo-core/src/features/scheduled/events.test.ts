@@ -13,6 +13,11 @@ import {
 } from "./events";
 import { needsReview, scheduledBanner, scheduledNavEntry, scheduledSections, scheduledTotals } from "./model";
 import type { ScheduledMessage } from "./types";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 알약의 낭독 이름은 키와 값이다(#6058). 한국어 생성물로 풀어 예전 문장과 견준다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -329,11 +334,12 @@ describe("a pending row held for sessions_ended shows at once (owner decision 6)
     expect(sections.failed.map((entry) => entry.id)).toEqual([ID]);
     expect(sections.pending.map((entry) => entry.id)).toEqual([ID2]);
     expect(scheduledBanner(arrived.store.rows, { channelId: CH })).toEqual({ tone: "failed", count: 1 });
-    expect(scheduledNavEntry(arrived.store.rows)).toEqual({
-      visible: true,
-      failedCount: 1,
-      badgeLabel: "보내지 못한 예약 1개",
-    });
+    const nav = scheduledNavEntry(arrived.store.rows);
+    expect(nav).toMatchObject({ visible: true, failedCount: 1 });
+    expect(nav.badgeLabel).not.toBeNull();
+    expect(ko(nav.badgeLabel!.key as "scheduled.nav.badgeLabel", nav.badgeLabel!.values as { count: number })).toBe(
+      "보내지 못한 예약 1개"
+    );
     // 한 번 눌러 나가지 않는 행이다: 내용 확인을 거쳐야 한다. 본문은 재조회가 채운다.
     const held = sections.failed[0];
     expect(held !== undefined && needsReview(held)).toBe(true);

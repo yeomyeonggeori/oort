@@ -1,6 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
-import { SCHEDULED_COPY, failureLines, type ErrorPlaceWord } from "./copy";
+import { SCHEDULED_COPY, failureLines, type ErrorPlaceWord, type ScheduledRef } from "./copy";
 import { isScheduledFailureReason } from "./types";
 
 // =============================================================================
@@ -35,8 +35,8 @@ export function isSchedulerDisabled(error: unknown): boolean {
 
 /** 오류 줄. `next`는 다음 행동 줄이 따로 있는 문장(503)만 갖는다. */
 export interface ScheduledErrorLine {
-  text: string;
-  next?: string;
+  text: ScheduledRef;
+  next?: ScheduledRef;
 }
 
 const TIME_OPS: readonly ScheduledOp[] = ["create", "edit", "change", "rearm"];
@@ -55,68 +55,68 @@ export function scheduledErrorLine(
 ): ScheduledErrorLine {
   const copy = SCHEDULED_COPY.errors;
   const generic = (): ScheduledErrorLine => ({
-    text: op === "create" ? copy.otherCreate : copy.otherWrite,
+    text: { key: op === "create" ? copy.otherCreate : copy.otherWrite },
   });
 
   if (error instanceof NetworkError) {
     switch (op) {
       case "create":
-        return { text: copy.unknownCreate };
+        return { text: { key: copy.unknownCreate } };
       case "edit":
       case "change":
       case "rearm":
-        return { text: copy.unknownEdit };
+        return { text: { key: copy.unknownEdit } };
       case "delete":
-        return { text: copy.unknownDelete };
+        return { text: { key: copy.unknownDelete } };
       case "sendNow":
-        return { text: copy.unknownSendNow };
+        return { text: { key: copy.unknownSendNow } };
     }
   }
   if (!(error instanceof ApiError)) return generic();
 
   const { status, code } = error;
-  if (status === 429) return { text: copy.rateLimited };
+  if (status === 429) return { text: { key: copy.rateLimited } };
 
   if (status === 503 && code === "scheduler_disabled" && op !== "delete") {
     return {
-      text: SCHEDULED_COPY.disabled.unavailable.reason,
-      next: SCHEDULED_COPY.disabled.unavailable.next,
+      text: { key: SCHEDULED_COPY.disabled.unavailable.reason },
+      next: { key: SCHEDULED_COPY.disabled.unavailable.next },
     };
   }
 
   if (status === 400) {
-    if (code === "send_at_too_soon" && TIME_OPS.includes(op)) return { text: copy.tooSoon };
-    if (code === "send_at_too_far" && TIME_OPS.includes(op)) return { text: copy.tooFar };
+    if (code === "send_at_too_soon" && TIME_OPS.includes(op)) return { text: { key: copy.tooSoon } };
+    if (code === "send_at_too_far" && TIME_OPS.includes(op)) return { text: { key: copy.tooFar } };
     if (code === "empty_message" && (op === "create" || op === "edit")) {
-      return { text: copy.emptyMessage };
+      return { text: { key: copy.emptyMessage } };
     }
-    if (code === undefined && op === "create") return { text: copy.createBadRequest };
+    if (code === undefined && op === "create") return { text: { key: copy.createBadRequest } };
     return generic();
   }
 
   if (status === 403) {
-    return op === "create" ? { text: copy.createForbidden(place) } : generic();
+    return op === "create" ? { text: { key: copy.createForbidden, values: { place } } } : generic();
   }
 
   if (status === 404) {
-    return op === "create" ? { text: copy.createNotFound } : { text: copy.rowNotFound };
+    return op === "create" ? { text: { key: copy.createNotFound } } : { text: { key: copy.rowNotFound } };
   }
 
   if (status === 409) {
-    if (code === "scheduled_already_sent") return { text: copy.alreadySent };
+    if (code === "scheduled_already_sent") return { text: { key: copy.alreadySent } };
     if (code === "pending_limit_reached" && (op === "create" || op === "rearm")) {
-      return { text: SCHEDULED_COPY.disabled.limit };
+      return { text: { key: SCHEDULED_COPY.disabled.limit } };
     }
     if (code === "attachment_reserved" && op === "create") {
-      return { text: copy.attachmentReserved };
+      return { text: { key: copy.attachmentReserved } };
     }
-    if (code === undefined && op === "create") return { text: copy.attachmentUnusable };
+    if (code === undefined && op === "create") return { text: { key: copy.attachmentUnusable } };
     if (code === "scheduled_too_late" && (op === "edit" || op === "change")) {
-      return { text: SCHEDULED_COPY.error.tooLate };
+      return { text: { key: SCHEDULED_COPY.error.tooLate } };
     }
     if (code === "scheduled_busy") {
-      if (op === "edit" || op === "change" || op === "rearm") return { text: copy.busyEdit };
-      if (op === "delete" || op === "sendNow") return { text: copy.busyAct };
+      if (op === "edit" || op === "change" || op === "rearm") return { text: { key: copy.busyEdit } };
+      if (op === "delete" || op === "sendNow") return { text: { key: copy.busyAct } };
       return generic();
     }
     // 지금 보내기가 거절됐다: 코드가 행이 이제 갖는 실패 사유다(3.2의 이유 줄).

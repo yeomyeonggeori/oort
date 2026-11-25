@@ -20,11 +20,11 @@ import type {MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import {
   ATTACH_COPY,
   MAX_ATTACHMENTS_PER_MESSAGE,
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
 } from '@momo/core/features/attachments/model';
 import {
-  COMPOSER_OFFLINE_COPY,
+  COMPOSER_OFFLINE_KEY,
   composerFieldLabel,
   composerPlaceholderClauses,
   fitComposerPlaceholder,
@@ -1107,7 +1107,7 @@ export function placeholderRoom(fontScale: number): number {
  * 으로 값을 읽어** 사진을 찍고 단정한다. 문장을 베껴 적으면 배송되는 문장이
  * 바뀌어도 사진은 옛말을 계속 한다.
  */
-export {COMPOSER_OFFLINE_COPY};
+export {COMPOSER_OFFLINE_KEY};
 
 export interface ComposerSendOptions {
   attachments?: MessageAttachment[];
@@ -1429,7 +1429,7 @@ export function Composer({
   );
   const attachmentSurface = useAttachmentSurface(attachmentKey);
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
-  const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
+  const attachmentBlockKey = sendBlockKey(attachmentSurface.drafts);
 
   // 링크를 넣고 멈추면 입력창 위에 카드가 뜬다(#5016, 웹 입력칸 #5005 와 같은 규칙). 보낼 방은 첨부가 올라가는 방과
   // 같다(워크스페이스·채널, 스레드면 뿌리 메시지까지) — 이 입력창은 채널과 스레드가 함께 쓰고, 방을 모르면(첨부 대상이
@@ -2372,9 +2372,9 @@ export function Composer({
   const clauses = useMemo(
     () =>
       placeholder === undefined
-        ? composerPlaceholderClauses(channelLabel, recipient)
+        ? composerPlaceholderClauses(formatMessage, channelLabel, recipient)
         : null,
-    [placeholder, channelLabel, recipient],
+    [placeholder, channelLabel, recipient, formatMessage],
   );
   const placeholderProbes = useMemo(
     () => (clauses === null ? [] : placeholderCandidates(clauses)),
@@ -2720,7 +2720,7 @@ export function Composer({
       {offline ? (
         // 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288).
         <Sentence style={styles.offline} testID="composer-offline">
-          {offlineNote ?? COMPOSER_OFFLINE_COPY}
+          {offlineNote ?? formatMessage(COMPOSER_OFFLINE_KEY)}
         </Sentence>
       ) : null}
 
@@ -2826,10 +2826,10 @@ export function Composer({
           <Pressable
             ref={attachRef}
             accessibilityRole="button"
-            accessibilityLabel={ATTACH_COPY.attach}
+            accessibilityLabel={formatMessage(ATTACH_COPY.attach)}
             accessibilityHint={
               offline
-                ? offlineNote ?? COMPOSER_OFFLINE_COPY
+                ? offlineNote ?? formatMessage(COMPOSER_OFFLINE_KEY)
                 : attachmentSurface.drafts.length >=
                     MAX_ATTACHMENTS_PER_MESSAGE
                   ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`
@@ -2890,7 +2890,7 @@ export function Composer({
           // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
           placeholderTextColor={palette.textMuted}
           keyboardAppearance={keyboardAppearance}
-          accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
+          accessibilityLabel={placeholder ?? composerFieldLabel(formatMessage, channelLabel, recipient)}
           accessibilityHint={placeholderHint}
           multiline
           // 쉬는 초안(#4614)은 스크롤하지 않는다: 입력창 안이 끝 쪽으로 스크롤된 채(캐럿이 끝에 있었다) 한 줄로 줄면 그 스크롤이 남아 첫 줄이 아니라 중간 줄이 알약에 보였다(시뮬레이터 실측).
@@ -3035,8 +3035,10 @@ export function Composer({
           // 먼저 도착하는 길(로터·직접 탐색)이 있다. 이유는 버튼이 함께 든다.
           accessibilityHint={
             offline
-              ? offlineNote ?? COMPOSER_OFFLINE_COPY
-              : attachmentBlockCopy ?? undefined
+              ? offlineNote ?? formatMessage(COMPOSER_OFFLINE_KEY)
+              : attachmentBlockKey === null
+                ? undefined
+                : formatMessage(attachmentBlockKey)
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
