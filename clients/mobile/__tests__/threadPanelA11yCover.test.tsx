@@ -1,5 +1,10 @@
 import type {Member} from '@momo/core/lib/api';
-import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
+import {THREAD_COMPOSER_PLACEHOLDER_KEY} from '@momo/core/features/chat/composerCopy';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 문장은 사전에 있다(#6058). 폰은 공급자 밖에서 한국어로 물러나므로 한국어 생성물로 풀어 예전 문장 그대로 단정한다.
+const THREAD_COMPOSER_PLACEHOLDER = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog})(THREAD_COMPOSER_PLACEHOLDER_KEY);
 import {FIXTURE_LIST, FIXTURE_WORKSPACE_ID} from '@momo/core/features/expressions/fixtures';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';

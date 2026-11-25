@@ -449,6 +449,15 @@ export const messageKeys = [
   "channels.rename.submit",
   "channels.rename.title",
   "channels.topic.tooLong",
+  "chat.composer.fieldLabelPerson",
+  "chat.composer.fieldLabelPlace",
+  "chat.composer.mentionAffordance",
+  "chat.composer.offline",
+  "chat.composer.placeholderPerson",
+  "chat.composer.placeholderPlace",
+  "chat.hint.composerKeys",
+  "chat.hint.editorKeys",
+  "chat.thread.placeholder",
   "cliLogin.consent.approve",
   "cliLogin.consent.approveBusy",
   "cliLogin.consent.checkNote",
@@ -3460,6 +3469,23 @@ export const argumentSpecs = {
   "channels.topic.tooLong": {
     "max": "number"
   },
+  "chat.composer.fieldLabelPerson": {
+    "name": "string"
+  },
+  "chat.composer.fieldLabelPlace": {
+    "name": "string"
+  },
+  "chat.composer.mentionAffordance": {},
+  "chat.composer.offline": {},
+  "chat.composer.placeholderPerson": {
+    "name": "string"
+  },
+  "chat.composer.placeholderPlace": {
+    "name": "string"
+  },
+  "chat.hint.composerKeys": {},
+  "chat.hint.editorKeys": {},
+  "chat.thread.placeholder": {},
   "cliLogin.consent.approve": {},
   "cliLogin.consent.approveBusy": {},
   "cliLogin.consent.checkNote": {},
@@ -7296,6 +7322,15 @@ export interface MessageArgs {
   "channels.rename.submit": Record<string, never>;
   "channels.rename.title": Record<string, never>;
   "channels.topic.tooLong": { max: number };
+  "chat.composer.fieldLabelPerson": { name: string };
+  "chat.composer.fieldLabelPlace": { name: string };
+  "chat.composer.mentionAffordance": Record<string, never>;
+  "chat.composer.offline": Record<string, never>;
+  "chat.composer.placeholderPerson": { name: string };
+  "chat.composer.placeholderPlace": { name: string };
+  "chat.hint.composerKeys": Record<string, never>;
+  "chat.hint.editorKeys": Record<string, never>;
+  "chat.thread.placeholder": Record<string, never>;
   "cliLogin.consent.approve": Record<string, never>;
   "cliLogin.consent.approveBusy": Record<string, never>;
   "cliLogin.consent.checkNote": Record<string, never>;

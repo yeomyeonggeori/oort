@@ -3126,6 +3126,76 @@ export const catalog: MessageCatalog = {
       "value": "자 이내여야 합니다."
     }
   ],
+  "chat.composer.fieldLabelPerson": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 보낼 메시지"
+    }
+  ],
+  "chat.composer.fieldLabelPlace": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에 보낼 메시지"
+    }
+  ],
+  "chat.composer.mentionAffordance": [
+    {
+      "type": 0,
+      "value": "@⁠로 부르기"
+    }
+  ],
+  "chat.composer.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 보낼 수 없습니다. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있습니다."
+    }
+  ],
+  "chat.composer.placeholderPerson": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 메시지 보내기"
+    }
+  ],
+  "chat.composer.placeholderPlace": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에 메시지 보내기"
+    }
+  ],
+  "chat.hint.composerKeys": [
+    {
+      "type": 0,
+      "value": "Enter로 보내기 · Shift+Enter로 줄바꿈"
+    }
+  ],
+  "chat.hint.editorKeys": [
+    {
+      "type": 0,
+      "value": "Enter로 저장 · Shift+Enter로 줄바꿈 · Esc로 취소"
+    }
+  ],
+  "chat.thread.placeholder": [
+    {
+      "type": 0,
+      "value": "답글 쓰기"
+    }
+  ],
   "cliLogin.consent.approve": [
     {
       "type": 0,

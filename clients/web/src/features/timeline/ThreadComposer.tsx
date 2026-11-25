@@ -23,7 +23,7 @@ import {
   type SendBundleMessage,
 } from "@momo/core/features/expressions/sendBundle";
 import type { Expression } from "@momo/core/features/expressions/types";
-import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
+import { THREAD_COMPOSER_PLACEHOLDER_KEY } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { mentionRoutingTarget, calledAgents } from "@momo/core/features/routing/mentionTargets";
@@ -558,8 +558,8 @@ export function ThreadComposer({
               // 공유 문구는 아직 「답글 쓰기」만 말한다. C-1 코어 파도와 충돌하지
               // 않도록 이 goal은 코어 문장을 건드리지 않고, 실제 @ 동작만 웹과 폰에
               // 맞춘다. 다음 코어 카피 정리에서 광고 절을 한 벌로 올릴 수 있다.
-              placeholder={THREAD_COMPOSER_PLACEHOLDER}
-              aria-label={THREAD_COMPOSER_PLACEHOLDER}
+              placeholder={formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY)}
+              aria-label={formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY)}
               aria-describedby={
                 secretBlocked ? "thread-composer-secret-block" : followHintId
               }

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { MESSAGE_EDITOR_KEYS_HINT } from "@momo/core/features/chat/composerCopy";
+import { MESSAGE_EDITOR_KEYS_HINT_KEY } from "@momo/core/features/chat/composerCopy";
 import { isComposingEvent, keyKeepsCompositionGuard, messageEditorKeyIntent } from "@momo/core/features/chat/composerKeys";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useAutoGrow } from "./useAutoGrow";
 
 // =============================================================================
@@ -35,6 +36,7 @@ export function MessageEditor({
   onSave: (body: string) => void;
   onCancel: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [draft, setDraft] = useState(initialBody);
   const ref = useRef<HTMLTextAreaElement | null>(null);
   // 조합이 막 끝났고 아직 키가 떼어지지 않았다 — 다음 keydown 이 그 조합을 끝낸 바로 그 키일 수 있다(WebKit 순서). 컴포저와
@@ -153,7 +155,7 @@ export function MessageEditor({
             크기가 `text-timestamp`(11px)라 같은 종류의 안내인 컴포저 힌트·
             사이드바 ⌘K(둘 다 12px)보다 한 단 작았다. 11px은 묘비의 크기다. */}
         <span className="wide-only text-meta text-ink-muted">
-          {MESSAGE_EDITOR_KEYS_HINT}
+          {formatMessage(MESSAGE_EDITOR_KEYS_HINT_KEY)}
         </span>
       </div>
     </div>

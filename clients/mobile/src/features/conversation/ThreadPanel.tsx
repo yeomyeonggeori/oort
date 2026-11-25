@@ -5,7 +5,7 @@ import {
   threadFollowCopy,
 } from '@momo/core/features/timeline/threadFollow';
 import {readSignalSeq} from '@momo/core/features/timeline/threadSummary';
-import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
+import {THREAD_COMPOSER_PLACEHOLDER_KEY} from '@momo/core/features/chat/composerCopy';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {StyleSheet, View, type LayoutChangeEvent} from 'react-native';
@@ -587,7 +587,7 @@ export function ThreadPanel({
               offline={!gates.canSend}
               offlineNote={composerNote}
               // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
-              placeholder={THREAD_COMPOSER_PLACEHOLDER}
+              placeholder={formatMessage(THREAD_COMPOSER_PLACEHOLDER_KEY)}
               sendLabel="답글 보내기"
               onSend={onSend}
               // 스레드 입력창도 대화 입력창처럼 이모티콘·GIF 를 미리 보기에 올려 글과 함께 보낸다(#5490, 웹 스레드 입력창 #5487 의 짝).

@@ -31,7 +31,7 @@ import {
 } from "@momo/core/features/chat/composerKeys";
 import type { RecipientKind } from "@momo/core/lib/koreanParticle";
 import {
-  COMPOSER_KEYS_HINT,
+  COMPOSER_KEYS_HINT_KEY,
   HINT_SEPARATOR,
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
@@ -188,6 +188,7 @@ function ComposerHint({
   pendingLink: boolean;
   sharedRow: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const lead = pendingLink || dmHint !== null;
   return (
     <p
@@ -217,7 +218,7 @@ function ComposerHint({
       {keysHintNeeded && (
         <span className="wide-only @max-md:hidden" data-testid="composer-keys-hint">
           {lead ? HINT_SEPARATOR : ""}
-          {COMPOSER_KEYS_HINT}
+          {formatMessage(COMPOSER_KEYS_HINT_KEY)}
         </span>
       )}
     </p>
@@ -1181,7 +1182,7 @@ export function Composer({
             returnFocus={() => inputRef.current?.focus()}
           />
           <label className="sr-only" htmlFor="composer-input">
-            {composerFieldLabel(channelLabel, recipient)}
+            {composerFieldLabel(formatMessage, channelLabel, recipient)}
           </label>
           <textarea
             id="composer-input"

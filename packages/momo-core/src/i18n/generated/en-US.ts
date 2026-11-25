@@ -3332,6 +3332,76 @@ export const catalog: MessageCatalog = {
       "value": " characters or fewer."
     }
   ],
+  "chat.composer.fieldLabelPerson": [
+    {
+      "type": 0,
+      "value": "Message to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.composer.fieldLabelPlace": [
+    {
+      "type": 0,
+      "value": "Message to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.composer.mentionAffordance": [
+    {
+      "type": 0,
+      "value": "type @ to mention"
+    }
+  ],
+  "chat.composer.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send right now. Your draft stays here, and you can send it once you're connected."
+    }
+  ],
+  "chat.composer.placeholderPerson": [
+    {
+      "type": 0,
+      "value": "Message "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.composer.placeholderPlace": [
+    {
+      "type": 0,
+      "value": "Message "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "chat.hint.composerKeys": [
+    {
+      "type": 0,
+      "value": "Enter to send · Shift+Enter for a new line"
+    }
+  ],
+  "chat.hint.editorKeys": [
+    {
+      "type": 0,
+      "value": "Enter to save · Shift+Enter for a new line · Esc to cancel"
+    }
+  ],
+  "chat.thread.placeholder": [
+    {
+      "type": 0,
+      "value": "Write a reply"
+    }
+  ],
   "cliLogin.consent.approve": [
     {
       "type": 0,
