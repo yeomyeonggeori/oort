@@ -86,5 +86,8 @@
   "attachments.action.expandNamed": "View {label} larger",
   "attachments.action.expandNamedAt": "View {label} {position} larger",
   "attachments.action.removeNamed": "Remove attachment {name}",
-  "attachments.action.retryNamed": "Retry {name}"
+  "attachments.action.retryNamed": "Retry {name}",
+  "attachments.preview.photos": "{count, plural, one {# photo} other {# photos}}",
+  "attachments.preview.files": "{count, plural, one {# file} other {# files}}",
+  "attachments.preview.photosAndFiles": "{photos}, {files}"
 }

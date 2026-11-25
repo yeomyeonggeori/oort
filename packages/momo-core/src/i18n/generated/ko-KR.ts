@@ -436,10 +436,54 @@ export const catalog: MessageCatalog = {
       "value": "미리보기를 불러오지 못했습니다"
     }
   ],
+  "attachments.preview.files": [
+    {
+      "type": 0,
+      "value": "파일 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
   "attachments.preview.loading": [
     {
       "type": 0,
       "value": "미리보기 불러오는 중"
+    }
+  ],
+  "attachments.preview.photos": [
+    {
+      "type": 0,
+      "value": "사진 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "장"
+    }
+  ],
+  "attachments.preview.photosAndFiles": [
+    {
+      "type": 1,
+      "value": "photos"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "files"
     }
   ],
   "attachments.sendBlock.failed": [
@@ -12504,6 +12548,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "내일 오전 9시"
+    }
+  ],
+  "reminders.tab.later": [
+    {
+      "type": 0,
+      "value": "나중에"
     }
   ],
   "reply.card.cancel": [

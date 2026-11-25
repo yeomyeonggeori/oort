@@ -31,5 +31,6 @@
   "reminders.preset.in1h": "In 1 hour",
   "reminders.preset.in3h": "In 3 hours",
   "reminders.preset.tomorrow9": "Tomorrow at 9 AM",
-  "reminders.preset.nextMonday9": "Next Monday at 9 AM"
+  "reminders.preset.nextMonday9": "Next Monday at 9 AM",
+  "reminders.tab.later": "Later"
 }

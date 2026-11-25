@@ -521,7 +521,7 @@ export function MessageRow({
   // 「내용 없는 메시지」는 사진이 달린 메시지에게 하는 말이 아니다. 리마인더는 이 줄을 저장해 두고
   // 목록에서 다시 보이므로 한 번 잘못 말하면 그 말이 남는다.
   const previewText =
-    message.body?.trim() || attachmentPreviewLine(attachments) || formatMessage(PIN_EMPTY_BODY_KEY);
+    message.body?.trim() || attachmentPreviewLine((key, values) => formatMessage(key, values as never), attachments) || formatMessage(PIN_EMPTY_BODY_KEY);
   const rollup = showRollup ? (listRollup === undefined ? threadRollup(message) : listRollup) : null;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜

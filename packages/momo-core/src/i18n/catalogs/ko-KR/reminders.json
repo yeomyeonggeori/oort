@@ -31,5 +31,6 @@
   "reminders.preset.in1h": "1시간 후",
   "reminders.preset.in3h": "3시간 후",
   "reminders.preset.tomorrow9": "내일 오전 9시",
-  "reminders.preset.nextMonday9": "다음 주 월요일 오전 9시"
+  "reminders.preset.nextMonday9": "다음 주 월요일 오전 9시",
+  "reminders.tab.later": "나중에"
 }

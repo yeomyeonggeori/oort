@@ -6,7 +6,7 @@ import {
   type InboxFilter,
 } from "@momo/core/features/inbox/model";
 import type { FilterTabsSpec, FilterTabText } from "@momo/core/features/common/filterTabs";
-import { REMINDER_TAB_LABEL } from "@momo/core/features/reminders/model";
+import { REMINDER_TAB_KEY } from "@momo/core/features/reminders/model";
 
 /**
  * Web-only 4th inbox tab. Core `InboxFilter` stays three values so the phone
@@ -28,7 +28,7 @@ export function parseWebInboxFilter(
 
 export function webInboxFilterLabel(filter: WebInboxFilter): FilterTabText {
   return filter === "reminders"
-    ? REMINDER_TAB_LABEL
+    ? { key: REMINDER_TAB_KEY }
     : { key: filterLabelKey(filter) };
 }
 

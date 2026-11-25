@@ -9,7 +9,7 @@ import {
   draftStatusLine as draftStatusLineWith,
   attachmentIdsOf,
   attachmentMetaLine as attachmentMetaLineWith,
-  attachmentPreviewLine,
+  attachmentPreviewLine as attachmentPreviewLineWith,
   beginUpload,
   completeUpload,
   draftFor,
@@ -57,6 +57,7 @@ const attachmentDisplayName = (...args: Tail<Parameters<typeof attachmentDisplay
 const draftAnnouncement = (...args: Tail<Parameters<typeof draftAnnouncementWith>>) => draftAnnouncementWith(formatMessage, ...args);
 const draftStatusLine = (...args: Tail<Parameters<typeof draftStatusLineWith>>) => draftStatusLineWith(formatMessage, ...args);
 const attachmentMetaLine = (...args: Tail<Parameters<typeof attachmentMetaLineWith>>) => attachmentMetaLineWith(formatMessage, ...args);
+const attachmentPreviewLine = (...args: Tail<Parameters<typeof attachmentPreviewLineWith>>) => attachmentPreviewLineWith(formatMessage, ...args);
 const formatMimeLabel = (mime: string) => ko(mimeLabelKey(mime));
 const sendBlockCopy = (drafts: Parameters<typeof sendBlockKey>[0]) => {
   const key = sendBlockKey(drafts);

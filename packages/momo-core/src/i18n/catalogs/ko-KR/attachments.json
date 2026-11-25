@@ -86,5 +86,8 @@
   "attachments.action.expandNamed": "{label} 크게 보기",
   "attachments.action.expandNamedAt": "{label} {position} 크게 보기",
   "attachments.action.removeNamed": "{name} 첨부 제거",
-  "attachments.action.retryNamed": "{name} 다시 시도"
+  "attachments.action.retryNamed": "{name} 다시 시도",
+  "attachments.preview.photos": "사진 {count, number}장",
+  "attachments.preview.files": "파일 {count, number}개",
+  "attachments.preview.photosAndFiles": "{photos}, {files}"
 }

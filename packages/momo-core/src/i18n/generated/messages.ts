@@ -54,7 +54,10 @@ export const messageKeys = [
   "attachments.pdf.opening",
   "attachments.pdf.popupBlocked",
   "attachments.preview.failed",
+  "attachments.preview.files",
   "attachments.preview.loading",
+  "attachments.preview.photos",
+  "attachments.preview.photosAndFiles",
   "attachments.sendBlock.failed",
   "attachments.sendBlock.retryable",
   "attachments.sendBlock.uploading",
@@ -1808,6 +1811,7 @@ export const messageKeys = [
   "reminders.preset.in3h",
   "reminders.preset.nextMonday9",
   "reminders.preset.tomorrow9",
+  "reminders.tab.later",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -2960,7 +2964,17 @@ export const argumentSpecs = {
   "attachments.pdf.opening": {},
   "attachments.pdf.popupBlocked": {},
   "attachments.preview.failed": {},
+  "attachments.preview.files": {
+    "count": "number"
+  },
   "attachments.preview.loading": {},
+  "attachments.preview.photos": {
+    "count": "number"
+  },
+  "attachments.preview.photosAndFiles": {
+    "files": "string",
+    "photos": "string"
+  },
   "attachments.sendBlock.failed": {},
   "attachments.sendBlock.retryable": {},
   "attachments.sendBlock.uploading": {},
@@ -5174,6 +5188,7 @@ export const argumentSpecs = {
   "reminders.preset.in3h": {},
   "reminders.preset.nextMonday9": {},
   "reminders.preset.tomorrow9": {},
+  "reminders.tab.later": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -6886,7 +6901,10 @@ export interface MessageArgs {
   "attachments.pdf.opening": Record<string, never>;
   "attachments.pdf.popupBlocked": Record<string, never>;
   "attachments.preview.failed": Record<string, never>;
+  "attachments.preview.files": { count: number };
   "attachments.preview.loading": Record<string, never>;
+  "attachments.preview.photos": { count: number };
+  "attachments.preview.photosAndFiles": { files: string; photos: string };
   "attachments.sendBlock.failed": Record<string, never>;
   "attachments.sendBlock.retryable": Record<string, never>;
   "attachments.sendBlock.uploading": Record<string, never>;
@@ -8640,6 +8658,7 @@ export interface MessageArgs {
   "reminders.preset.in3h": Record<string, never>;
   "reminders.preset.nextMonday9": Record<string, never>;
   "reminders.preset.tomorrow9": Record<string, never>;
+  "reminders.tab.later": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;

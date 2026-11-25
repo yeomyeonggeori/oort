@@ -1022,12 +1022,6 @@ export function imageGridColumns(count: number): 1 | 2 | 3 {
 // 같은 무게의 노출이고, 개수는 「무엇이 왔나」에 필요한 전부다. 폰 알림 확장(Swift
 // `PushAttachmentCopy`)이 같은 문장을 낸다 — 두 언어가 같은 표를 읽게 폰 시험이 둘을 맞댄다.
 
-/** 7개 언어 계획(ADR-0213) 전이라 한국어 상수다. 사진이 먼저, 섞이면 쉼표로 잇는다. */
-export const ATTACH_PREVIEW_COPY = {
-  photos: (count: number) => `사진 ${count}장`,
-  files: (count: number) => `파일 ${count}개`,
-  separator: ", ",
-} as const;
 
 /**
  * 「사진」으로 세는가: 사진으로 그려지는 래스터 이미지. SVG는 타임라인이 카드로 세우므로
@@ -1045,14 +1039,23 @@ export function isPhotoAttachment(attachment: Pick<MessageAttachment, "mime">): 
  * 첨부 한 묶음의 한 줄: 「사진 1장」, 「사진 3장」, 「파일 2개」, 「사진 1장, 파일 1개」.
  * 첨부가 없으면 `null`.
  */
+/** 첨부 한 줄이 쓰는 사전 키와 값. 알림 모델처럼 좁은 언어 서비스만 가진 자리도 이 모양이면 부른다(#6058). */
+export type AttachPreviewFormat = (
+  key: "attachments.preview.photos" | "attachments.preview.files" | "attachments.preview.photosAndFiles",
+  values: { count: number } | { photos: string; files: string }
+) => string;
+
 export function attachmentPreviewLine(
+  formatMessage: AttachPreviewFormat,
   attachments: readonly Pick<MessageAttachment, "mime">[] | null | undefined
 ): string | null {
   if (!attachments || attachments.length === 0) return null;
-  const photos = attachments.filter(isPhotoAttachment).length;
-  const files = attachments.length - photos;
-  const parts: string[] = [];
-  if (photos > 0) parts.push(ATTACH_PREVIEW_COPY.photos(photos));
-  if (files > 0) parts.push(ATTACH_PREVIEW_COPY.files(files));
-  return parts.join(ATTACH_PREVIEW_COPY.separator);
+  const photoCount = attachments.filter(isPhotoAttachment).length;
+  const fileCount = attachments.length - photoCount;
+  if (fileCount === 0) return formatMessage("attachments.preview.photos", { count: photoCount });
+  if (photoCount === 0) return formatMessage("attachments.preview.files", { count: fileCount });
+  return formatMessage("attachments.preview.photosAndFiles", {
+    photos: formatMessage("attachments.preview.photos", { count: photoCount }),
+    files: formatMessage("attachments.preview.files", { count: fileCount }),
+  });
 }

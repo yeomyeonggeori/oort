@@ -97,6 +97,7 @@ function ContextRow({
   isTarget: boolean;
   targetRef: React.MutableRefObject<HTMLLIElement | null>;
 }) {
+  const formatMessage = useFormatMessage();
   // 목록 줄과 같은 해석(`actorNamesIn`): 에이전트는 타임라인처럼 `@핸들`이다.
   const actor = actorNamesIn(directory, message.authorMemberId);
   const member = memberFor(directory, message.authorMemberId);
@@ -109,7 +110,7 @@ function ContextRow({
   const attachmentLine =
     message.state === "deleted" || hasRenderableBody(message.body)
       ? null
-      : attachmentPreviewLine(message.attachments);
+      : attachmentPreviewLine((key, values) => formatMessage(key, values as never), message.attachments);
   return (
     <li
       ref={isTarget ? targetRef : undefined}

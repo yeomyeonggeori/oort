@@ -494,10 +494,88 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the preview"
     }
   ],
+  "attachments.preview.files": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "attachments.preview.loading": [
     {
       "type": 0,
       "value": "Loading preview"
+    }
+  ],
+  "attachments.preview.photos": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " photo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " photos"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "attachments.preview.photosAndFiles": [
+    {
+      "type": 1,
+      "value": "photos"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "files"
     }
   ],
   "attachments.sendBlock.failed": [
@@ -13391,6 +13469,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Tomorrow at 9 AM"
+    }
+  ],
+  "reminders.tab.later": [
+    {
+      "type": 0,
+      "value": "Later"
     }
   ],
   "reply.card.cancel": [

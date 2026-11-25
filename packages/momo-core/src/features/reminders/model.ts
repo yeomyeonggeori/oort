@@ -196,8 +196,7 @@ export const REMINDER_LOAD_FAILURE_KEY = "reminders.error.loadFailed" satisfies 
 export const REMINDER_EMPTY_HEADLINE_KEY = "reminders.empty.headline" satisfies ReminderPlainKey;
 export const REMINDER_EMPTY_DETAIL_KEY = "reminders.empty.detail" satisfies ReminderPlainKey;
 export const REMINDER_MENU_KEY = "reminders.menu.remind" satisfies ReminderPlainKey;
-// 받은함 탭 낱말은 받은함의 탭 이름 표(`mailboxFilterLabel`)와 한 줄로 그려져서 그 표가 옮겨질 때 함께 옮긴다(#6058 보고).
-export const REMINDER_TAB_LABEL = "나중에";
+export const REMINDER_TAB_KEY = "reminders.tab.later" satisfies ReminderPlainKey;
 export const REMINDER_NOTIFY_TITLE_KEY = "reminders.notify.title" satisfies ReminderPlainKey;
 export const REMINDER_COMPLETE_KEY = "reminders.action.complete" satisfies ReminderPlainKey;
 export const REMINDER_SNOOZE_KEY = "reminders.action.snooze" satisfies ReminderPlainKey;
