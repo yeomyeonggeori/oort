@@ -21952,17 +21952,22 @@ components:
         The closed subset of `WorkspaceActionId` an agent may raise **unasked**
         through the Agent Port tool `oort_action_initiate` (ADR-0186 증보 v5
         U-b-2, #4704): `channel.create` (a **private** channel only),
-        `channel.member.add`, `message.pin`, `message.unpin`. Never one that mints
+        `channel.member.add`, `message.pin`, `message.unpin`, and (증보 v9 X9-2,
+        #6137) `expression.create` as **one** picture the agent made (exactly one
+        candidate, `image.source: generated`, `subjectMemberId: null`, a request of
+        at most 2 MiB, two a day counted together with `oort_expression_register`,
+        and only while the `agent_self_expressions` switch is on — at the call and
+        again at the decision). Never one that mints
         a value shown once, widens what the agent can read, or changes who or what
         an agent is (`hosted.channels.grant`, `agent.*`, `invite.create`,
         `workspace.settings.update`, `member.avatar.set`). The canonical list is
         the registry's `initiative` flag (`momo_agent::actions::ACTIONS`); this
-        enum, that flag, the tool's `actionId` enum and the four literals of the
-        ADR are held equal by one test
+        enum, that flag, the tool's `actionId` enum and the five literals of the
+        ADRs are held equal by one test
         (`routes::actions::the_initiative_ids_are_one_list_in_three_places`).
         The card stands in the agent's owner's one-to-one direct message with
         `props.origin = "agent_initiated"` and is always decided in the app.
-      enum: ["channel.create", "channel.member.add", "message.pin", "message.unpin"]
+      enum: ["channel.create", "channel.member.add", "message.pin", "message.unpin", "expression.create"]
 
     SuggestableCommandId:
       type: string
@@ -30203,6 +30208,26 @@ components:
             (#4965): a card the team AI raised has no such choice — its
             `agent.invite` shows the pairing code to the approver alone — so
             `true` on it is the same 400 receipt.
+        keepAllowing:
+          type: boolean
+          default: false
+          description: >
+            ADR-0218 증보 13 §19 Y2.1 ② · ADR-0186 v9 X9-3 (#6137) — 「승인하고 계속
+            허용」. Only an explicit `true` asks for it: approving an agent's
+            `expression.create` card (a picture chosen with `expressionChoice`)
+            then also writes that agent's standing grant to register its own
+            expressions without a card (the grant `GET …/agents/{agentMemberId}/expression-grant`
+            reads), in the same transaction, pinned to the connection the card was
+            raised through. Without it the approval is 「이번만」: the one picture,
+            no grant — so an older client's approval is never a standing one.
+            `true` anywhere else (another action, a set card, a rejection, a link
+            candidate not fetched yet, the lock screen's credential, a card the
+            team AI raised) is a 400 receipt `keep_allowing_not_supported`; from a
+            decider who is not an active workspace admin a 403 receipt
+            `keep_allowing_requires_admin`; while the `agent_self_expressions`
+            switch is off or the card's connection no longer stands a 409 receipt
+            `keep_allowing_unavailable`. Every refusal registers nothing and leaves
+            the approval pending. Not part of the idempotency key.
 
     ApprovalDecisionReceipt:
       type: object

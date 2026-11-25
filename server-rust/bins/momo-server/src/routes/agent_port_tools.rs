@@ -495,6 +495,18 @@ async fn expression_register(
 
     let begun = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
+            // **The agent's own lock first** (#6137, the review's 「같은 에이전트 잠금」): the advisory key the
+            // unasked-card door and a person's proposal already take before any share lock. The daily
+            // count is shared with the unasked `expression.create` cards (Y3 하루 개수), so the two doors'
+            // count-then-write must not interleave; and taken before `authorize_in_tx`'s `FOR SHARE` on the
+            // agent's member row, it keeps two calls of one agent from both holding that share and then
+            // both asking for the row lock `standing_in_tx` takes (a share-to-exclusive upgrade).
+            momo_agent::initiative::lock_agent_initiative_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await?;
             let identity =
                 match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
                     Ok(identity) => identity,
@@ -554,9 +566,30 @@ async fn expression_register(
 
     let finished = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
-            self_register::finish_in_tx(conn, who, call, server_setting_on, picture)
-                .await
-                .map_err(expression_db_error)
+            momo_agent::initiative::lock_agent_initiative_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await?;
+            // Y2.4 5 again, in the registering transaction (review M2): the credential is still live
+            // and not revoked, the connection still active and proved, and still the one the first
+            // transaction proved. The decode sat between the two.
+            let credential_stands =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity.connection_id == who.connection,
+                    Err(_) => false,
+                };
+            self_register::finish_in_tx(
+                conn,
+                who,
+                call,
+                server_setting_on,
+                credential_stands,
+                picture,
+            )
+            .await
+            .map_err(expression_db_error)
         })
     })
     .await
@@ -2563,12 +2596,12 @@ fn preparing_agents() -> &'static std::sync::Mutex<std::collections::HashSet<Uui
 /// Entering takes the agent's place and **dropping the guard gives it back** — also when the
 /// request is cancelled with a half-finished preparation — so a dropped connection cannot lock an
 /// agent out. The set holds ids of agents that are preparing *now*, so it cannot grow.
-struct Preparing {
+pub(crate) struct Preparing {
     agent: Uuid,
 }
 
 impl Preparing {
-    fn enter(agent: Uuid) -> Option<Preparing> {
+    pub(crate) fn enter(agent: Uuid) -> Option<Preparing> {
         let mut preparing = preparing_agents()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);

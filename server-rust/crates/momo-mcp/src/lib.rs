@@ -118,6 +118,18 @@ pub const MAX_ASSEMBLE_BASE64_BYTES: usize = 5_592_408;
 /// 1 MiB (base64, [`MAX_EXPRESSION_BASE64_BYTES`]) and its envelope — a 2 MiB budget of that one tool.
 pub const MAX_REGISTER_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 
+/// ADR-0186 v9 X9-2 · ADR-0218 §19 Y2.2 (#6137): is `request` (already parsed) a `tools/call` of
+/// `oort_action_initiate` naming `expression.create` — one picture the agent made, under the same 2 MiB
+/// budget as the register tool ([`MAX_REGISTER_REQUEST_BYTES`]), never the proposal's 6 MiB?
+pub fn is_expression_initiate_call(request: &Value) -> bool {
+    request.get("method").and_then(Value::as_str) == Some("tools/call")
+        && request.pointer("/params/name").and_then(Value::as_str) == Some(TOOL_ACTION_INITIATE)
+        && request
+            .pointer("/params/arguments/actionId")
+            .and_then(Value::as_str)
+            == Some(EXPRESSION_CREATE_ACTION_ID)
+}
+
 /// Is `request` (already parsed) a `tools/call` of `oort_expression_register`?
 pub fn is_expression_register_call(request: &Value) -> bool {
     request.get("method").and_then(Value::as_str) == Some("tools/call")
@@ -707,9 +719,11 @@ fn dispatch_inner(
     };
     let expression_budget = is_expression_create_call(&value);
     let assemble_budget = is_expression_assemble_call(&value);
-    // #6069: the register tool's own 2 MiB, never the 6 MiB of the two above.
-    let register_budget =
-        is_expression_register_call(&value) && request.body.len() <= MAX_REGISTER_REQUEST_BYTES;
+    // #6069: the register tool's own 2 MiB, never the 6 MiB of the two above — and #6137: an unasked
+    // emoticon card carries the same one picture under the same 2 MiB.
+    let register_budget = (is_expression_register_call(&value)
+        || is_expression_initiate_call(&value))
+        && request.body.len() <= MAX_REGISTER_REQUEST_BYTES;
     if past_standard_limit && !(expression_budget || assemble_budget || register_budget) {
         return error(
             413,

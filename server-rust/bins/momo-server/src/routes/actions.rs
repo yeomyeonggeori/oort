@@ -224,7 +224,7 @@ mod tests {
     }
 
     /// **ADR-0186 증보 v5 U-b-2 — the unasked-card ids are one list in three places, and the list
-    /// is exactly the four the ADR names.**
+    /// is exactly the five the ADR names** (v5 U-b-2's four + v9 X9-1's `expression.create`, #6137).
     ///
     /// The registry's `initiative` flag is the definition; `oort_action_initiate`'s `actionId`
     /// enum (a deliberate copy — `momo-mcp` may not depend on `momo-agent`) and the published
@@ -240,9 +240,10 @@ mod tests {
                 "channel.create",
                 "channel.member.add",
                 "message.pin",
-                "message.unpin"
+                "message.unpin",
+                "expression.create"
             ],
-            "the registry's initiative flag is exactly the ADR's four"
+            "the registry's initiative flag is exactly the ADR's five"
         );
         let initiate = momo_mcp::TOOL_CATALOG
             .iter()
@@ -299,10 +300,13 @@ mod tests {
                 "{} is a one-time-secret action",
                 action.id
             );
-            assert_eq!(
-                action.required_role,
-                actions::RequiredRole::Admin,
-                "{}: the door judges only the Admin gate for the owner",
+            // The door judges the owner's gate for exactly these two (`initiate_in_tx` door 5): the
+            // admin gate, and the add policy for an emoticon (v9 X9-2) — asked for nobody's face.
+            assert!(
+                action.required_role == actions::RequiredRole::Admin
+                    || (action.id == actions::ACTION_EXPRESSION_CREATE
+                        && action.required_role == actions::RequiredRole::ExpressionAdder),
+                "{}: the door judges only the Admin gate (or an emoticon's add policy) for the owner",
                 action.id
             );
             assert_eq!(
@@ -319,6 +323,9 @@ mod tests {
                 actions::ACTION_INVITE_CREATE,
                 actions::ACTION_WORKSPACE_SETTINGS_UPDATE,
                 actions::ACTION_MEMBER_AVATAR_SET,
+                // ADR-0218 §19 Y2.6 · YA10: a set is never raised unasked.
+                actions::ACTION_EXPRESSION_SET_CREATE,
+                actions::ACTION_EXPRESSION_SET_PLAN,
             ] {
                 assert_ne!(action.id, closed, "{closed} may never be raised unasked");
             }

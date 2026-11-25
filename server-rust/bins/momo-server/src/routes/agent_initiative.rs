@@ -123,7 +123,7 @@ struct Refusal {
 }
 
 impl Refusal {
-    async fn record(self, conn: &mut PgConnection) -> Result<Result<Value, ToolFailure>, DbError> {
+    async fn record<T>(self, conn: &mut PgConnection) -> Result<Result<T, ToolFailure>, DbError> {
         momo_agent::initiative::record_refused_in_tx(
             conn,
             self.workspace_id,
@@ -216,9 +216,19 @@ pub(crate) async fn card_still_stands_in_tx(
     decider: Uuid,
 ) -> Result<Option<Uuid>, DbError> {
     let agent = approval.requested_by;
-    // 1. the switch.
+    // 1. the switch — and for an emoticon, the switch over agents' own expressions too (ADR-0218 §19
+    // Y3 · ADR-0186 v9 X9-2, #6137): turned off, a card already standing is not run (the approval is
+    // not spent, a rejection still goes through) and so no 「계속 허용」 stands either.
     let settings = momo_settings::read_workspace_settings(conn, workspace_id).await?;
     if !momo_agent::initiative::switch_is_on(settings.as_ref()) {
+        return Ok(None);
+    }
+    let emoticon = approval
+        .payload
+        .pointer("/action/id")
+        .and_then(Value::as_str)
+        == Some(momo_agent::actions::ACTION_EXPRESSION_CREATE);
+    if emoticon && !momo_expressions::self_register::switch_is_on(settings.as_ref()) {
         return Ok(None);
     }
     // 2. the connection, the scope, the agent.
@@ -236,6 +246,40 @@ pub(crate) async fn card_still_stands_in_tx(
         return Ok(None);
     };
     Ok((facts.owner_member_id == decider).then_some(connection_id))
+}
+
+/// Whether an unasked `expression.create` may bring its 2 MiB body (ADR-0218 §19 Y2.2 「큰 본문을 읽기
+/// 전에」, #6137): the connection and `workspace:initiate` on both halves, the unasked-card switch and the
+/// switch over agents' own expressions, read **before** the big body is. The rest of the door (the
+/// owner, the add policy, the ceilings) is the tool's own judgement, in its transaction. A failed read
+/// is closed. Writes and locks nothing.
+pub(crate) async fn expression_door_open(state: &AppState, caller: HostedCaller) -> bool {
+    let read = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            if authorize_in_tx(conn, caller, SCOPE_WORKSPACE_INITIATE)
+                .await?
+                .is_err()
+            {
+                return Ok(false);
+            }
+            let settings =
+                momo_settings::read_workspace_settings(conn, caller.workspace_id).await?;
+            Ok(momo_agent::initiative::switch_is_on(settings.as_ref())
+                && momo_expressions::self_register::switch_is_on(settings.as_ref()))
+        })
+    })
+    .await;
+    match read {
+        Ok(open) => open,
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                route = "/v1/mcp/agent-port",
+                "Agent Port unasked expression door resolution failed"
+            );
+            false
+        }
+    }
 }
 
 /// `oort_action_initiate { clientRequestId, actionId, args, rationale? }`.
@@ -268,13 +312,158 @@ pub(crate) async fn action_initiate(
     let mut pure = validated_action_args(action, &raw_args, now_ms)
         .map_err(|_| ToolFailure::InvalidArguments)?;
     initiative_args_checks(&mut pure).map_err(|_| ToolFailure::InvalidArguments)?;
+    // **`expression.create`: one picture the agent made** (ADR-0186 v9 X9-2, #6137). What the request
+    // itself shows — strict base64 within 1 MiB, bytes that start like a picture — before anything
+    // else; the doors and the ceilings next, in a transaction that writes only what a refusal writes;
+    // only then the decode, outside any transaction (ADR-0218 D2), so a closed door or a spent ceiling
+    // never reaches the decoder.
+    let picture = match &pure.args {
+        ActionArgs::ExpressionCreate { candidates, .. } => Some(unasked_picture(candidates)?),
+        _ => None,
+    };
     let normalized = pure.normalized;
 
+    let prepared: Option<std::sync::Arc<PreparedPicture>> = match picture {
+        None => None,
+        Some(picture) => {
+            match run_initiate(
+                state,
+                caller,
+                client_request_id,
+                action,
+                &raw_args,
+                &normalized,
+                rationale.as_deref(),
+                Pass::Check,
+            )
+            .await?
+            {
+                Initiated::Answer(answer) => return Ok(answer),
+                Initiated::Proceed => {}
+            }
+            // One preparation per agent at a time, the decoder's line of two, inside one deadline —
+            // the proposal's own rules (`prepare_expression`).
+            let _preparing =
+                crate::routes::agent_port_tools::Preparing::enter(caller.agent_member_id)
+                    .ok_or(ToolFailure::Unavailable)?;
+            let processed = momo_expressions::media::process_waiting(
+                picture.bytes,
+                momo_expressions::action::PREPARE_DEADLINE,
+                state.expression_rendition_table,
+            )
+            .await
+            .map_err(|rejected| match rejected {
+                momo_expressions::media::Rejected::Busy => ToolFailure::Unavailable,
+                _ => ToolFailure::InvalidArguments,
+            })?;
+            Some(std::sync::Arc::new(PreparedPicture {
+                meta: picture.meta,
+                prompt: picture.prompt,
+                media: processed,
+            }))
+        }
+    };
+
+    match run_initiate(
+        state,
+        caller,
+        client_request_id,
+        action,
+        &raw_args,
+        &normalized,
+        rationale.as_deref(),
+        Pass::Write(prepared),
+    )
+    .await?
+    {
+        Initiated::Answer(answer) => Ok(answer),
+        // The write pass never stops halfway.
+        Initiated::Proceed => Err(ToolFailure::Unavailable),
+    }
+}
+
+/// The one picture of an unasked `expression.create`, as the request shows it (#6137): its name, tags
+/// and prompt, and the bytes — strict base64, at most 1 MiB, starting like a picture (the proposal's
+/// own early checks, `prepare_expression`). The bytes decide the format, never the declared mime.
+struct UnaskedPicture {
+    meta: momo_expressions::Metadata,
+    prompt: String,
+    bytes: Vec<u8>,
+}
+
+fn unasked_picture(
+    candidates: &[momo_workspace_actions::action_resolve::ExpressionCandidateSpec],
+) -> Result<UnaskedPicture, ToolFailure> {
+    use base64::Engine as _;
+    use momo_workspace_actions::action_resolve::ExpressionImageSpec;
+    let [candidate] = candidates else {
+        return Err(ToolFailure::InvalidArguments);
+    };
+    let ExpressionImageSpec::Generated {
+        data_base64,
+        prompt,
+        ..
+    } = &candidate.image
+    else {
+        return Err(ToolFailure::InvalidArguments);
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|_| ToolFailure::InvalidArguments)?;
+    if bytes.len() > momo_expressions::self_register::PICTURE_BYTES
+        || momo_expressions::media::sniff(&bytes) != momo_expressions::media::Sniffed::Image
+    {
+        return Err(ToolFailure::InvalidArguments);
+    }
+    Ok(UnaskedPicture {
+        meta: candidate.meta.clone(),
+        prompt: prompt.clone(),
+        bytes,
+    })
+}
+
+/// The decoded picture the write pass stores as the card's one draft.
+struct PreparedPicture {
+    meta: momo_expressions::Metadata,
+    prompt: String,
+    media: momo_expressions::media::Processed,
+}
+
+/// Which half of an unasked card's call a transaction is.
+#[derive(Clone)]
+enum Pass {
+    /// The doors, the re-ask and the ceilings only — an `expression.create` asks them before its picture
+    /// is decoded. Writes nothing but what a refusal writes.
+    Check,
+    /// The whole call; an `expression.create` carries its decoded picture.
+    Write(Option<std::sync::Arc<PreparedPicture>>),
+}
+
+/// What a pass decided: the answer to the agent, or (a [`Pass::Check`] only) go on to the decode.
+enum Initiated {
+    Answer(Value),
+    Proceed,
+}
+
+/// One pass in its own tenant transaction, run once more if it was a deadlock's victim (see
+/// [`INITIATE_ATTEMPTS`]).
+#[allow(clippy::too_many_arguments)]
+async fn run_initiate(
+    state: &AppState,
+    caller: HostedCaller,
+    client_request_id: Uuid,
+    action: &'static momo_agent::WorkspaceAction,
+    raw_args: &Value,
+    normalized: &Value,
+    rationale: Option<&str>,
+    pass: Pass,
+) -> Result<Initiated, ToolFailure> {
     let mut attempt = 1;
     loop {
-        let rationale = rationale.clone();
+        let rationale = rationale.map(str::to_string);
         let raw_args = raw_args.clone();
         let normalized = normalized.clone();
+        let pass = pass.clone();
         let outcome = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
             Box::pin(async move {
                 initiate_in_tx(
@@ -285,6 +474,7 @@ pub(crate) async fn action_initiate(
                     &raw_args,
                     &normalized,
                     rationale.as_deref(),
+                    pass,
                 )
                 .await
             })
@@ -304,6 +494,7 @@ pub(crate) async fn action_initiate(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn initiate_in_tx(
     conn: &mut PgConnection,
     caller: HostedCaller,
@@ -312,9 +503,11 @@ async fn initiate_in_tx(
     raw_args: &Value,
     normalized: &Value,
     rationale: Option<&str>,
-) -> Result<Result<Value, ToolFailure>, DbError> {
+    pass: Pass,
+) -> Result<Result<Initiated, ToolFailure>, DbError> {
     let workspace_id = caller.workspace_id;
     let agent = caller.agent_member_id;
+    let expression = action.id == momo_agent::actions::ACTION_EXPRESSION_CREATE;
 
     // ---- serialise this agent's unasked-card calls (see the module header) -------------------
     //
@@ -349,13 +542,17 @@ async fn initiate_in_tx(
     )
     .await?
     {
-        if record.action_id.as_deref() != Some(action.id) || &record.args != normalized {
+        // An `expression.create` card stores the id of its draft, not the picture (ADR-0186 v8), so
+        // its re-ask is judged on the action alone: the same id answers what that card is.
+        if record.action_id.as_deref() != Some(action.id)
+            || (!expression && &record.args != normalized)
+        {
             return Ok(Err(ToolFailure::Conflict));
         }
-        return Ok(Ok(momo_agent::initiative::reask_answer(
+        return Ok(Ok(Initiated::Answer(momo_agent::initiative::reask_answer(
             &record,
             Utc::now(),
-        )));
+        ))));
     }
 
     // ---- doors 3, 4, 5 -----------------------------------------------------------------------
@@ -373,6 +570,13 @@ async fn initiate_in_tx(
     // definition for the door and for the decision that re-proves it).
     let settings = momo_settings::read_workspace_settings(conn, workspace_id).await?;
     if !momo_agent::initiative::switch_is_on(settings.as_ref()) {
+        return refuse(RefusalReason::SwitchOff, ToolFailure::Unavailable)
+            .record(conn)
+            .await;
+    }
+    // 3'. an emoticon also needs the switch over agents' own expressions (ADR-0218 §19 Y3, #6137) —
+    // the same reading the register door and the decision make, and the same answer as door 3.
+    if expression && !momo_expressions::self_register::switch_is_on(settings.as_ref()) {
         return refuse(RefusalReason::SwitchOff, ToolFailure::Unavailable)
             .record(conn)
             .await;
@@ -400,6 +604,14 @@ async fn initiate_in_tx(
             .await
             .map_err(DbError::from)?
             .is_some_and(|role| role.is_admin()),
+        // `expression.create` (ADR-0186 v9 X9-2): the owner may add a team expression **now** under the
+        // workspace's add policy — the predicate the decision's gate asks. An unasked emoticon has no
+        // face (`initiative_args_checks`), so the policy is asked for nobody's face.
+        momo_agent::RequiredRole::ExpressionAdder if expression => {
+            momo_expressions::store::adder_allows_in_tx(conn, workspace_id, owner, None)
+                .await
+                .map_err(crate::routes::approvals::expression_db_error)?
+        }
         _ => false,
     };
     if !gate_open {
@@ -439,6 +651,27 @@ async fn initiate_in_tx(
             .record(conn)
             .await;
     }
+    // An emoticon's day (ADR-0218 §19 Y3 하루 개수, #6137): two in 24 hours, the unasked cards and the
+    // registrations without a card **counted together** — the register door counts the same SQL
+    // (`counts_in_tx`) behind the same advisory lock this transaction took first, so the two doors'
+    // count-then-write cannot interleave. Said as the rate it is.
+    if expression
+        && momo_expressions::self_register::counts_in_tx(conn, workspace_id, agent)
+            .await
+            .map_err(crate::routes::approvals::expression_db_error)?
+            .daily
+            >= momo_expressions::self_register::DAILY_CAP
+    {
+        return refuse(RefusalReason::RateLimited, ToolFailure::Conflict)
+            .record(conn)
+            .await;
+    }
+    // The check pass of an emoticon stops here: the doors and the ceilings are judged, and the picture
+    // is decoded next, outside any transaction. The write pass judges all of it again.
+    let prepared = match pass {
+        Pass::Check => return Ok(Ok(Initiated::Proceed)),
+        Pass::Write(prepared) => prepared,
+    };
 
     // ---- 6. the arguments, resolved for the owner's eyes --------------------------------------
     let now = Utc::now();
@@ -488,11 +721,29 @@ async fn initiate_in_tx(
     // the same proposal (review M7), ids as they are — never the agent's spelling. An expired card
     // blocks nothing (nobody said no) and a person's own proposal has no cooldown at all: this
     // reads the unasked cards only.
-    let key = momo_agent::initiative::initiative_key(
-        action.id,
-        &resolved.validated.normalized,
-        &resolved.pins,
-    );
+    // An emoticon is the same proposal when it names the same name (a name is the expression's
+    // identity and is never given twice, D1): keyed on the name and not on what the resolver normalised
+    // (`{"candidates": ["generated"]}` would make every emoticon one proposal), never on a byte.
+    let expression_draft: Option<(Uuid, std::sync::Arc<PreparedPicture>)> = if expression {
+        let Some(picture) = prepared else {
+            return Ok(Err(ToolFailure::InvalidArguments));
+        };
+        Some((Uuid::new_v4(), picture))
+    } else {
+        None
+    };
+    let key = match &expression_draft {
+        Some((_, picture)) => momo_agent::initiative::initiative_key(
+            action.id,
+            &json!({"name": picture.meta.name}),
+            &resolved.pins,
+        ),
+        None => momo_agent::initiative::initiative_key(
+            action.id,
+            &resolved.validated.normalized,
+            &resolved.pins,
+        ),
+    };
     match momo_agent::initiative::find_blocker_in_tx(conn, workspace_id, agent, &key).await? {
         Some(momo_agent::initiative::Blocker::Pending) => {
             return refuse(RefusalReason::Duplicate, ToolFailure::Conflict)
@@ -528,6 +779,12 @@ async fn initiate_in_tx(
             },
         };
     let expires_at = momo_agent::default_expires_at(now, limits.ttl_seconds);
+    // What is stored is the id of the draft, nothing else (ADR-0186 v8): the picture lives in the draft
+    // row written below, behind the approval.
+    let mut resolved = resolved;
+    if let Some((draft, _)) = &expression_draft {
+        resolved.validated.normalized = json!({"drafts": [draft.to_string()]});
+    }
     let created = momo_agent::create_held_agent_run_in_tx(
         conn,
         workspace_id,
@@ -597,6 +854,39 @@ async fn initiate_in_tx(
     )
     .await?;
 
+    // The draft stands behind the approval row (the FK), so it is written now, in this transaction;
+    // the card shows it exactly as stored.
+    let expression_card: Option<Value> = match expression_draft {
+        Some((draft, picture)) => {
+            momo_expressions::action::insert_candidates_in_tx(
+                conn,
+                workspace_id,
+                approval_id,
+                agent,
+                expires_at,
+                &[draft],
+                vec![momo_expressions::action::Candidate {
+                    meta: picture.meta.clone(),
+                    origin: momo_expressions::Origin {
+                        kind: "generated".into(),
+                        source_url: None,
+                        prompt: Some(picture.prompt.clone()),
+                    },
+                    source_attachment_id: None,
+                    media: Some(picture.media.clone()),
+                    code: None,
+                }],
+            )
+            .await
+            .map_err(crate::routes::approvals::expression_db_error)?;
+            Some(
+                momo_expressions::action::card_in_tx(conn, workspace_id, approval_id)
+                    .await
+                    .map_err(crate::routes::approvals::expression_db_error)?,
+            )
+        }
+        None => None,
+    };
     let message_preview: Option<Value> = match &resolved.validated.args {
         ActionArgs::MessagePin {
             target: Some(target),
@@ -611,6 +901,10 @@ async fn initiate_in_tx(
     let mut block = momo_agent::action_block(action, resolved.validated.rows.clone(), rationale);
     if let (Some(preview), Some(object)) = (message_preview, block.as_object_mut()) {
         object.insert("preview".into(), preview);
+    }
+    // ADR-0218 `Approval`: the candidate as stored, in `approval_request.props.action.expression`.
+    if let (Some(card), Some(object)) = (expression_card, block.as_object_mut()) {
+        object.insert("expression".into(), card);
     }
     let mut props = momo_agent::workspace_action_request_props(
         approval_id,
@@ -675,10 +969,10 @@ async fn initiate_in_tx(
     )
     .await?;
 
-    Ok(Ok(json!({
+    Ok(Ok(Initiated::Answer(json!({
         "approvalId": approval_id,
         "status": "pending",
         "expiresAtMs": expires_at.timestamp_millis(),
         "cardMessageId": card.message.id,
-    })))
+    }))))
 }

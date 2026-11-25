@@ -97,8 +97,34 @@ pub enum CardAudience {
 /// * its `topic`, like the card's `rationale`, is the agent's own sentence to a person who did
 ///   not ask: at most 140 characters
 ///   under the profile-tagline rules (no controls, links or mentions), and what is stored is the
-///   sentence **as those rules normalised it** (review M4).
+///   sentence **as those rules normalised it** (review M4);
+/// * `expression.create` is **one picture** (ADR-0186 v9 X9-2, #6137): exactly one candidate — or, on
+///   the stored form, one draft — made by the agent (`generated`, so no link the server would fetch,
+///   no attachment and no kept assembly that need a person's run), with nobody's face declared. The
+///   stored draft's own origin and face are proved by the resolver ([`resolve_action_with_origin_in_tx`]).
 pub fn initiative_args_checks(validated: &mut ValidatedActionArgs) -> Result<(), ActionRejection> {
+    if let ActionArgs::ExpressionCreate {
+        candidates,
+        drafts,
+        subject,
+    } = &validated.args
+    {
+        let not_one = || ActionRejection::new("an unasked expression is one generated picture");
+        let pictures = if candidates.is_empty() {
+            drafts.len()
+        } else {
+            candidates.len()
+        };
+        if pictures != 1 || subject.is_some() {
+            return Err(not_one());
+        }
+        if candidates.iter().any(|candidate| {
+            !matches!(candidate.image, ExpressionImageSpec::Generated { .. })
+                || candidate.meta.subject_member_id.is_some()
+        }) {
+            return Err(not_one());
+        }
+    }
     if let ActionArgs::ChannelCreate { kind, topic, .. } = &mut validated.args {
         if *kind != "private" {
             return Err(ActionRejection::new("channel kind is not proposable"));
@@ -3828,112 +3854,160 @@ pub async fn resolve_action_with_origin_in_tx(
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
             }
-            // The run was raised by a person (never from an argument): attachments are that
-            // person's, in the conversation the agent was called in.
             let unresolved = || ActionRejection::new("expression target did not resolve");
-            let Some(run_id) = run_id else {
-                return Ok(Err(unresolved()));
-            };
-            let Some((requester, run_channel)) = momo_messaging::requester_of_run_in_tx(
-                conn,
-                workspace_id,
-                run_id,
-                proposer_member_id,
-            )
-            .await?
-            else {
-                return Ok(Err(unresolved()));
-            };
-            if origin == ArgsOrigin::Proposal {
-                // The face, if any, is a live human of THIS conversation: a card must never be
-                // the first to say that somebody outside the room exists.
-                if let Some(face) = *subject {
-                    if !face_is_human_in_room_in_tx(conn, workspace_id, face, run_channel).await? {
+            // **A card nobody asked for** (ADR-0186 v9 X9-2, #6137): one picture the agent made, with
+            // nobody's face — `initiative_args_checks` has already narrowed the arguments, and there
+            // is no person's run to resolve attachments against. A decision proves the stored draft is
+            // still exactly that: this approval's one draft, by this proposer, generated, faceless, no
+            // original photo.
+            if matches!(audience, CardAudience::Owner(_)) {
+                if origin == ArgsOrigin::Proposal {
+                    validated.rows = vec![actions::action_row(
+                        "후보",
+                        "1개 — 에이전트가 먼저 만든 그림이에요. 저장될 그림을 보고 승인해요",
+                    )];
+                } else {
+                    let Some(approval_id) = decision_approval_id else {
+                        return Ok(Err(unresolved()));
+                    };
+                    let rows = momo_db::sqlx::query_as::<_, (Uuid, bool)>(
+                        "SELECT id, (subject_member_id IS NULL AND creator = $3 \
+                                     AND origin->>'kind' = 'generated' \
+                                     AND origin_source_attachment_id IS NULL) \
+                           FROM expression_draft \
+                          WHERE workspace_id = $1 AND approval_id = $2 ORDER BY candidate_index",
+                    )
+                    .bind(workspace_id)
+                    .bind(approval_id)
+                    .bind(proposer_member_id)
+                    .fetch_all(&mut *conn)
+                    .await?;
+                    if rows.len() != 1
+                        || rows.iter().map(|row| row.0).collect::<Vec<_>>() != *drafts
+                        || !rows[0].1
+                    {
                         return Ok(Err(unresolved()));
                     }
                 }
-                // V4's own judgement, reused: the requester's, complete, undeleted, in this
-                // conversation. Another person's photo, another conversation's file and an
-                // unknown id are the same refusal.
-                let mut from_attachment = false;
-                for candidate in candidates.iter() {
-                    if let ExpressionImageSpec::Attachment(attachment_id) = &candidate.image {
-                        from_attachment = true;
-                        // The expression's own use of the judgement: a GIF and a video are
-                        // sources too (ADR-0186 X8-1/X8-2). `prepare_expression` asks for the
-                        // same use, so the two never disagree about which file exists.
-                        let found = momo_messaging::find_requester_attachment_for_in_tx(
-                            conn,
-                            workspace_id,
-                            requester,
-                            run_channel,
-                            *attachment_id,
-                            momo_expressions::INPUT_BYTES as i64,
-                            momo_messaging::RequesterAttachmentUse::ExpressionSource,
-                        )
-                        .await?;
-                        if found.is_none() {
+                *subject = None;
+                validated.rows.push(actions::action_row(
+                    "얼굴",
+                    "없음 — 사람 얼굴이 없다고 에이전트가 밝혔어요",
+                ));
+                validated.rows.push(actions::action_row(
+                    "보관 범위",
+                    "승인하면 팀 보관함에 저장돼 워크스페이스 전체가 쓸 수 있어요",
+                ));
+                GateSubject::Workspace
+            } else {
+                // The run was raised by a person (never from an argument): attachments are that
+                // person's, in the conversation the agent was called in.
+                let Some(run_id) = run_id else {
+                    return Ok(Err(unresolved()));
+                };
+                let Some((requester, run_channel)) = momo_messaging::requester_of_run_in_tx(
+                    conn,
+                    workspace_id,
+                    run_id,
+                    proposer_member_id,
+                )
+                .await?
+                else {
+                    return Ok(Err(unresolved()));
+                };
+                if origin == ArgsOrigin::Proposal {
+                    // The face, if any, is a live human of THIS conversation: a card must never be
+                    // the first to say that somebody outside the room exists.
+                    if let Some(face) = *subject {
+                        if !face_is_human_in_room_in_tx(conn, workspace_id, face, run_channel)
+                            .await?
+                        {
                             return Ok(Err(unresolved()));
                         }
                     }
-                }
-                validated.rows = vec![actions::action_row(
-                    "후보",
-                    format!("{}개 — 저장될 그림을 보고 하나를 골라요", candidates.len()),
-                )];
-                if from_attachment {
-                    validated.rows.push(actions::action_row(
+                    // V4's own judgement, reused: the requester's, complete, undeleted, in this
+                    // conversation. Another person's photo, another conversation's file and an
+                    // unknown id are the same refusal.
+                    let mut from_attachment = false;
+                    for candidate in candidates.iter() {
+                        if let ExpressionImageSpec::Attachment(attachment_id) = &candidate.image {
+                            from_attachment = true;
+                            // The expression's own use of the judgement: a GIF and a video are
+                            // sources too (ADR-0186 X8-1/X8-2). `prepare_expression` asks for the
+                            // same use, so the two never disagree about which file exists.
+                            let found = momo_messaging::find_requester_attachment_for_in_tx(
+                                conn,
+                                workspace_id,
+                                requester,
+                                run_channel,
+                                *attachment_id,
+                                momo_expressions::INPUT_BYTES as i64,
+                                momo_messaging::RequesterAttachmentUse::ExpressionSource,
+                            )
+                            .await?;
+                            if found.is_none() {
+                                return Ok(Err(unresolved()));
+                            }
+                        }
+                    }
+                    validated.rows = vec![actions::action_row(
+                        "후보",
+                        format!("{}개 — 저장될 그림을 보고 하나를 골라요", candidates.len()),
+                    )];
+                    if from_attachment {
+                        validated.rows.push(actions::action_row(
                         "보관 범위",
                         "첨부를 원본으로 쓰면 팀 보관함에 저장돼 워크스페이스 전체가 쓸 수 있어요",
                     ));
-                }
-            } else {
-                // A decision: the drafts the card stands on are this approval's own, made by
-                // this proposer, in candidate order, all naming the same face.
-                let Some(approval_id) = decision_approval_id else {
-                    return Ok(Err(unresolved()));
-                };
-                let rows = momo_db::sqlx::query_as::<_, (Uuid, Option<Uuid>, Uuid)>(
-                    "SELECT id, subject_member_id, creator FROM expression_draft \
+                    }
+                } else {
+                    // A decision: the drafts the card stands on are this approval's own, made by
+                    // this proposer, in candidate order, all naming the same face.
+                    let Some(approval_id) = decision_approval_id else {
+                        return Ok(Err(unresolved()));
+                    };
+                    let rows = momo_db::sqlx::query_as::<_, (Uuid, Option<Uuid>, Uuid)>(
+                        "SELECT id, subject_member_id, creator FROM expression_draft \
                       WHERE workspace_id = $1 AND approval_id = $2 ORDER BY candidate_index",
-                )
-                .bind(workspace_id)
-                .bind(approval_id)
-                .fetch_all(&mut *conn)
-                .await?;
-                let same_ids = rows.iter().map(|row| row.0).collect::<Vec<_>>() == *drafts;
-                let face = rows.first().and_then(|row| row.1);
-                if !same_ids
-                    || rows
-                        .iter()
-                        .any(|row| row.1 != face || row.2 != proposer_member_id)
-                {
-                    return Ok(Err(unresolved()));
+                    )
+                    .bind(workspace_id)
+                    .bind(approval_id)
+                    .fetch_all(&mut *conn)
+                    .await?;
+                    let same_ids = rows.iter().map(|row| row.0).collect::<Vec<_>>() == *drafts;
+                    let face = rows.first().and_then(|row| row.1);
+                    if !same_ids
+                        || rows
+                            .iter()
+                            .any(|row| row.1 != face || row.2 != proposer_member_id)
+                    {
+                        return Ok(Err(unresolved()));
+                    }
+                    *subject = face;
                 }
-                *subject = face;
-            }
-            if let Some(face) = *subject {
-                let person = momo_db::sqlx::query_as::<_, (String, String)>(
+                if let Some(face) = *subject {
+                    let person = momo_db::sqlx::query_as::<_, (String, String)>(
                     "SELECT display_name, handle FROM member WHERE workspace_id = $1 AND id = $2",
                 )
                 .bind(workspace_id)
                 .bind(face)
                 .fetch_optional(&mut *conn)
                 .await?;
-                let label = person
-                    .map(|(name, handle)| actions::member_card_label(&name, &handle, false))
-                    .unwrap_or_else(|| "알 수 없는 멤버".to_string());
-                validated.rows.push(actions::action_row(
-                    "얼굴",
-                    format!("{label} — 그 본인만 승인할 수 있어요"),
-                ));
-            } else {
-                validated.rows.push(actions::action_row(
-                    "얼굴",
-                    "없음 — 사람 얼굴이 없다고 에이전트가 밝혔어요",
-                ));
+                    let label = person
+                        .map(|(name, handle)| actions::member_card_label(&name, &handle, false))
+                        .unwrap_or_else(|| "알 수 없는 멤버".to_string());
+                    validated.rows.push(actions::action_row(
+                        "얼굴",
+                        format!("{label} — 그 본인만 승인할 수 있어요"),
+                    ));
+                } else {
+                    validated.rows.push(actions::action_row(
+                        "얼굴",
+                        "없음 — 사람 얼굴이 없다고 에이전트가 밝혔어요",
+                    ));
+                }
+                GateSubject::Workspace
             }
-            GateSubject::Workspace
         }
         ActionArgs::PluginInstall { plugin_id, plugin } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
@@ -4535,6 +4609,50 @@ mod tests {
                     && !properties.contains_key("agent_reactions")
             );
         }
+    }
+
+    /// ADR-0186 v9 X9-2 (#6137 · YA10): an unasked `expression.create` is one picture the agent made with
+    /// nobody's face — judged on the proposal (one `generated` candidate, no face) and on the stored form
+    /// (one draft). Two candidates, a link, an attachment, a kept assembly, a face and two drafts are each
+    /// refused; a card a person asked for keeps its four.
+    #[test]
+    fn an_unasked_expression_is_one_generated_faceless_picture() {
+        let action = actions::action_by_id(actions::ACTION_EXPRESSION_CREATE).expect("registered");
+        let generated = json!({"source": "generated", "mime": "image/png", "dataBase64": "iVBORw0KGgo=", "prompt": "별"});
+        let candidate = |subject: Value, image: Value| json!({"name": "unasked-comet", "displayName": "혜성", "tags": ["별"], "subjectMemberId": subject, "image": image});
+        let face = Uuid::from_u128(3).to_string();
+        let narrowed = |args: Value| {
+            let mut validated =
+                expression_create_args(&args, ArgsOrigin::Proposal).expect("parses");
+            initiative_args_checks(&mut validated)
+        };
+        assert!(
+            narrowed(json!({"candidates": [candidate(json!(null), generated.clone())]})).is_ok()
+        );
+        for refused in [
+            json!({"candidates": [candidate(json!(null), generated.clone()), candidate(json!(null), generated.clone())]}),
+            json!({"candidates": [candidate(json!(null), json!({"source": "url", "url": "https://example.com/a.png"}))]}),
+            json!({"candidates": [candidate(json!(null), json!({"source": "attachment", "attachmentId": face}))]}),
+            json!({"candidates": [candidate(json!(null), json!({"source": "assembled", "assemblyId": face, "index": 0}))]}),
+            json!({"candidates": [candidate(json!(face), generated.clone())]}),
+        ] {
+            assert!(narrowed(refused.clone()).is_err(), "{refused}");
+        }
+        let stored = |drafts: Vec<String>| {
+            let mut validated =
+                expression_create_args(&json!({"drafts": drafts}), ArgsOrigin::Stored)
+                    .expect("parses");
+            initiative_args_checks(&mut validated)
+        };
+        assert!(stored(vec![Uuid::from_u128(1).to_string()]).is_ok());
+        assert!(stored(vec![
+            Uuid::from_u128(1).to_string(),
+            Uuid::from_u128(2).to_string()
+        ])
+        .is_err());
+        // A card a person asked for is not narrowed: the checks are the unasked card's only.
+        let four = json!({"candidates": [candidate(json!(null), generated.clone()), candidate(json!(null), generated.clone())]});
+        assert!(validated_action_args(action, &four, 0).is_ok());
     }
 
     /// ADR-0186 증보 v5 U-b-3 (#4704): the switch that bounds an agent's unasked cards is **not**
